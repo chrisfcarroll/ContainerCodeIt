@@ -207,7 +207,7 @@ case "$runtime" in
 esac
 # Give the Apple container runtime enough memory for the agent to work with
 if [[ "$runtime" == "container" ]]; then
-    container_args="--memory 2g"
+    container_args="--memory 3g"
 fi
 echo "    Using container runtime: $runtime"
 echo "    Using code agent: $code_agent"

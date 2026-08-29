@@ -143,7 +143,7 @@ $onLinux = $IsLinux -eq $true
 # otherwise suggest what is best for the current platform.
 if (-not $runtime) {
     if ($onMacOS -and (Get-Command container -EA Silent)) {
-        $runtime = "container"
+        $runtime = "container"        
     }
     elseif (Get-Command docker -EA Silent) {
         $runtime = "docker"
@@ -183,6 +183,12 @@ elseif (-not (Get-Command $runtime -EA Silent)) {
 }
 "    Using container runtime: $runtime"
 "    Using code agent: $codeAgent"
+
+# Give the Apple container runtime enough memory for the agent to work with
+if ( $runtime -eq "container"){
+    $containerArgs="--memory 3g"
+}
+
 
 # Ensure required commands
 if (-not (Get-Command git -EA Silent)) {
@@ -273,6 +279,7 @@ if ($dryRun) {
 }
 
 & $runtime run -it -p $($portsMap[0]) -p $($portsMap[1]) `
+            $containerArgs `
             -e CODE_AGENT="$codeAgent" `
             -e GIT_AUTHOR_NAME="$gitAuthorName" `
             -e GIT_AUTHOR_EMAIL="$gitAuthorEmail" `
