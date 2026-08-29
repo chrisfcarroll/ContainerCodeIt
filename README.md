@@ -14,6 +14,33 @@ Code-It.ps1 -c   # or -claude
 
 The agent gets work done by having a single mounted directory, typically one containing a git repo or repos, so it can get, commit and push.
 
+## Prerequisites
+
+- Docker or Apple Containers.
+- Tested on MacOs and Windows 11, not tested by me Linux
+
+In principal either powershell or bash scripts should work on any O/S.
+
+## Quick start
+
+```bash
+# Build and run with the included Dockerfile
+./code-it.sh --build-image
+
+# Thereafter, run the built image
+./code-it.sh [-o] [-c] [--work-dir path ]
+```
+
+```powershell
+.\Code-It.ps1 -buildImage
+.\Code-It.ps1 -o [[-WorkDirToMount] <string>]
+```
+
+## Rough Edges
+
+- There's a choice between creating a huge Dockerfile that includes All The Tech Stacks, or a list of Dockerfiles for various tech stacks, or just the one example. This repo currently has just the one example, which is intended to be easy to to copy and edit.
+- Putting .sh on the bash scripts is surely a dubious design choice.
+
 ## Runtime detection
 
 `code-it.sh` and `Code-It.ps1` pick a container runtime automatically:
@@ -33,25 +60,6 @@ Edit the **Dockerfile** to taste. The default version includes:
 - A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, `dotnet`, `npm`, and `node`
 
 On startup, the container launches a **tmux** session running the chosen agent, and a `zsh` terminal available via the tmux switch hotkey sequence, `Ctrl-B S`.
-
-## Prerequisites
-
-- Docker or Apple Containers.
-
-## Quick start
-
-```bash
-# Build and run with the included Dockerfile
-./code-it.sh --build-image
-
-# Thereafter, run the built image
-./code-it.sh [-o] [-c] [--work-dir path ]
-```
-
-```powershell
-.\Code-It.ps1 -buildImage
-.\Code-It.ps1 -o [[-WorkDirToMount] <string>]
-```
 
 ### What does the shell script do?
 
