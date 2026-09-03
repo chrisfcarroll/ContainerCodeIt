@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Launches a container with Alpine Linux, Claude Code AND OpenCode, and .NET development tools.
+# Launches an Alpine Linux container with OpenCode, Claude Code, and .NET development tools.
 #
 # Picks a container runtime automatically:
 # - On macOS, uses the Apple container CLI (container) if installed

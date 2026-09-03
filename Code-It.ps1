@@ -1,10 +1,10 @@
 #! /usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Launches a container with Alpine Linux, Claude Code AND OpenCode, and .NET development tools.
+    Launches an Alpine Linux container with OpenCode, Claude Code, and .NET development tools.
 
 .DESCRIPTION
-    Creates and runs a container for development using Claude Code or OpenCode as an agent.
+    Creates and runs a container for development using OpenCode or Claude Code as an agent.
 
     Picks a container runtime automatically:
     - On macOS, uses the Apple container CLI (container) if installed
@@ -263,7 +263,7 @@ if ($portsMap.Count -lt 2) {
 }
 
 @"
-    $runtime run -it -p $($portsMap[0]) -p $($portsMap[1]) `
+    $runtime run -it --rm -p $($portsMap[0]) -p $($portsMap[1]) `
                 -e CODE_AGENT=`"$codeAgent`" `
                 -e GIT_AUTHOR_NAME=`"$gitAuthorName`" `
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
@@ -278,7 +278,7 @@ if ($dryRun) {
     exit 0
 }
 
-& $runtime run -it -p $($portsMap[0]) -p $($portsMap[1]) `
+& $runtime run -it --rm -p $($portsMap[0]) -p $($portsMap[1]) `
             $containerArgs `
             -e CODE_AGENT="$codeAgent" `
             -e GIT_AUTHOR_NAME="$gitAuthorName" `
