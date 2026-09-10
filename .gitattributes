@@ -1,0 +1,10 @@
+# Default: let Git handle text files normally
+* text=auto
+
+# Dockerfiles, shell files and files for use in the VMs must always be LF (no CRLF)
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+*.dockerfile text eol=lf
+*.env text eol=lf
+*.sh text eol=lf
+*.json text eol=lf
