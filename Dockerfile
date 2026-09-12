@@ -52,8 +52,8 @@ RUN echo "permit nopass agent1 as root cmd node" >> /etc/doas.d/doas.conf
 USER agent1
 RUN mkdir -p ~/.local/bin
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
-RUN curl -fsSL https://opencode.ai/install | bash
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN curl -fsSL https://opencode.ai/install | bash # last changed 2026-09-11
+RUN curl -fsSL https://claude.ai/install.sh | bash # last changed 2026-09-11
 RUN git config --global rerere.enabled true
 RUN git config --global alias.root 'rev-parse --show-toplevel'
 RUN git config --global alias.lg  "log --color --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --graph"
