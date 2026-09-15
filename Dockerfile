@@ -1,10 +1,10 @@
-FROM alpine:3.23
-# alpine 3.24 dotnet not yet working? https://github.com/dotnet/dotnet-docker/issues/7334
-RUN apk add --no-cache zsh
+FROM alpine:3.24
+RUN apk add --no-cache zsh curl doas
 RUN apk add --no-cache dotnet10-sdk dotnet8-sdk mono
+RUN dotnet workload update
 RUN apk add --no-cache vim chromium ttf-freefont freetype-dev
 RUN apk add --no-cache nodejs npm git
-RUN apk add --no-cache curl doas
+RUN apk add --no-cache uv
 RUN apk add --no-cache ca-certificates less ncurses-terminfo-base krb5-libs libgcc libintl libssl3 libstdc++
 RUN apk add --no-cache tzdata userspace-rcu zlib icu-libs
 RUN apk -X https://dl-cdn.alpinelinux.org/alpine/edge/main add --no-cache lttng-ust openssh-client
