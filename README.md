@@ -1,6 +1,6 @@
 # ContainerCodeIt
 
-A sandbox to safely set your agentic AI to work on a single directory, free of permissions interruption. The default Dockerfile includes **OpenCode** and **Claude Code**.
+A sandbox to safely set your agentic AI to work on a single directory, free of permissions interruption. The default Dockerfile includes **OpenCode** and **Claude Code**, and runs the requested agent harness within tmux.
 
 ```bash
 code-it.sh     # or -o or --opencode (this is the default)
@@ -38,7 +38,7 @@ In principal either powershell or bash scripts should work on any O/S.
 
 ## Rough Edges
 
-- There's a choice between creating a huge Dockerfile that includes All The Tech Stacks, or a list of Dockerfiles for various tech stacks, or just the one example. This repo currently has just the one example, which is intended to be easy to to copy and edit.
+- There's a choice between creating a huge Dockerfile that includes All The Tech Stacks, or a list of Dockerfiles for various tech stacks, or just the one example. This repo currently has just the one example techstack, intended to be easy to to copy and edit.
 - Putting .sh on the bash scripts is surely a dubious design choice.
 
 ## Runtime detection
@@ -55,7 +55,7 @@ Or specify `--runtime docker` or `--runtime container` (`-runtime` in PowerShell
 
 Edit the **Dockerfile** to taste. The default version includes:
 
-- **Alpine Linux 3.23** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
+- **Alpine Linux 3.24** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
 - **Claude Code CLI** and **OpenCode CLI**
 - A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, `dotnet`, `npm`, and `node`
 
