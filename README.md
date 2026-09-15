@@ -39,6 +39,7 @@ In principal either powershell or bash scripts should work on any O/S.
 ## Rough Edges
 
 - There's a choice between creating a huge Dockerfile that includes All The Tech Stacks, or a list of Dockerfiles for various tech stacks, or just the one example. This repo currently has just the one example techstack, intended to be easy to to copy and edit.
+- Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it --build-image` / `code-it.ps1 -buildImage`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
 
 ## Runtime detection
