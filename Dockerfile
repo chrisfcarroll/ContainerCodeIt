@@ -1,19 +1,23 @@
-FROM alpine:3.23
-# alpine 3.24 dotnet not yet working? https://github.com/dotnet/dotnet-docker/issues/7334
-RUN apk add --no-cache zsh
+FROM alpine:3.24
+RUN apk add --no-cache zsh curl doas
 RUN apk add --no-cache dotnet10-sdk dotnet8-sdk mono
+RUN dotnet workload update
 RUN apk add --no-cache vim chromium ttf-freefont freetype-dev
 RUN apk add --no-cache nodejs npm git
-RUN apk add --no-cache curl doas
+RUN apk add --no-cache uv
 RUN apk add --no-cache ca-certificates less ncurses-terminfo-base krb5-libs libgcc libintl libssl3 libstdc++
 RUN apk add --no-cache tzdata userspace-rcu zlib icu-libs
 RUN apk -X https://dl-cdn.alpinelinux.org/alpine/edge/main add --no-cache lttng-ust openssh-client
+RUN apk add --no-cache docs oh-my-zsh tmux
+RUN apk add --no-cache libgcc libstdc++ ripgrep bash # Claude.AI & opencode dependencies
+RUN apk add --no-cache musl-locales ncurses-terminfo
+RUN apk add --no-cache krb5
 # PowerShell: Microsoft only ships musl (Alpine) builds for x64, so on other
 # architectures install it as a dotnet tool instead, with gcompat plus a tiny
 # shim for two glibc-only symbols its native library needs (verified on aarch64).
 RUN set -e; \
     if [ "$(uname -m)" = "x86_64" ]; then \
-        curl -L https://github.com/PowerShell/PowerShell/releases/download/v7.5.5/powershell-7.5.5-linux-musl-x64.tar.gz -o /tmp/powershell.tar.gz && \
+        curl -L https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/powershell-7.6.6-linux-musl-x64.tar.gz -o /tmp/powershell.tar.gz && \
         mkdir -p /opt/microsoft/powershell/7 && \
         tar zxf /tmp/powershell.tar.gz -C /opt/microsoft/powershell/7 && \
         chmod +x /opt/microsoft/powershell/7/pwsh && \
@@ -35,10 +39,6 @@ RUN set -e; \
         printf '#!/bin/sh\nLD_PRELOAD=/usr/lib/libpsl-chk-shim.so exec /opt/microsoft/powershell/pwsh "$@"\n' > /usr/bin/pwsh && \
         chmod +x /usr/bin/pwsh; \
     fi
-RUN apk add --no-cache docs oh-my-zsh tmux
-RUN apk add --no-cache libgcc libstdc++ ripgrep bash # Claude.AI & opencode dependencies
-RUN apk add --no-cache musl-locales ncurses-terminfo
-RUN apk add --no-cache krb5
 RUN touch /etc/rc.conf
 RUN sed -i 's/#unicode="NO"/#unicode="NO"\nunicode="YES"/' /etc/rc.conf
 RUN adduser -S agent1 -G wheel
@@ -52,8 +52,8 @@ RUN echo "permit nopass agent1 as root cmd node" >> /etc/doas.d/doas.conf
 USER agent1
 RUN mkdir -p ~/.local/bin
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
-RUN curl -fsSL https://opencode.ai/install | bash
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN curl -fsSL https://opencode.ai/install | bash # last changed 2026-09-11
+RUN curl -fsSL https://claude.ai/install.sh | bash # last changed 2026-09-11
 RUN git config --global rerere.enabled true
 RUN git config --global alias.root 'rev-parse --show-toplevel'
 RUN git config --global alias.lg  "log --color --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --graph"
