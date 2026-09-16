@@ -91,8 +91,21 @@ The launcher scripts keep all agent state under one save dir (default `~/.config
 | `/home/agent1/.claude` | Persists Claude credentials, settings, permissions, and memory |
 | `/home/agent1/.claude.json` | Persists Claude OAuth session data, MCP configs, and preferences |
 | `/home/agent1/.local/share/opencode` | Persists OpenCode data and auth |
+| `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache, mounted only if one is found (see below) |
 
 Alternatively, pass `-e ANTHROPIC_API_KEY=sk-...` (claude) or a provider API key env var (opencode) instead of mounting state.
+
+## NuGet package cache
+
+If the host has a NuGet global packages cache, the launcher scripts mount it **read-only** at `/home/agent1/.nuget/packages-host`, so `dotnet restore` inside the container can reuse packages you have already downloaded — useful when the sandboxed network cannot reach your usual package sources. The read-only mount guarantees the container can never write to your host cache; anything the container downloads for itself goes to its own `~/.nuget/packages`, which disappears with the container.
+
+The cache is located using the documented precedence ([Managing the global packages and cache folders](https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders)):
+
+1. The `NUGET_PACKAGES` environment variable
+2. The `globalPackagesFolder` setting in your user-level `NuGet.Config`
+3. The default `~/.nuget/packages` (`%userprofile%\.nuget\packages` on Windows)
+
+The image's `~/.nuget/NuGet/NuGet.Config` registers the mount point as a NuGet [fallback package folder](https://learn.microsoft.com/en-us/nuget/reference/nuget-config-file#fallbackpackagefolders-section). For a package to be used from the host cache it must have been extracted there by a current NuGet client (i.e. its `.nupkg.metadata` file is present) — the norm for caches populated by `dotnet restore` or Visual Studio. If no cache is found, no mount is added and restore simply uses the configured package sources.
 
 ## Launcher script options
 

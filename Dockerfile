@@ -102,14 +102,32 @@ RUN cat <<'EOF' >> ~/.config/opencode/config.json
   "permission": "allow"
 }
 EOF
+# NuGet: the launcher scripts mount the host's NuGet package cache (if one is
+# found) read-only at ~/.nuget/packages-host. Register that mount point as a
+# fallback package folder in the user-level NuGet.Config (the default location
+# for the dotnet CLI on Linux), so restores reuse host-cached packages without
+# downloading them, and can never write to the host cache; packages not found
+# there are downloaded into the container's own ~/.nuget/packages as usual.
+# Create the mount point so the fallback folder always exists, even if empty.
+RUN mkdir -p ~/.nuget/packages-host ~/.nuget/NuGet
+RUN cat <<'EOF' > ~/.nuget/NuGet/NuGet.Config
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <fallbackPackageFolders>
+    <add key="host-nuget-cache" value="/home/agent1/.nuget/packages-host" />
+  </fallbackPackageFolders>
+</configuration>
+EOF
 WORKDIR /repos
 # --------------------------------
 # Repos to work on can be mounted at runtime under /repos.
-# Also mount the state directories for whichever agent(s) you use, for up to 4 mounts:
+# Also mount the state directories for whichever agent(s) you use, for up to 5 mounts:
 # 1. Repos directory
 # 2. ~/.claude directory (claude credentials, settings & memory)
 # 3. ~/.claude.json file (claude OAuth session data & MCP configs)
 # 4. ~/.local/share/opencode directory (opencode data & auth)
+# 5. Host's NuGet package cache at ~/.nuget/packages-host, READ-ONLY (optional;
+#    registered as a NuGet fallback package folder by ~/.nuget/NuGet/NuGet.Config)
 # Choose the agent with -e CODE_AGENT=opencode (default) or -e CODE_AGENT=claude
 # Example :
 #     docker run -it --rm \

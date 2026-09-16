@@ -211,6 +211,46 @@ assert_contains "agent name lowercased in mounts" "$out" "/home/myagent/.claude"
 assert_contains "agent name in git author" "$out" 'GIT_AUTHOR_NAME="MyAgent for'
 
 # ---------------------------------------------------------------------------
+echo "12. NuGet package cache: detection and read-only mount"
+fakehome="$tmp/fakehome"; mkdir -p "$fakehome"
+nuget_cache="$tmp/nuget-cache"; mkdir -p "$nuget_cache"
+
+# (a) NUGET_PACKAGES override: mounted read-only, in both printout and run command
+out=$(HOME="$fakehome" NUGET_PACKAGES="$nuget_cache" PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+assert_contains "NUGET_PACKAGES cache mounted read-only (printout)" "$out" "-v \"$nuget_cache:/home/agent1/.nuget/packages-host:ro\""
+out=$(HOME="$fakehome" NUGET_PACKAGES="$nuget_cache" PATH="$stub_docker:$PATH" "$code_it" --work-dir "$script_dir" --save-dir "$save")
+assert_contains "run command runs the stub" "$out" "STUB-DOCKER-RUN"
+assert_contains "NUGET_PACKAGES cache mounted read-only (run)" "$out" "-v $nuget_cache:/home/agent1/.nuget/packages-host:ro"
+
+# (b) globalPackagesFolder from the user-level NuGet.Config
+mkdir -p "$fakehome/.nuget/NuGet"
+cat > "$fakehome/.nuget/NuGet/NuGet.Config" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <config>
+    <add key="globalPackagesFolder" value="$nuget_cache" />
+  </config>
+</configuration>
+EOF
+out=$(HOME="$fakehome" NUGET_PACKAGES= PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+assert_contains "globalPackagesFolder from NuGet.Config mounted" "$out" "$nuget_cache:/home/agent1/.nuget/packages-host:ro"
+rm -f "$fakehome/.nuget/NuGet/NuGet.Config"
+
+# (c) default ~/.nuget/packages
+mkdir -p "$fakehome/.nuget/packages"
+out=$(HOME="$fakehome" NUGET_PACKAGES= PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+assert_contains "default ~/.nuget/packages mounted" "$out" "$fakehome/.nuget/packages:/home/agent1/.nuget/packages-host:ro"
+
+# (d) no cache found: no mount, and a note is printed
+emptyhome="$tmp/emptyhome"; mkdir -p "$emptyhome"
+out=$(HOME="$emptyhome" NUGET_PACKAGES= PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+assert_contains "no cache: note printed" "$out" "No NuGet package cache found"
+case "$out" in
+    *packages-host*) assert "no cache: no nuget mount line" 1 ;;
+    *)               assert "no cache: no nuget mount line" 0 ;;
+esac
+
+# ---------------------------------------------------------------------------
 echo
 echo "Results: $pass passed, $fail failed"
 [[ "$fail" == "0" ]] || exit 1
