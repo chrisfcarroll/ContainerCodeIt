@@ -52,8 +52,8 @@ RUN echo "permit nopass agent1 as root cmd node" >> /etc/doas.d/doas.conf
 USER agent1
 RUN mkdir -p ~/.local/bin
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
-RUN curl -fsSL https://opencode.ai/install | bash # last changed 2026-09-11
-RUN curl -fsSL https://claude.ai/install.sh | bash # last changed 2026-09-11
+RUN curl -fsSL https://opencode.ai/install | bash # last changed 2026-09-16
+RUN curl -fsSL https://claude.ai/install.sh | bash # last changed 2026-09-16
 RUN git config --global rerere.enabled true
 RUN git config --global alias.root 'rev-parse --show-toplevel'
 RUN git config --global alias.lg  "log --color --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --graph"
@@ -83,6 +83,10 @@ RUN cat <<'EOF' >> ~/.tmux.conf
 set -g default-terminal "tmux-256color"
 set -ga terminal-overrides ",tmux-256color:RGB"
 set -ga terminal-overrides ",xterm-256color:RGB"
+set -g mouse on
+set -g focus-events on
+set -g history-limit 50000
+setw -g aggressive-resize on
 EOF
 RUN cat <<'EOF' >> ~/go.sh
 git config --global --add safe.directory /repos
@@ -116,6 +120,10 @@ RUN cat <<'EOF' > ~/.nuget/NuGet/NuGet.Config
   <fallbackPackageFolders>
     <add key="host-nuget-cache" value="/home/agent1/.nuget/packages-host" />
   </fallbackPackageFolders>
+  <packageSources>
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+    <add key="host-nuget-cache" value="/home/agent1/.nuget/packages-host" />
+  </packageSources>
 </configuration>
 EOF
 WORKDIR /repos
