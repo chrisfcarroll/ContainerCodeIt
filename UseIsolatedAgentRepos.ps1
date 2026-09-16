@@ -2,13 +2,13 @@
 
 <#
 .SYNOPSIS
-    Initialize powershell variables and functions in this session which simplify a
-    “very” isolated agent git workflow.
-
+    When dot-sourced, initializes powershell variables and functions in this session 
+    to simplify a “very” isolated agent git workflow.
+    
     By “very isolated”, we mean, the containerised agent is unable to push or pull. It has
     no access to your upstream origin repo, only to the working directory you give it.
 
-    Dot-source this script, so that the functions it declares stay available in your session:
+    This script must be dot-sourced to be of any use:
 
     . ./UseIsolatedAgentRepos.ps1
 
@@ -99,6 +99,12 @@ param (
 if ($help) {
     Get-Help $PSCommandPath -Full
     exit 0
+}
+
+if($MyInvocation.InvocationName -ne "."){
+    Write-Warning "This script defines functions, which only works if you source it:
+    
+    . ./UseIsolatedAgentRepos.ps1"
 }
 
 # Expand ~ and relative paths now, so that the guard clauses can compare them to (Get-Location).Path
