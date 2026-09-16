@@ -117,22 +117,28 @@ if ($agentReposUnder) {
 
 function updateAgentFromOrigin(
             [string]$originBranch=$defaultOriginalBranchName,
-            [string]$agentBranch="$(git rev-parse --abbrev-ref HEAD)"
+            [string]$agentBranch=$defaultAgentBranchName
 )
 {
     if( $agentReposUnder -and -not ((Get-Location).Path -ilike "$agentReposUnder*")){
         Write-Error "This command only runs in $agentReposUnder" -ErrorAction Stop
     }
     git fetch --all
-    git checkout $originBranch ; git pull --ff-only ; if ($LASTEXITCODE -ne 0) { git pull }
+    if ($LASTEXITCODE -ne 0) { Write-Error "git fetch failed" -ErrorAction Stop }
+    git checkout $originBranch
+    if ($LASTEXITCODE -ne 0) { Write-Error "Could not checkout $originBranch" -ErrorAction Stop }
+    git pull --ff-only ; if ($LASTEXITCODE -ne 0) { git pull }
+    if ($LASTEXITCODE -ne 0) { Write-Error "Could not pull $originBranch" -ErrorAction Stop }
     git checkout $agentBranch
+    if ($LASTEXITCODE -ne 0) { Write-Error "Could not checkout $agentBranch" -ErrorAction Stop }
     git merge $originBranch --ff-only ; if ($LASTEXITCODE -ne 0) { git merge $originBranch }
-    git push
+    if ($LASTEXITCODE -ne 0) { Write-Error "Merging $originBranch into $agentBranch needs resolving. Not pushed." -ErrorAction Stop }
+    git push -u origin $agentBranch
 }
 
 function mergeFromAgent(
         [string]$agentBranch=$defaultAgentBranchName,
-        [string]$originBranch="$(git rev-parse --abbrev-ref HEAD)",
+        [string]$originBranch=$defaultOriginalBranchName,
         [switch]$pullpushOriginBeforeMerge)
 {
     if( $originalReposUnder -and -not ((Get-Location).Path -ilike "$originalReposUnder*")){
@@ -146,7 +152,7 @@ function mergeFromAgent(
 
 function updateAgentAndDiff(
         [string]$agentBranch=$defaultAgentBranchName,
-        [string]$originBranch="$(git rev-parse --abbrev-ref HEAD)",
+        [string]$originBranch=$defaultOriginalBranchName,
         [switch]$pullpushOriginBeforeMerge)
 {
     if( $originalReposUnder -and -not ((Get-Location).Path -ilike "$originalReposUnder*")){
