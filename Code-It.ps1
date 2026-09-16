@@ -16,6 +16,7 @@
     - Volume mounts for code repositories and agent configuration
     - Git author environment variables or config settings (name and email)
     - Paths to preserve agent credentials, settings, and session data across container runs
+    - The host's NuGet package cache, mounted read-only as a fallback package folder
     - Port mappings
 
     The script supports optional image building and port mappings. Container mounts preserve:
@@ -87,6 +88,12 @@
       can destroy the container and create a new one without logging in again
     - Alternatively, use ANTHROPIC_API_KEY (claude) or a provider API key env var (opencode)
       to avoid volume mounts for credentials
+    - If a NuGet package cache is found on the host, it is mounted read-only at
+      ~/.nuget/packages-host, which the image's NuGet.Config registers as a fallback
+      package folder: restores reuse host-cached packages, and the container can
+      never write to the host cache. Looked up, in order, from: the NUGET_PACKAGES
+      environment variable, the globalPackagesFolder setting in the user-level
+      NuGet.Config, and the default ~/.nuget/packages
 
 .LINK
     https://docs.docker.com/engine/reference/commandline/run/
@@ -245,6 +252,51 @@ $onBehalfOf = $env:GIT_AUTHOR_NAME,$env:GIT_COMMITTER_NAME,"$(git config --get u
 $gitAuthorName = "$agentName for $onBehalfOf"
 $gitAuthorEmail = $env:GIT_AUTHOR_EMAIL,"$(git config --get user.email)" | Where-Object { $_ } | Select-Object -First 1
 
+# Locate the user's NuGet global packages cache (if any) to mount read-only.
+# Precedence per https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders :
+# the NUGET_PACKAGES environment variable, then the globalPackagesFolder setting in
+# the user-level NuGet.Config, then the default ~/.nuget/packages.
+$nugetPackages = ""
+if ($env:NUGET_PACKAGES -and (Test-Path -Path $env:NUGET_PACKAGES -PathType Container)) {
+    $nugetPackages = $env:NUGET_PACKAGES
+} else {
+    $nugetConfigs = @("$HOME/.nuget/NuGet/NuGet.Config", "$HOME/.config/NuGet/NuGet.Config")
+    if ($env:APPDATA) { $nugetConfigs = @("$env:APPDATA/NuGet/NuGet.Config") + $nugetConfigs }
+    foreach ($nugetConfig in $nugetConfigs) {
+        if (Test-Path -Path $nugetConfig -PathType Leaf) {
+            $globalPackagesFolder = $null
+            try {
+                $globalPackagesFolder = ([xml](Get-Content $nugetConfig -Raw)).configuration.config.add |
+                    Where-Object { $_.key -eq 'globalPackagesFolder' } |
+                    Select-Object -First 1 -ExpandProperty value
+            } catch {
+                # Like NuGet, silently ignore a malformed config file
+            }
+            if ($globalPackagesFolder -and (Test-Path -Path $globalPackagesFolder -PathType Container)) {
+                $nugetPackages = $globalPackagesFolder
+                break
+            }
+        }
+    }
+    if (-not $nugetPackages -and (Test-Path -Path "$HOME/.nuget/packages" -PathType Container)) {
+        $nugetPackages = "$HOME/.nuget/packages"
+    }
+}
+
+# If a cache was found, mount it read-only; the image's NuGet.Config registers the
+# mount point as a fallback package folder, so restores reuse host-cached packages
+# and the container can never write to the host cache.
+$nugetMountArgs = @()
+$nugetMountPrint = ""
+if ($nugetPackages) {
+    $nugetPackages = (Resolve-Path $nugetPackages).Path
+    $nugetMountArgs = @('-v', "${nugetPackages}:/home/$agentNameLower/.nuget/packages-host:ro")
+    $nugetMountPrint = "`n                -v `"${nugetPackages}`:/home/$agentNameLower/.nuget/packages-host:ro`""
+    "    Mounting NuGet package cache read-only: $nugetPackages"
+} else {
+    "    No NuGet package cache found; restore will use package sources only"
+}
+
 # Build image if requested
 if ($buildImage) {
     $dockerfileDir = (Resolve-Path $dockerfileDir).Path
@@ -270,7 +322,7 @@ if ($portsMap.Count -lt 2) {
                 -v `"$WorkDirToMount`:/repos`" `
                 -v `"$saveDir/.claude`:/home/$agentNameLower/.claude`" `
                 -v `"$saveDir/.claude.json`:/home/$agentNameLower/.claude.json`" `
-                -v `"$saveDir/.local/share/opencode`:/home/$agentNameLower/.local/share/opencode`" `
+                -v `"$saveDir/.local/share/opencode`:/home/$agentNameLower/.local/share/opencode`"$nugetMountPrint
             $image`:latest
 "@
 
@@ -287,4 +339,5 @@ if ($dryRun) {
             -v "$saveDir/.claude:/home/$agentNameLower/.claude" `
             -v "$saveDir/.claude.json:/home/$agentNameLower/.claude.json" `
             -v "$saveDir/.local/share/opencode:/home/$agentNameLower/.local/share/opencode" `
+            $nugetMountArgs `
     $image`:latest

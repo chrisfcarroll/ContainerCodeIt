@@ -1,6 +1,6 @@
 # ContainerCodeIt
 
-A sandbox to safely set your agentic AI to work on a single directory, free of permissions interruption. The default Dockerfile includes **OpenCode** and **Claude Code**.
+A sandbox to safely set your agentic AI to work on a single directory, free of permissions interruption. The default Dockerfile includes **OpenCode** and **Claude Code**, and runs the requested agent harness within tmux.
 
 ```bash
 code-it.sh     # or -o or --opencode (this is the default)
@@ -38,7 +38,8 @@ In principal either powershell or bash scripts should work on any O/S.
 
 ## Rough Edges
 
-- There's a choice between creating a huge Dockerfile that includes All The Tech Stacks, or a list of Dockerfiles for various tech stacks, or just the one example. This repo currently has just the one example, which is intended to be easy to to copy and edit.
+- There's a choice between creating a huge Dockerfile that includes All The Tech Stacks, or a list of Dockerfiles for various tech stacks, or just the one example. This repo currently has just the one example techstack, intended to be easy to to copy and edit.
+- Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it --build-image` / `code-it.ps1 -buildImage`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
 
 ## Runtime detection
@@ -55,7 +56,7 @@ Or specify `--runtime docker` or `--runtime container` (`-runtime` in PowerShell
 
 Edit the **Dockerfile** to taste. The default version includes:
 
-- **Alpine Linux 3.23** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
+- **Alpine Linux 3.24** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
 - **Claude Code CLI** and **OpenCode CLI**
 - A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, `dotnet`, `npm`, and `node`
 
@@ -90,8 +91,21 @@ The launcher scripts keep all agent state under one save dir (default `~/.config
 | `/home/agent1/.claude` | Persists Claude credentials, settings, permissions, and memory |
 | `/home/agent1/.claude.json` | Persists Claude OAuth session data, MCP configs, and preferences |
 | `/home/agent1/.local/share/opencode` | Persists OpenCode data and auth |
+| `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache, mounted only if one is found (see below) |
 
 Alternatively, pass `-e ANTHROPIC_API_KEY=sk-...` (claude) or a provider API key env var (opencode) instead of mounting state.
+
+## NuGet package cache
+
+If the host has a NuGet global packages cache, the launcher scripts mount it **read-only** at `/home/agent1/.nuget/packages-host`, so `dotnet restore` inside the container can reuse packages you have already downloaded — useful when the sandboxed network cannot reach your usual package sources. The read-only mount guarantees the container can never write to your host cache; anything the container downloads for itself goes to its own `~/.nuget/packages`, which disappears with the container.
+
+The cache is located using the documented precedence ([Managing the global packages and cache folders](https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders)):
+
+1. The `NUGET_PACKAGES` environment variable
+2. The `globalPackagesFolder` setting in your user-level `NuGet.Config`
+3. The default `~/.nuget/packages` (`%userprofile%\.nuget\packages` on Windows)
+
+The image's `~/.nuget/NuGet/NuGet.Config` registers the mount point as a NuGet [fallback package folder](https://learn.microsoft.com/en-us/nuget/reference/nuget-config-file#fallbackpackagefolders-section). For a package to be used from the host cache it must have been extracted there by a current NuGet client (i.e. its `.nupkg.metadata` file is present) — the norm for caches populated by `dotnet restore` or Visual Studio. If no cache is found, no mount is added and restore simply uses the configured package sources.
 
 ## Launcher script options
 

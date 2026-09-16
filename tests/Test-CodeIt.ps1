@@ -225,6 +225,60 @@ Assert-Contains "agent name lowercased in mounts" $r.out '/home/myagent/.claude'
 Assert-Contains "agent name in git author" $r.out 'GIT_AUTHOR_NAME="MyAgent for'
 
 # ---------------------------------------------------------------------------
+"11. NuGet package cache: detection and read-only mount"
+# Redirect HOME/USERPROFILE/APPDATA so detection is hermetic on any machine;
+# child pwsh processes derive `$HOME` from USERPROFILE on Windows, HOME elsewhere.
+$fakeHome  = Join-Path $tmp 'fakehome'
+$emptyHome = Join-Path $tmp 'emptyhome'
+$nugetCache = Join-Path $tmp 'nuget-cache'
+$null = New-Item -ItemType Directory -Force -Path $fakeHome, $emptyHome, $nugetCache
+$savedEnv = @{}
+foreach ($v in 'NUGET_PACKAGES','HOME','USERPROFILE','APPDATA') { $savedEnv[$v] = [Environment]::GetEnvironmentVariable($v) }
+function Restore-NugetTestEnv {
+    foreach ($k in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $savedEnv[$k]) }
+}
+try {
+    $env:HOME = $fakeHome; $env:USERPROFILE = $fakeHome; $env:APPDATA = (Join-Path $tmp 'no-appdata')
+
+    # (a) NUGET_PACKAGES override: mounted read-only, in both printout and run command
+    $env:NUGET_PACKAGES = $nugetCache
+    $r = Invoke-Scenario $codeIt $commonArgs $stubPath
+    Assert-Contains "NUGET_PACKAGES cache mounted read-only (printout)" $r.out "-v `"$nugetCache`:/home/agent1/.nuget/packages-host:ro`""
+    $r = Invoke-Scenario $codeIt @('-WorkDirToMount', $scriptDir, '-saveDir', $save) $stubPath
+    Assert-Contains "run command runs the stub" $r.out 'STUB-DOCKER-RUN'
+    Assert-Contains "NUGET_PACKAGES cache mounted read-only (run)" $r.out "-v $nugetCache`:/home/agent1/.nuget/packages-host:ro"
+
+    # (b) globalPackagesFolder from the user-level NuGet.Config
+    $env:NUGET_PACKAGES = $null
+    $null = New-Item -ItemType Directory -Force -Path "$fakeHome/.nuget/NuGet"
+    @"
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <config>
+    <add key="globalPackagesFolder" value="$nugetCache" />
+  </config>
+</configuration>
+"@ | Set-Content -Path "$fakeHome/.nuget/NuGet/NuGet.Config"
+    $r = Invoke-Scenario $codeIt $commonArgs $stubPath
+    Assert-Contains "globalPackagesFolder from NuGet.Config mounted" $r.out "$nugetCache`:/home/agent1/.nuget/packages-host:ro"
+    Remove-Item "$fakeHome/.nuget/NuGet/NuGet.Config"
+
+    # (c) default ~/.nuget/packages
+    $null = New-Item -ItemType Directory -Force -Path "$fakeHome/.nuget/packages"
+    $resolvedPackages = (Resolve-Path "$fakeHome/.nuget/packages").Path
+    $r = Invoke-Scenario $codeIt $commonArgs $stubPath
+    Assert-Contains "default ~/.nuget/packages mounted" $r.out "$resolvedPackages`:/home/agent1/.nuget/packages-host:ro"
+
+    # (d) no cache found: no mount, and a note is printed
+    $env:HOME = $emptyHome; $env:USERPROFILE = $emptyHome
+    $r = Invoke-Scenario $codeIt $commonArgs $stubPath
+    Assert-Contains "no cache: note printed" $r.out 'No NuGet package cache found'
+    Assert "no cache: no nuget mount line" (-not $r.out.Contains('packages-host'))
+} finally {
+    Restore-NugetTestEnv
+}
+
+# ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $tmp -EA Silent
 ""
 "Results: $script:pass passed, $script:fail failed"
