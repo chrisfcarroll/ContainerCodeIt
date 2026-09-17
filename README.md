@@ -1,6 +1,8 @@
 # ContainerCodeIt
 
-A sandbox to safely set your agentic AI to work on a single directory, free of permissions interruption. The default Dockerfile includes **OpenCode** and **Claude Code**, and runs the requested agent harness within tmux.
+Sandbox your agentic AI properly, in a container with access to a single working directory, where it can work free of permissions interruption. 
+
+The default Dockerfile includes **OpenCode** and **Claude Code** agents.
 
 ```bash
 code-it.sh     # or -o or --opencode (this is the default)
@@ -27,7 +29,7 @@ In principal either powershell or bash scripts should work on any O/S.
 # Build and run with the included Dockerfile
 ./code-it.sh --build-image
 
-# Thereafter, run the built image
+# Thereafter, no need to rebuild the image, except to get agent harness updates.
 ./code-it.sh [-o] [-c] [--work-dir path ]
 ```
 
@@ -36,78 +38,7 @@ In principal either powershell or bash scripts should work on any O/S.
 .\Code-It.ps1 -o [[-WorkDirToMount] <string>]
 ```
 
-## Rough Edges
-
-- There's a choice between creating a huge Dockerfile that includes All The Tech Stacks, or a list of Dockerfiles for various tech stacks, or just the one example. This repo currently has just the one example techstack, intended to be easy to to copy and edit.
-- Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it --build-image` / `code-it.ps1 -buildImage`)
-- Putting .sh on the bash scripts is surely a dubious design choice.
-
-## Runtime detection
-
-`code-it.sh` and `Code-It.ps1` pick a container runtime automatically:
-
-1. On **macOS**, uses the **Apple container CLI** (`container`) if installed
-2. Otherwise uses **Docker** if installed
-3. Otherwise it exits with a suggestion for the best runtime to install on your platform
-
-Or specify `--runtime docker` or `--runtime container` (`-runtime` in PowerShell).
-
-## What's in the image
-
-Edit the **Dockerfile** to taste. The default version includes:
-
-- **Alpine Linux 3.24** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
-- **Claude Code CLI** and **OpenCode CLI**
-- A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, `dotnet`, `npm`, and `node`
-
-On startup, the container launches a **tmux** session running the chosen agent, and a `zsh` terminal available via the tmux switch hotkey sequence, `Ctrl-B S`.
-
-### What does the shell script do?
-
-Something like this:
-
-```bash
-# docker build . -t code-it-alpine-dotnet:latest
-
-docker run -it --rm \
-    -p 3000:3000 -p 3001:3001 \
-    -e CODE_AGENT=opencode \
-    -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
-    -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
-    -v ~/my-repos:/repos \
-    -v ~/.config/code-it/.claude:/home/agent1/.claude \
-    -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
-    -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
-    code-it-alpine-dotnet:latest
-```
-
-## Volume mounts
-
-The launcher scripts keep all agent state under one save dir (default `~/.config/code-it`, created on first run), so you can destroy the container and create a new one without logging in again:
-
-| Mount point | Purpose |
-|---|---|
-| `/repos` | Host directory containing git repos for the agent to work on |
-| `/home/agent1/.claude` | Persists Claude credentials, settings, permissions, and memory |
-| `/home/agent1/.claude.json` | Persists Claude OAuth session data, MCP configs, and preferences |
-| `/home/agent1/.local/share/opencode` | Persists OpenCode data and auth |
-| `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache, mounted only if one is found (see below) |
-
-Alternatively, pass `-e ANTHROPIC_API_KEY=sk-...` (claude) or a provider API key env var (opencode) instead of mounting state.
-
-## NuGet package cache
-
-If the host has a NuGet global packages cache, the launcher scripts mount it **read-only** at `/home/agent1/.nuget/packages-host`, so `dotnet restore` inside the container can reuse packages you have already downloaded — useful when the sandboxed network cannot reach your usual package sources. The read-only mount guarantees the container can never write to your host cache; anything the container downloads for itself goes to its own `~/.nuget/packages`, which disappears with the container.
-
-The cache is located using the documented precedence ([Managing the global packages and cache folders](https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders)):
-
-1. The `NUGET_PACKAGES` environment variable
-2. The `globalPackagesFolder` setting in your user-level `NuGet.Config`
-3. The default `~/.nuget/packages` (`%userprofile%\.nuget\packages` on Windows)
-
-The image's `~/.nuget/NuGet/NuGet.Config` registers the mount point as a NuGet [fallback package folder](https://learn.microsoft.com/en-us/nuget/reference/nuget-config-file#fallbackpackagefolders-section). For a package to be used from the host cache it must have been extracted there by a current NuGet client (i.e. its `.nupkg.metadata` file is present) — the norm for caches populated by `dotnet restore` or Visual Studio. If no cache is found, no mount is added and restore simply uses the configured package sources.
-
-## Launcher script options
+## Code-It options
 
 `code-it.sh` and `Code-It.ps1` accept the same logical parameters:
 
@@ -127,30 +58,120 @@ The image's `~/.nuget/NuGet/NuGet.Config` registers the mount point as a NuGet [
 
 The scripts automatically derive the git author name and email from your environment or git config, prefixed with the agent name (e.g. `Agent1 for Your Name`).
 
-## Isolating your agent from upstream origin repos.
+### What does the script do?
 
-For complete isolation, git clone your working tree locally. It works easiest if you give the agent its own branch (to avoid git error, 'updating the current branch in a non-bare repository is denied').
+Something like this:
+
+```bash
+# docker build . -t code-it-alpine-dotnet:latest
+
+docker run -it --rm \
+    -p 3000:3000 -p 3001:3001 \
+    -e CODE_AGENT=opencode \
+    -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
+    -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
+    -v ~/my-repos:/repos \
+    -v ~/.config/code-it/.claude:/home/agent1/.claude \
+    -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
+    -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
+    code-it-alpine-dotnet:latest
+```
+
+## What's in the image
+
+Edit the **Dockerfile** to taste. The default version includes:
+
+- **Alpine Linux 3.24** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
+- **Claude Code CLI** and **OpenCode CLI**
+- A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, `dotnet`, `npm`, and `node`
+
+On startup, the container launches a **tmux** session running the chosen agent, and a `zsh` terminal available via the tmux switch hotkey sequence, `Ctrl-B S`.
+
+## Rough Edges
+
+- There's a choice between creating a huge “kitchen-sink” Dockerfile that includes All The Tech Stacks and All The Coding Agents; or a list of Dockerfiles for combinations of tech stack & agent ; or just the one example. This repo currently has just the one example techstack, intended to be easy to to copy and edit.
+- Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it --update-and-build-image` / `code-it.ps1 -updateAndBuildImage`)
+- Putting .sh on the bash scripts is surely a dubious design choice.
+
+## Runtime detection
+
+`code-it.sh` and `Code-It.ps1` choose a container runtime automatically:
+
+1. On **macOS**, they use the **Apple container CLI** (`container`) if installed
+2. Otherwise they use **Docker** if installed
+3. Otherwise they exits with a suggestion for the best runtime to install on your platform
+
+Or on MacOs, specify `--runtime docker` or `--runtime container` (`-runtime` in PowerShell).
+
+## Volume mounts
+
+The launcher scripts keep all agent state under one save dir (default `~/.config/code-it`, created on first run), so your sessions and logins are saved.
+
+| Mount point | Purpose |
+|---|---|
+| `/repos` | Host directory containing git repos for the agent to work on |
+| `/home/agent1/.claude` | Persists Claude credentials, settings, permissions, and memory |
+| `/home/agent1/.claude.json` | Persists Claude OAuth session data, MCP configs, and preferences |
+| `/home/agent1/.local/share/opencode` | Persists OpenCode data and auth |
+| `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache, mounted only if one is found (see below) |
+
+Alternatively, pass `-e ANTHROPIC_API_KEY=sk-...` (claude) or a provider API key env var (opencode) instead of mounting state.
+
+# Isolating your agent from upstream origin repos.
+
+To isolate your upstream repo from your agents, git clone your working tree locally. Git works fine with origin repos on the local filesystem. 
+
+This works easiest if you give the agent its own branch (to avoid git error, 'updating the current branch in a non-bare repository is denied') as well as its own cloned repo.
 
 ```bash
 mkdir ~/ReposForAgents
 cd ~/ReposForAgents
-git clone ~/MyRepos/Project1 # git can locally clone a working tree
+git clone ~/MyRepos/Project1 # local clone of your working tree
 cd Project1
 git checkout -b agent1
-git push --set-upstream origin agent1 # 
+git push --set-upstream origin agent1
 ```
-
-Now the agent can only push to your own local working tree. You can only push upstream outside the container.
-
+Now the agent can only push to your own local working tree. To push upstream, you have to be in your original repo, outside the container.
 ```
 cd ~/MyRepos/Project1
 git merge agent1
 git push
 ```
 
+## UseIsolatedAgentRepos.ps1
+
+`UseIsolatedAgentRepos.ps1` caters to this workflow, using a mostly-one-way dataflow.
+
+```
+. UseIsolatedAgentRepos.ps1 -originBranch <defaults to main> -agentBranch <defaults to agent1>
+cd ~/ReposForAgents/Project1
+updateAgentFromOrigin
+cd ~/Repos/Project1
+mergeFromAgent
+```
+“Mostly” one-way because there's also:
+```
+cd ~/Repos/Project1
+updateAgentAndDiff
+```
+which helps if you want to review agent changes in your repo before merging to main. The alternative is to review agent changes in the agent's repo.
+
+
+## Package caches
+
+To avoid giving agents access to your non-public package sources, and also to avoid a myriad duplicate downloads, we can give the container read-only access to your package caches. The read-only flag prevents this becoming a way to leak out of the sandbox.
+
+### NuGet
+
+If you use NuGet, the launcher scripts mounts your NuGet package cache at `/home/agent1/.nuget/packages-host`, where `dotnet restore` etc can use it. NuGet downloads added in the container will go in `~/.nuget/packages` and will disappear when the container exits. (See [Managing the global packages and cache folders](https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders) to understand nuget package cache locations).
+
+### npm, PyPi, etc.
+
+To do.
+
 ## Tests
 
-No container runtime needed — the tests stub `docker`/`container`/`uname` on the PATH and assert on `--dry-run` output, so they run on any machine, not just inside a container:
+No container runtime needed. The tests stub `docker`/`container`/`uname` on the PATH and assert on `--dry-run` output, so they run on any machine, not just inside a container.
 
 ```bash
 # Linux / macOS (runs the bash suite, then the pwsh suite if pwsh is installed)
@@ -158,7 +179,6 @@ No container runtime needed — the tests stub `docker`/`container`/`uname` on t
 ```
 
 ```powershell
-# Windows (or anywhere with pwsh) — the PowerShell suite alone
 pwsh -NoProfile -File tests/Test-CodeIt.ps1
 ```
 
