@@ -223,6 +223,13 @@ Assert-Contains "custom ports" $r.out '-p 8000:3000 -p 8001:3001'
 $r = Invoke-Scenario $codeIt (@('-agentName', 'MyAgent') + $commonArgs) $stubPath
 Assert-Contains "agent name lowercased in mounts" $r.out '/home/myagent/.claude'
 Assert-Contains "agent name in git author" $r.out 'GIT_AUTHOR_NAME="MyAgent for'
+Assert-Contains "agent name in git committer" $r.out 'GIT_COMMITTER_NAME="MyAgent for'
+Assert-Contains "git committer email passed" $r.out 'GIT_COMMITTER_EMAIL='
+$savedAuthor = $env:GIT_AUTHOR_NAME
+$env:GIT_AUTHOR_NAME = 'Agent1 for Some One'
+try { $r = Invoke-Scenario $codeIt (@('-agentName', 'MyAgent') + $commonArgs) $stubPath }
+finally { $env:GIT_AUTHOR_NAME = $savedAuthor }
+Assert-Contains "run inside an agent container does not repeat the agent prefix" $r.out 'GIT_AUTHOR_NAME="MyAgent for Some One"'
 
 # ---------------------------------------------------------------------------
 "11. NuGet package cache: detection and read-only mount"
