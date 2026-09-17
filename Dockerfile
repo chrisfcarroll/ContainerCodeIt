@@ -83,6 +83,7 @@ RUN cat <<'EOF' >> ~/.tmux.conf
 set -g default-terminal "tmux-256color"
 set -ga terminal-overrides ",tmux-256color:RGB"
 set -ga terminal-overrides ",xterm-256color:RGB"
+set -g set-clipboard on
 set -g mouse on
 set -g focus-events on
 set -g history-limit 50000
