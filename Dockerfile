@@ -142,6 +142,8 @@ WORKDIR /repos
 #                -e CODE_AGENT=claude \
 #                -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
 #                -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
+#                -e GIT_COMMITTER_NAME="Agent1 for $(git config --get user.name)" \
+#                -e GIT_COMMITTER_EMAIL="$(git config --get user.email)" \
 #                -v ~/repos:/repos \
 #                -v ~/.config/code-it/.claude:/home/agent1/.claude \
 #                -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \

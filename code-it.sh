@@ -272,9 +272,15 @@ fi
 
 # Git author info
 agent_name_lower=$(echo "$agent_name" | tr '[:upper:]' '[:lower:]')
-on_behalf_of="${GIT_AUTHOR_NAME:-${GIT_COMMITTER_NAME:-$(git config --get user.name 2>/dev/null || echo "")}}"
+# Git takes the committer only from GIT_COMMITTER_* or user.name/user.email, never from
+# GIT_AUTHOR_*, and the container has no user.name/user.email, so the run passes both.
+on_behalf_of="${GIT_AUTHOR_NAME:-${GIT_COMMITTER_NAME:-$(git -C "$work_dir_to_mount" config --get user.name 2>/dev/null || echo "")}}"
 git_author_name="$agent_name for $on_behalf_of"
-git_author_email="${GIT_AUTHOR_EMAIL:-$(git config --get user.email 2>/dev/null || echo "")}"
+git_author_email="${GIT_AUTHOR_EMAIL:-$(git -C "$work_dir_to_mount" config --get user.email 2>/dev/null || echo "")}"
+if [[ -z "$on_behalf_of" || -z "$git_author_email" ]]; then
+    echo "Warning: No git user.name or user.email found for $work_dir_to_mount. The agent will not be able to commit." >&2
+    echo "    Set them with: git config --global user.name 'Your Name' ; git config --global user.email you@example.com" >&2
+fi
 
 # Locate the user's NuGet global packages cache (if any) to mount read-only.
 # Precedence per https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders :
@@ -346,6 +352,8 @@ cat <<EOF
                 -e CODE_AGENT="$code_agent" \\
                 -e GIT_AUTHOR_NAME="$git_author_name" \\
                 -e GIT_AUTHOR_EMAIL="$git_author_email" \\
+                -e GIT_COMMITTER_NAME="$git_author_name" \\
+                -e GIT_COMMITTER_EMAIL="$git_author_email" \\
                 -v "$work_dir_to_mount:/repos" \\
                 -v "$save_dir/.claude:/home/$agent_name_lower/.claude" \\
                 -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \\
@@ -362,6 +370,8 @@ fi
             -e CODE_AGENT="$code_agent" \
             -e GIT_AUTHOR_NAME="$git_author_name" \
             -e GIT_AUTHOR_EMAIL="$git_author_email" \
+            -e GIT_COMMITTER_NAME="$git_author_name" \
+            -e GIT_COMMITTER_EMAIL="$git_author_email" \
             -v "$work_dir_to_mount:/repos" \
             -v "$save_dir/.claude:/home/$agent_name_lower/.claude" \
             -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \

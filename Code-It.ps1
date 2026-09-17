@@ -248,9 +248,15 @@ elseif (-not $buildImage -and -not ($validImages | Where-Object { $_ -and ($_ -e
 
 # Git author info
 $agentNameLower = $agentName.ToLower()
-$onBehalfOf = $env:GIT_AUTHOR_NAME,$env:GIT_COMMITTER_NAME,"$(git config --get user.name)" | Where-Object { $_ } | Select-Object -First 1
+# Git takes the committer only from GIT_COMMITTER_* or user.name/user.email, never from
+# GIT_AUTHOR_*, and the container has no user.name/user.email, so the run passes both.
+$onBehalfOf = $env:GIT_AUTHOR_NAME,$env:GIT_COMMITTER_NAME,"$(git -C $WorkDirToMount config --get user.name)" | Where-Object { $_ } | Select-Object -First 1
 $gitAuthorName = "$agentName for $onBehalfOf"
-$gitAuthorEmail = $env:GIT_AUTHOR_EMAIL,"$(git config --get user.email)" | Where-Object { $_ } | Select-Object -First 1
+$gitAuthorEmail = $env:GIT_AUTHOR_EMAIL,"$(git -C $WorkDirToMount config --get user.email)" | Where-Object { $_ } | Select-Object -First 1
+if (-not $onBehalfOf -or -not $gitAuthorEmail) {
+    Write-Warning "No git user.name or user.email found for $WorkDirToMount. The agent will not be able to commit.
+    Set them with: git config --global user.name 'Your Name' ; git config --global user.email you@example.com"
+}
 
 # Locate the user's NuGet global packages cache (if any) to mount read-only.
 # Precedence per https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders :
@@ -319,6 +325,8 @@ if ($portsMap.Count -lt 2) {
                 -e CODE_AGENT=`"$codeAgent`" `
                 -e GIT_AUTHOR_NAME=`"$gitAuthorName`" `
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
+                -e GIT_COMMITTER_NAME=`"$gitAuthorName`" `
+                -e GIT_COMMITTER_EMAIL=`"$gitAuthorEmail`" `
                 -v `"$WorkDirToMount`:/repos`" `
                 -v `"$saveDir/.claude`:/home/$agentNameLower/.claude`" `
                 -v `"$saveDir/.claude.json`:/home/$agentNameLower/.claude.json`" `
@@ -335,6 +343,8 @@ if ($dryRun) {
             -e CODE_AGENT="$codeAgent" `
             -e GIT_AUTHOR_NAME="$gitAuthorName" `
             -e GIT_AUTHOR_EMAIL="$gitAuthorEmail" `
+            -e GIT_COMMITTER_NAME="$gitAuthorName" `
+            -e GIT_COMMITTER_EMAIL="$gitAuthorEmail" `
             -v "$WorkDirToMount`:/repos" `
             -v "$saveDir/.claude:/home/$agentNameLower/.claude" `
             -v "$saveDir/.claude.json:/home/$agentNameLower/.claude.json" `
