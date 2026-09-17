@@ -44,6 +44,11 @@
     If specified, builds the image from the Dockerfile before running the container.
     Default: $false
 
+.PARAMETER updateAndBuildImage
+    Like -buildImage, but first updates the "# last changed" cache-bust dates in the
+    Dockerfile to today, forcing the agent install layers to rerun so the agents are
+    updated. Default: $false
+
 .PARAMETER dockerfileDir
     Directory containing the Dockerfile. Used with -buildImage.
     Defaults to this script's own directory.
@@ -120,6 +125,7 @@ param (
     [string]$saveDir        = "$HOME/.config/code-it",
     [string]$image          = "code-it-alpine-dotnet",
     [switch]$buildImage     = $false,
+    [switch]$updateAndBuildImage = $false,
     [string]$dockerfileDir  = $PSScriptRoot,
     [string]$runtime        = "",
     [string[]]$portsMap     = @(),
@@ -140,6 +146,9 @@ if ($claude -and $opencode) {
     exit 1
 }
 $codeAgent = if ($claude) { "claude" } else { "opencode" }
+
+# -updateAndBuildImage implies -buildImage
+if ($updateAndBuildImage) { $buildImage = $true }
 
 # $IsMacOS/$IsLinux are not defined in Windows PowerShell 5.1, so treat unset as false
 $onMacOS = $IsMacOS -eq $true
@@ -308,6 +317,14 @@ if ($nugetPackages) {
 # Build image if requested
 if ($buildImage) {
     $dockerfileDir = (Resolve-Path $dockerfileDir).Path
+    if ($updateAndBuildImage) {
+        # Bump the "# last changed" cache-bust dates in the Dockerfile to today, so
+        # the agent install layers rebuild and update the agents
+        $today = [DateTime]::Today.ToString('yyyy-MM-dd')
+        (Get-Content "$dockerfileDir/Dockerfile") -replace '# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}', "# last changed $today" |
+            Set-Content "$dockerfileDir/Dockerfile"
+        "    Updated '# last changed' dates in $dockerfileDir/Dockerfile to $today"
+    }
     & $runtime build -t "$image`:latest" $dockerfileDir
 }
 

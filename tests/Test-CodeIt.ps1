@@ -217,6 +217,27 @@ $r = Invoke-Scenario $codeIt (@('-buildImage', '-dockerfileDir', $tmp) + $common
 Assert "-buildImage with no Dockerfile fails" ($r.code -ne 0)
 
 # ---------------------------------------------------------------------------
+"9b. Update and build image"
+$dfDir = Join-Path $tmp 'dfdir'
+$null = New-Item -ItemType Directory -Force -Path $dfDir
+$dfPath = Join-Path $dfDir 'Dockerfile'
+(Get-Content (Join-Path $scriptDir 'Dockerfile')) -replace '# last changed [0-9-]+', '# last changed 2000-01-01' | Set-Content $dfPath
+$today = [DateTime]::Today.ToString('yyyy-MM-dd')
+$r = Invoke-Scenario $codeIt (@('-updateAndBuildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
+Assert "-updateAndBuildImage exit code 0" ($r.code -eq 0)
+Assert-Contains "update+build invokes docker build" $r.out 'STUB-DOCKER-BUILD'
+Assert-Contains "update+build implies build (no -buildImage needed)" $r.out '-t code-it-alpine-dotnet:latest'
+$df = Get-Content $dfPath -Raw
+Assert "Dockerfile dates bumped to today" ($df.Contains("# last changed $today"))
+Assert "old dates gone from Dockerfile" (-not $df.Contains('# last changed 2000-01-01'))
+# plain -buildImage leaves the dates alone
+(Get-Content (Join-Path $scriptDir 'Dockerfile')) -replace '# last changed [0-9-]+', '# last changed 2000-01-01' | Set-Content $dfPath
+$r = Invoke-Scenario $codeIt (@('-buildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
+Assert "-buildImage exit code 0 (dfdir)" ($r.code -eq 0)
+$df = Get-Content $dfPath -Raw
+Assert "-buildImage leaves dates unchanged" ($df.Contains('# last changed 2000-01-01'))
+
+# ---------------------------------------------------------------------------
 "10. Custom options"
 $r = Invoke-ScenarioCommand "& '$codeIt' -portsMap '8000:3000','8001:3001' -dryRun -WorkDirToMount '$scriptDir' -saveDir '$save'" $stubPath
 Assert-Contains "custom ports" $r.out '-p 8000:3000 -p 8001:3001'
