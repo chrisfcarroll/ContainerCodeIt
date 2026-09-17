@@ -44,7 +44,7 @@
     If specified, builds the image from the Dockerfile before running the container.
     Default: $false
 
-.PARAMETER updateAndBuildImage
+.PARAMETER rebuildImage
     Like -buildImage, but first updates the "# last changed" cache-bust dates in the
     Dockerfile to today, forcing the agent install layers to rerun so the agents are
     updated. Default: $false
@@ -125,7 +125,7 @@ param (
     [string]$saveDir        = "$HOME/.config/code-it",
     [string]$image          = "code-it-alpine-dotnet",
     [switch]$buildImage     = $false,
-    [switch]$updateAndBuildImage = $false,
+    [switch]$rebuildImage   = $false,
     [string]$dockerfileDir  = $PSScriptRoot,
     [string]$runtime        = "",
     [string[]]$portsMap     = @(),
@@ -147,8 +147,8 @@ if ($claude -and $opencode) {
 }
 $codeAgent = if ($claude) { "claude" } else { "opencode" }
 
-# -updateAndBuildImage implies -buildImage
-if ($updateAndBuildImage) { $buildImage = $true }
+# -rebuildImage implies -buildImage
+if ($rebuildImage) { $buildImage = $true }
 
 # $IsMacOS/$IsLinux are not defined in Windows PowerShell 5.1, so treat unset as false
 $onMacOS = $IsMacOS -eq $true
@@ -317,7 +317,7 @@ if ($nugetPackages) {
 # Build image if requested
 if ($buildImage) {
     $dockerfileDir = (Resolve-Path $dockerfileDir).Path
-    if ($updateAndBuildImage) {
+    if ($rebuildImage) {
         # Bump the "# last changed" cache-bust dates in the Dockerfile to today, so
         # the agent install layers rebuild and update the agents
         $today = [DateTime]::Today.ToString('yyyy-MM-dd')

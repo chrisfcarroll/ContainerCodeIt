@@ -102,7 +102,7 @@ assert "--help exit code" "$?"
 assert_contains "--help shows usage" "$out" "Usage:"
 assert_contains "--help documents -c" "$out" "--claude, -c"
 assert_contains "--help documents -o" "$out" "--opencode, -o"
-assert_contains "--help documents --update-and-build-image" "$out" "--update-and-build-image"
+assert_contains "--help documents --rebuild-image" "$out" "--rebuild-image"
 
 # ---------------------------------------------------------------------------
 echo "3. Default dry-run with docker: opencode agent, all state mounts"
@@ -201,14 +201,14 @@ PATH="$stub_docker:$PATH" "$code_it" --build-image --dockerfile-dir "$tmp" "${co
 [[ "$?" != "0" ]]; assert "--build-image with no Dockerfile fails" "$?"
 
 # ---------------------------------------------------------------------------
-echo "10b. Update and build image"
+echo "10b. Rebuild image (updates the agents)"
 dfdir="$tmp/dfdir"; mkdir -p "$dfdir"
 sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$script_dir/Dockerfile" > "$dfdir/Dockerfile"
 today=$(date +%Y-%m-%d)
-out=$(PATH="$stub_docker:$PATH" "$code_it" --update-and-build-image --dockerfile-dir "$dfdir" "${common_args[@]}")
-assert "--update-and-build-image exit code" "$?"
-assert_contains "update+build invokes docker build" "$out" "STUB-DOCKER-BUILD"
-assert_contains "update+build implies build (no --build-image needed)" "$out" "-t code-it-alpine-dotnet:latest"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --rebuild-image --dockerfile-dir "$dfdir" "${common_args[@]}")
+assert "--rebuild-image exit code" "$?"
+assert_contains "rebuild invokes docker build" "$out" "STUB-DOCKER-BUILD"
+assert_contains "rebuild implies build (no --build-image needed)" "$out" "-t code-it-alpine-dotnet:latest"
 grep -q "# last changed $today" "$dfdir/Dockerfile"
 assert "Dockerfile dates bumped to today" "$?"
 grep -q "# last changed 2000-01-01" "$dfdir/Dockerfile" >/dev/null 2>&1

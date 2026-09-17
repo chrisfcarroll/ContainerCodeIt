@@ -28,7 +28,7 @@
 #                            Created if missing. Defaults to ~/.config/code-it
 #   --image NAME             Image name to run. Default: "code-it-alpine-dotnet"
 #   --build-image            If specified, builds the image from the Dockerfile before running.
-#   --update-and-build-image Like --build-image, but first updates the "# last changed"
+#   --rebuild-image          Like --build-image, but first updates the "# last changed"
 #                            cache-bust dates in the Dockerfile to today, forcing the
 #                            agent install layers to rerun so the agents are updated.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile. Used with --build-image.
@@ -95,7 +95,7 @@ work_dir_to_mount="."
 save_dir="$HOME/.config/code-it"
 image="code-it-alpine-dotnet"
 build_image=false
-update_and_build=false
+rebuild_image=false
 dockerfile_dir="$script_dir"
 runtime=""
 ports=()
@@ -130,9 +130,9 @@ while [[ $# -gt 0 ]]; do
             build_image=true
             shift
             ;;
-        --update-and-build-image)
+        --rebuild-image)
             build_image=true
-            update_and_build=true
+            rebuild_image=true
             shift
             ;;
         --dockerfile-dir)
@@ -337,10 +337,10 @@ fi
 
 # Build image if requested
 if [[ "$build_image" == true ]]; then
-    # --update-and-build-image: bump the "# last changed" cache-bust dates in the
+    # --rebuild-image: bump the "# last changed" cache-bust dates in the
     # Dockerfile to today, so the agent install layers rebuild and update the agents.
     # (Write to a temp file and move: portable in-place edit for BSD and GNU sed.)
-    if [[ "$update_and_build" == true ]]; then
+    if [[ "$rebuild_image" == true ]]; then
         today=$(date +%Y-%m-%d)
         sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed $today/" "$dockerfile_dir/Dockerfile" > "$dockerfile_dir/Dockerfile.tmp" \
             && mv "$dockerfile_dir/Dockerfile.tmp" "$dockerfile_dir/Dockerfile"

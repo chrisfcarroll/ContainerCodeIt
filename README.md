@@ -39,7 +39,7 @@ In principal either powershell or bash scripts should work on any O/S.
 ## Rough Edges
 
 - There's a choice between creating a huge Dockerfile that includes All The Tech Stacks, or a list of Dockerfiles for various tech stacks, or just the one example. This repo currently has just the one example techstack, intended to be easy to to copy and edit.
-- Updating the agent harnesses claude code/open code is done by rebuilding the image with `--update-and-build-image` / `-updateAndBuildImage`, which first bumps the Dockerfile's `# last changed` cache-bust dates to today so the agent install layers rerun. To rebuild without updating the agents, use `--build-image` / `-buildImage`
+- Updating the agent harnesses claude code/open code is done by rebuilding the image with `--rebuild-image` / `-rebuildImage`, which first bumps the Dockerfile's `# last changed` cache-bust dates to today so the agent install layers rerun. To rebuild without updating the agents, use `--build-image` / `-buildImage`
 - Putting .sh on the bash scripts is surely a dubious design choice.
 
 ## Runtime detection
@@ -119,7 +119,7 @@ The image's `~/.nuget/NuGet/NuGet.Config` registers the mount point as a NuGet [
 | `--save-dir` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image` | `-image` | `code-it-alpine-dotnet` | Image name |
 | `--build-image` | `-buildImage` | off | Build the image before running |
-| `--update-and-build-image` | `-updateAndBuildImage` | off | Build the image, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
+| `--rebuild-image` | `-rebuildImage` | off | Build the image, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
 | `--runtime` | `-runtime` | auto-detect | `docker` or `container` |
 | `--ports` | `-portsMap` | `0:3000` `0:3001` (docker); `3000:3000` `3001:3001` (container) | Port mappings (max 2); host port 0 auto-assigns |
