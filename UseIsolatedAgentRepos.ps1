@@ -131,6 +131,12 @@ function updateAgentFromOrigin(
     if ($LASTEXITCODE -ne 0) { Write-Error "Could not pull $originBranch" -ErrorAction Stop }
     git checkout $agentBranch
     if ($LASTEXITCODE -ne 0) { Write-Error "Could not checkout $agentBranch" -ErrorAction Stop }
+    # updateAgentAndDiff may have merged origin into origin/$agentBranch, so take that first or the push is rejected
+    git rev-parse --verify --quiet "refs/remotes/origin/$agentBranch" > $null
+    if ($LASTEXITCODE -eq 0) {
+        git merge "origin/$agentBranch" --ff-only ; if ($LASTEXITCODE -ne 0) { git merge "origin/$agentBranch" }
+        if ($LASTEXITCODE -ne 0) { Write-Error "Merging origin/$agentBranch into $agentBranch needs resolving. Not pushed." -ErrorAction Stop }
+    }
     git merge $originBranch --ff-only ; if ($LASTEXITCODE -ne 0) { git merge $originBranch }
     if ($LASTEXITCODE -ne 0) { Write-Error "Merging $originBranch into $agentBranch needs resolving. Not pushed." -ErrorAction Stop }
     git push -u origin $agentBranch
@@ -144,8 +150,12 @@ function mergeFromAgent(
     if( $originalReposUnder -and -not ((Get-Location).Path -ilike "$originalReposUnder*")){
         Write-Error "This command only runs in $originalReposUnder" -ErrorAction Stop
     }
-    if($pullpushOriginBeforeMerge){ git checkout $originBranch ; git pull ; git push }
     git checkout $originBranch
+    if ($LASTEXITCODE -ne 0) { Write-Error "Could not checkout $originBranch" -ErrorAction Stop }
+    if($pullpushOriginBeforeMerge){
+        git pull ; if ($LASTEXITCODE -ne 0) { Write-Error "Could not pull $originBranch" -ErrorAction Stop }
+        git push ; if ($LASTEXITCODE -ne 0) { Write-Error "Could not push $originBranch" -ErrorAction Stop }
+    }
     git merge $agentBranch --ff-only ; if ($LASTEXITCODE -ne 0) { git merge $agentBranch }
 }
 
@@ -158,8 +168,33 @@ function updateAgentAndDiff(
     if( $originalReposUnder -and -not ((Get-Location).Path -ilike "$originalReposUnder*")){
         Write-Error "This command only runs in $originalReposUnder" -ErrorAction Stop
     }
-    if($pullpushOriginBeforeMerge){ git checkout $originBranch ; git pull ; git push }
-    git checkout $agentBranch ; git merge $originBranch
-    git diff $originBranch
-    git checkout $originBranch
+    if($pullpushOriginBeforeMerge){
+        git checkout $originBranch
+        if ($LASTEXITCODE -ne 0) { Write-Error "Could not checkout $originBranch" -ErrorAction Stop }
+        git pull ; if ($LASTEXITCODE -ne 0) { Write-Error "Could not pull $originBranch" -ErrorAction Stop }
+        git push ; if ($LASTEXITCODE -ne 0) { Write-Error "Could not push $originBranch" -ErrorAction Stop }
+    }
+    # Update $agentBranch without checking it out, so your working tree is untouched and
+    # the agent can still push to $agentBranch. Conflicts are left for the agent side to resolve.
+    $agentTip  = git rev-parse --verify --quiet "refs/heads/$agentBranch"
+    if ($LASTEXITCODE -ne 0) { Write-Error "No branch $agentBranch in this repo" -ErrorAction Stop }
+    $originTip = git rev-parse --verify --quiet "refs/heads/$originBranch"
+    if ($LASTEXITCODE -ne 0) { Write-Error "No branch $originBranch in this repo" -ErrorAction Stop }
+    git merge-base --is-ancestor $originTip $agentTip
+    if ($LASTEXITCODE -ne 0) {
+        git merge-base --is-ancestor $agentTip $originTip
+        if ($LASTEXITCODE -eq 0) {
+            $newTip = $originTip
+        } else {
+            $tree = git merge-tree --write-tree $agentTip $originTip
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Merging $originBranch into $agentBranch conflicts. Run updateAgentFromOrigin in the agent repo to resolve it." -ErrorAction Stop
+            }
+            $newTip = git commit-tree ($tree | Select-Object -First 1) -p $agentTip -p $originTip -m "Merge branch '$originBranch' into $agentBranch"
+            if ($LASTEXITCODE -ne 0) { Write-Error "Could not create merge commit" -ErrorAction Stop }
+        }
+        git update-ref "refs/heads/$agentBranch" $newTip $agentTip
+        if ($LASTEXITCODE -ne 0) { Write-Error "Could not update $agentBranch" -ErrorAction Stop }
+    }
+    git diff $originBranch $agentBranch
 }
