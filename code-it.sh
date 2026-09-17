@@ -275,6 +275,8 @@ agent_name_lower=$(echo "$agent_name" | tr '[:upper:]' '[:lower:]')
 # Git takes the committer only from GIT_COMMITTER_* or user.name/user.email, never from
 # GIT_AUTHOR_*, and the container has no user.name/user.email, so the run passes both.
 on_behalf_of="${GIT_AUTHOR_NAME:-${GIT_COMMITTER_NAME:-$(git -C "$work_dir_to_mount" config --get user.name 2>/dev/null || echo "")}}"
+# Inside an agent container GIT_AUTHOR_NAME is already "<agent> for <you>": keep only <you>
+on_behalf_of=$(printf '%s' "$on_behalf_of" | sed -E 's/^([^[:space:]]+ for )+//')
 git_author_name="$agent_name for $on_behalf_of"
 git_author_email="${GIT_AUTHOR_EMAIL:-$(git -C "$work_dir_to_mount" config --get user.email 2>/dev/null || echo "")}"
 if [[ -z "$on_behalf_of" || -z "$git_author_email" ]]; then

@@ -211,6 +211,8 @@ assert_contains "agent name lowercased in mounts" "$out" "/home/myagent/.claude"
 assert_contains "agent name in git author" "$out" 'GIT_AUTHOR_NAME="MyAgent for'
 assert_contains "agent name in git committer" "$out" 'GIT_COMMITTER_NAME="MyAgent for'
 assert_contains "git committer email passed" "$out" 'GIT_COMMITTER_EMAIL='
+out=$(GIT_AUTHOR_NAME="Agent1 for Some One" PATH="$stub_docker:$PATH" "$code_it" --agent-name "MyAgent" "${common_args[@]}")
+assert_contains "run inside an agent container does not repeat the agent prefix" "$out" 'GIT_AUTHOR_NAME="MyAgent for Some One"'
 
 # ---------------------------------------------------------------------------
 echo "12. NuGet package cache: detection and read-only mount"

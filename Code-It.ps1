@@ -251,6 +251,8 @@ $agentNameLower = $agentName.ToLower()
 # Git takes the committer only from GIT_COMMITTER_* or user.name/user.email, never from
 # GIT_AUTHOR_*, and the container has no user.name/user.email, so the run passes both.
 $onBehalfOf = $env:GIT_AUTHOR_NAME,$env:GIT_COMMITTER_NAME,"$(git -C $WorkDirToMount config --get user.name)" | Where-Object { $_ } | Select-Object -First 1
+# Inside an agent container GIT_AUTHOR_NAME is already "<agent> for <you>": keep only <you>
+$onBehalfOf = $onBehalfOf -replace '^(\S+ for )+', ''
 $gitAuthorName = "$agentName for $onBehalfOf"
 $gitAuthorEmail = $env:GIT_AUTHOR_EMAIL,"$(git -C $WorkDirToMount config --get user.email)" | Where-Object { $_ } | Select-Object -First 1
 if (-not $onBehalfOf -or -not $gitAuthorEmail) {
