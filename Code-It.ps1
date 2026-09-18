@@ -257,10 +257,7 @@ elseif (-not $buildImage -and -not ($validImages | Where-Object { $_ -and ($_ -e
 
 # Git author info
 $agentNameLower = $agentName.ToLower()
-# Git takes the committer only from GIT_COMMITTER_* or user.name/user.email, never from
-# GIT_AUTHOR_*, and the container has no user.name/user.email, so the run passes both.
 $onBehalfOf = $env:GIT_AUTHOR_NAME,$env:GIT_COMMITTER_NAME,"$(git -C $WorkDirToMount config --get user.name)" | Where-Object { $_ } | Select-Object -First 1
-# Inside an agent container GIT_AUTHOR_NAME is already "<agent> for <you>": keep only <you>
 $onBehalfOf = $onBehalfOf -replace '^(\S+ for )+', ''
 $gitAuthorName = "$agentName for $onBehalfOf"
 $gitAuthorEmail = $env:GIT_AUTHOR_EMAIL,"$(git -C $WorkDirToMount config --get user.email)" | Where-Object { $_ } | Select-Object -First 1
@@ -270,9 +267,7 @@ if (-not $onBehalfOf -or -not $gitAuthorEmail) {
 }
 
 # Locate the user's NuGet global packages cache (if any) to mount read-only.
-# Precedence per https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders :
-# the NUGET_PACKAGES environment variable, then the globalPackagesFolder setting in
-# the user-level NuGet.Config, then the default ~/.nuget/packages.
+# https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders
 $nugetPackages = ""
 if ($env:NUGET_PACKAGES -and (Test-Path -Path $env:NUGET_PACKAGES -PathType Container)) {
     $nugetPackages = $env:NUGET_PACKAGES
@@ -300,9 +295,6 @@ if ($env:NUGET_PACKAGES -and (Test-Path -Path $env:NUGET_PACKAGES -PathType Cont
     }
 }
 
-# If a cache was found, mount it read-only; the image's NuGet.Config registers the
-# mount point as a fallback package folder, so restores reuse host-cached packages
-# and the container can never write to the host cache.
 $nugetMountArgs = @()
 $nugetMountPrint = ""
 if ($nugetPackages) {
@@ -318,10 +310,7 @@ if ($nugetPackages) {
 if ($buildImage) {
     $dockerfileDir = (Resolve-Path $dockerfileDir).Path
     if ($rebuildImage) {
-        # Bump the "# last changed" cache-bust dates in the Dockerfile to today, so
-        # the agent install layers rebuild and update the agents.
-        # Rewrite the file whole: Get-Content/Set-Content would re-join lines with CRLF
-        # on Windows, putting carriage returns into the Dockerfile's heredoc scripts.
+        # Bump the "# last changed" cache-bust dates in the Dockerfile to force re-run of installations.
         $today = [DateTime]::Today.ToString('yyyy-MM-dd')
         $dockerfile = "$dockerfileDir/Dockerfile"
         $dockerfileText = [IO.File]::ReadAllText($dockerfile) -replace '# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}', "# last changed $today"
