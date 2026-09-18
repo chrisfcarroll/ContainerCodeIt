@@ -221,7 +221,10 @@ Assert "-buildImage with no Dockerfile fails" ($r.code -ne 0)
 $dfDir = Join-Path $tmp 'dfdir'
 $null = New-Item -ItemType Directory -Force -Path $dfDir
 $dfPath = Join-Path $dfDir 'Dockerfile'
-(Get-Content (Join-Path $scriptDir 'Dockerfile')) -replace '# last changed [0-9-]+', '# last changed 2000-01-01' | Set-Content $dfPath
+# Write the fixture with explicit LF: Set-Content would join lines with CRLF on Windows
+$dfOriginal = [IO.File]::ReadAllText((Join-Path $scriptDir 'Dockerfile')) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'
+$dfLF = $dfOriginal -replace "`r`n", "`n"
+[IO.File]::WriteAllText($dfPath, $dfLF)
 $today = [DateTime]::Today.ToString('yyyy-MM-dd')
 $r = Invoke-Scenario $codeIt (@('-rebuildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
 Assert "-rebuildImage exit code 0" ($r.code -eq 0)
@@ -230,6 +233,14 @@ Assert-Contains "rebuild implies build (no -buildImage needed)" $r.out '-t code-
 $df = Get-Content $dfPath -Raw
 Assert "Dockerfile dates bumped to today" ($df.Contains("# last changed $today"))
 Assert "old dates gone from Dockerfile" (-not $df.Contains('# last changed 2000-01-01'))
+Assert "rebuild leaves LF Dockerfile without carriage returns" (-not $df.Contains("`r"))
+Assert "rebuild changes only the dates" ($df -eq ($dfLF -replace '# last changed 2000-01-01', "# last changed $today"))
+$dfBytes = [IO.File]::ReadAllBytes($dfPath)
+Assert "rebuild writes no BOM" (-not ($dfBytes[0] -eq 0xEF -and $dfBytes[1] -eq 0xBB -and $dfBytes[2] -eq 0xBF))
+[IO.File]::WriteAllText($dfPath, ($dfLF -replace "`n", "`r`n"))
+$r = Invoke-Scenario $codeIt (@('-rebuildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
+$df = [IO.File]::ReadAllText($dfPath)
+Assert "rebuild keeps CRLF Dockerfile as CRLF" (-not ($df -replace "`r`n", '').Contains("`n"))
 # plain -buildImage leaves the dates untouched
 (Get-Content (Join-Path $scriptDir 'Dockerfile')) -replace '# last changed [0-9-]+', '# last changed 2000-01-01' | Set-Content $dfPath
 $r = Invoke-Scenario $codeIt (@('-buildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
