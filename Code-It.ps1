@@ -319,10 +319,13 @@ if ($buildImage) {
     $dockerfileDir = (Resolve-Path $dockerfileDir).Path
     if ($rebuildImage) {
         # Bump the "# last changed" cache-bust dates in the Dockerfile to today, so
-        # the agent install layers rebuild and update the agents
+        # the agent install layers rebuild and update the agents.
+        # Rewrite the file whole: Get-Content/Set-Content would re-join lines with CRLF
+        # on Windows, putting carriage returns into the Dockerfile's heredoc scripts.
         $today = [DateTime]::Today.ToString('yyyy-MM-dd')
-        (Get-Content "$dockerfileDir/Dockerfile") -replace '# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}', "# last changed $today" |
-            Set-Content "$dockerfileDir/Dockerfile"
+        $dockerfile = "$dockerfileDir/Dockerfile"
+        $dockerfileText = [IO.File]::ReadAllText($dockerfile) -replace '# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}', "# last changed $today"
+        [IO.File]::WriteAllText($dockerfile, $dockerfileText)
         "    Updated '# last changed' dates in $dockerfileDir/Dockerfile to $today"
     }
     & $runtime build -t "$image`:latest" $dockerfileDir
