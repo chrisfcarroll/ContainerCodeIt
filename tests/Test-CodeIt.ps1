@@ -149,7 +149,7 @@ Assert-Contains "uses docker runtime" $r.out 'Using container runtime: docker'
 Assert-Contains "defaults to opencode" $r.out 'CODE_AGENT="opencode"'
 Assert-Contains "docker run command" $r.out 'docker run -it'
 Assert-Contains "image name" $r.out 'code-it-alpine-dotnet:latest'
-Assert-Contains "work dir mount" $r.out "$scriptDir`:/repos"
+Assert-Contains "work dir mount" $r.out "$scriptDir`:/work"
 Assert-Contains "claude dir mount" $r.out '/.claude:/home/agent1/.claude'
 Assert-Contains "claude.json mount" $r.out '/.claude.json:/home/agent1/.claude.json'
 Assert-Contains "opencode mount" $r.out '/.local/share/opencode:/home/agent1/.local/share/opencode'

@@ -90,8 +90,8 @@ set -g history-limit 50000
 setw -g aggressive-resize on
 EOF
 RUN cat <<'EOF' >> ~/go.sh
-git config --global --add safe.directory /repos
-for d in /repos/*/ ; do git config --global --add safe.directory "$d" ; done
+git config --global --add safe.directory /work
+for d in /work/*/ ; do git config --global --add safe.directory "$d" ; done
 case "${CODE_AGENT:-opencode}" in
     opencode) agent_bin=/home/agent1/.opencode/bin/opencode ;;
     claude)   agent_bin=/home/agent1/.local/bin/claude ;;
@@ -127,9 +127,9 @@ RUN cat <<'EOF' > ~/.nuget/NuGet/NuGet.Config
   </packageSources>
 </configuration>
 EOF
-WORKDIR /repos
+WORKDIR /work
 # --------------------------------
-# Repos to work on can be mounted at runtime under /repos.
+# Repos to work on can be mounted at runtime under /work.
 # Also mount the state directories for whichever agent(s) you use, for up to 5 mounts:
 # 1. Repos directory
 # 2. ~/.claude directory (claude credentials, settings & memory)
@@ -145,7 +145,7 @@ WORKDIR /repos
 #                -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
 #                -e GIT_COMMITTER_NAME="Agent1 for $(git config --get user.name)" \
 #                -e GIT_COMMITTER_EMAIL="$(git config --get user.email)" \
-#                -v ~/repos:/repos \
+#                -v ~/repos:/work \
 #                -v ~/.config/code-it/.claude:/home/agent1/.claude \
 #                -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
 #                -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \

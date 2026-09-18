@@ -25,7 +25,7 @@
     - ~/.claude.json           : Claude OAuth session data, MCP configs, preferences
 
 .PARAMETER WorkDirToMount
-    Host directory path to mount as /repos in the container. Defaults to the current directory.
+    Host directory path to mount as /work in the container. Defaults to the current directory.
 
 .PARAMETER opencode
     Run OpenCode in the container (default). Alias: -o
@@ -346,7 +346,7 @@ if ($portsMap.Count -lt 2) {
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
                 -e GIT_COMMITTER_NAME=`"$gitAuthorName`" `
                 -e GIT_COMMITTER_EMAIL=`"$gitAuthorEmail`" `
-                -v `"$WorkDirToMount`:/repos`" `
+                -v `"$WorkDirToMount`:/work`" `
                 -v `"$saveDir/.claude`:/home/$agentNameLower/.claude`" `
                 -v `"$saveDir/.claude.json`:/home/$agentNameLower/.claude.json`" `
                 -v `"$saveDir/.local/share/opencode`:/home/$agentNameLower/.local/share/opencode`"$nugetMountPrint
@@ -364,7 +364,7 @@ if ($dryRun) {
             -e GIT_AUTHOR_EMAIL="$gitAuthorEmail" `
             -e GIT_COMMITTER_NAME="$gitAuthorName" `
             -e GIT_COMMITTER_EMAIL="$gitAuthorEmail" `
-            -v "$WorkDirToMount`:/repos" `
+            -v "$WorkDirToMount`:/work" `
             -v "$saveDir/.claude:/home/$agentNameLower/.claude" `
             -v "$saveDir/.claude.json:/home/$agentNameLower/.claude.json" `
             -v "$saveDir/.local/share/opencode:/home/$agentNameLower/.local/share/opencode" `

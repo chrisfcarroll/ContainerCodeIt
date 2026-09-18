@@ -46,7 +46,7 @@ In principal either powershell or bash scripts should work on any O/S.
 |---|---|---|---|
 | `--claude`, `-c` | `-claude`, `-c` | off | Run Claude Code |
 | `--opencode`, `-o` | `-opencode`, `-o` | on (default) | Run OpenCode |
-| `--work-dir` | `-WorkDirToMount` | `.` | Host path mounted at `/repos` |
+| `--work-dir` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image` | `-image` | `code-it-alpine-dotnet` | Image name |
 | `--build-image` | `-buildImage` | off | Build the image before running |
@@ -69,7 +69,7 @@ docker run -it --rm \
     -e CODE_AGENT=opencode \
     -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
     -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
-    -v ~/my-repos:/repos \
+    -v ~/my-repos:/work \
     -v ~/.config/code-it/.claude:/home/agent1/.claude \
     -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
     -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
@@ -108,7 +108,7 @@ The launcher scripts keep all agent state under one save dir (default `~/.config
 
 | Mount point | Purpose |
 |---|---|
-| `/repos` | Host directory containing git repos for the agent to work on |
+| `/work` | Host directory containing git repos for the agent to work on |
 | `/home/agent1/.claude` | Persists Claude credentials, settings, permissions, and memory |
 | `/home/agent1/.claude.json` | Persists Claude OAuth session data, MCP configs, and preferences |
 | `/home/agent1/.local/share/opencode` | Persists OpenCode data and auth |
