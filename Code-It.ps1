@@ -201,9 +201,7 @@ elseif (-not (Get-Command $runtime -EA Silent)) {
 "    Using code agent: $codeAgent"
 
 # Give the Apple container runtime enough memory for the agent to work with
-if ( $runtime -eq "container"){
-    $containerArgs="--memory 3g"
-}
+$containerArgs = if ($runtime -eq "container") { @('--memory', '3g') } else { @() }
 
 
 # Ensure required commands
@@ -242,6 +240,10 @@ if ($runtime -eq "docker") {
     $validImages = (docker images --format "{{.Repository}}:{{.Tag}}")
 } else {
     $validImages = (container image ls)
+}
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Could not list $runtime images. Is the $runtime daemon or service running?"
+    exit 1
 }
 Write-Verbose ([string]::join("`n", @("    $runtime images") + $validImages)).ToString()
 
@@ -318,6 +320,10 @@ if ($buildImage) {
         "    Updated '# last changed' dates in $dockerfileDir/Dockerfile to $today"
     }
     & $runtime build -t "$image`:latest" $dockerfileDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "$runtime build failed with exit code $LASTEXITCODE"
+        exit $LASTEXITCODE
+    }
 }
 
 # Handle port mappings
@@ -328,11 +334,11 @@ if ($portsMap.Count -gt 2) {
 # the Apple container runtime needs fixed ports)
 if ($portsMap.Count -lt 2) {
     $pad = if ($runtime -eq "docker") { @("0:3000", "0:3001") } else { @("3000:3000", "3001:3001") }
-    $portsMap = ($portsMap + $pad) | Select-Object -First 2
+    while ($portsMap.Count -lt 2) { $portsMap += $pad[$portsMap.Count] }
 }
 
 @"
-    $runtime run -it --rm -p $($portsMap[0]) -p $($portsMap[1]) `
+    $runtime run -it --rm -p $($portsMap[0]) -p $($portsMap[1]) $containerArgs `
                 -e CODE_AGENT=`"$codeAgent`" `
                 -e GIT_AUTHOR_NAME=`"$gitAuthorName`" `
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `

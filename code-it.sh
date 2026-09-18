@@ -89,6 +89,40 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # Absolute path of an existing directory, without realpath (absent on older macOS)
 abs_dir() { (CDPATH= cd -- "$1" && pwd); }
 
+# The globalPackagesFolder value in a NuGet.Config's <config> section, like an XML
+# parser would read it: ignores comments; attributes in any order, with either quote.
+nuget_config_global_packages_folder() {
+    awk '
+        function attr(el, name,    v) {
+            if (!match(el, "[ \t\n]" name "[ \t\n]*=[ \t\n]*(\"[^\"]*\"|\047[^\047]*\047)")) return ""
+            v = substr(el, RSTART, RLENGTH)
+            v = substr(v, index(v, "=") + 1)
+            sub(/^[ \t\n]*/, "", v)
+            return substr(v, 2, length(v) - 2)
+        }
+        { sub(/\r$/, ""); doc = doc $0 "\n" }
+        END {
+            while ((i = index(doc, "<!--")) > 0) {
+                j = index(substr(doc, i + 4), "-->")
+                doc = substr(doc, 1, i - 1) (j ? substr(doc, i + j + 6) : "")
+            }
+            if (!match(doc, /<config[ \t\n]*>/)) exit
+            doc = substr(doc, RSTART + RLENGTH)
+            if ((i = index(doc, "</config>")) > 0) doc = substr(doc, 1, i - 1)
+            while (match(doc, /<add[ \t\n][^>]*>/)) {
+                el = substr(doc, RSTART, RLENGTH)
+                doc = substr(doc, RSTART + RLENGTH)
+                if (tolower(attr(el, "key")) != "globalpackagesfolder") continue
+                v = attr(el, "value")
+                gsub(/&lt;/, "<", v); gsub(/&gt;/, ">", v)
+                gsub(/&quot;/, "\"", v); gsub(/&apos;/, "\047", v); gsub(/&amp;/, "\\&", v)
+                print v
+                exit
+            }
+        }
+    ' "$1"
+}
+
 # Defaults
 code_agent="opencode"
 work_dir_to_mount="."
@@ -262,9 +296,13 @@ echo "    Checking $image ..."
 
 # List existing images in a runtime-appropriate way
 if [[ "$runtime" == "docker" ]]; then
-    valid_images=$(docker images --format "{{.Repository}}:{{.Tag}}")
+    valid_images=$(docker images --format "{{.Repository}}:{{.Tag}}") || images_rc=$?
 else
-    valid_images=$(container image ls)
+    valid_images=$(container image ls) || images_rc=$?
+fi
+if [[ "${images_rc:-0}" != 0 ]]; then
+    echo "Warning: Could not list $runtime images. Is the $runtime daemon or service running?" >&2
+    exit 1
 fi
 
 if [[ "$build_image" == true ]]; then
@@ -307,8 +345,7 @@ else
     fi
     for nuget_config in "${nuget_configs[@]}"; do
         if [[ -f "$nuget_config" ]]; then
-            gpf=$(sed -n 's/.*<add[^>]*key="globalPackagesFolder"[^>]*value="\([^"]*\)".*/\1/p' "$nuget_config")
-            gpf=${gpf%%$'\n'*}
+            gpf=$(nuget_config_global_packages_folder "$nuget_config")
             if [[ -n "$gpf" && -d "$gpf" ]]; then
                 nuget_packages="$gpf"
                 break

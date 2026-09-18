@@ -47,8 +47,8 @@ mkdir -p "$stub_docker"
 cat > "$stub_docker/docker" <<'EOF'
 #!/bin/sh
 case "$1" in
-    images) echo "code-it-alpine-dotnet:latest" ;;
-    build)  echo "STUB-DOCKER-BUILD $*" ;;
+    images) [ -n "${STUB_IMAGES_FAIL:-}" ] && exit 1; echo "code-it-alpine-dotnet:latest" ;;
+    build)  [ -n "${STUB_BUILD_FAIL:-}" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
 esac
@@ -62,7 +62,7 @@ cat > "$stub_container/container" <<'EOF'
 case "$1" in
     image)  echo "code-it-alpine-dotnet  latest" ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
-    run)    echo "STUB-CONTAINER-RUN $*" ;;
+    run)    echo "STUB-CONTAINER-RUN $*"; printf '[%s]' "$@"; echo ;;
     *)      echo "stub container: $*" ;;
 esac
 EOF
@@ -159,6 +159,8 @@ assert_contains "non-macOS prefers docker" "$out" "Using container runtime: dock
 # Forced runtime
 out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" --runtime container "${common_args[@]}")
 assert_contains "--runtime container forces apple container" "$out" "Using container runtime: container"
+out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" --runtime container --work-dir "$script_dir" --save-dir "$save")
+assert_contains "container run gets --memory and 3g as separate arguments" "$out" "[--memory][3g]"
 # Invalid runtime
 PATH="$stub_docker:$PATH" "$code_it" --runtime bogus "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "--runtime bogus fails" "$?"
@@ -190,6 +192,9 @@ PATH="$stub_docker:$PATH" "$code_it" --dry-run --work-dir "$tmp/does-not-exist" 
 [[ "$?" != "0" ]]; assert "missing work dir fails" "$?"
 PATH="$stub_docker:$PATH" "$code_it" --image no-such-image "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "unknown image without --build-image fails" "$?"
+out=$(STUB_IMAGES_FAIL=1 PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" 2>&1)
+[[ "$?" != "0" ]]; assert "failure to list images fails" "$?"
+assert_contains "failure to list images asks if the runtime is running" "$out" "Could not list docker images"
 
 # ---------------------------------------------------------------------------
 echo "10. Build image"
@@ -199,6 +204,9 @@ assert_contains "docker build invoked" "$out" "STUB-DOCKER-BUILD"
 assert_contains "build tags the image" "$out" "-t code-it-alpine-dotnet:latest"
 PATH="$stub_docker:$PATH" "$code_it" --build-image --dockerfile-dir "$tmp" "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "--build-image with no Dockerfile fails" "$?"
+out=$(STUB_BUILD_FAIL=1 PATH="$stub_docker:$PATH" "$code_it" --build-image --work-dir "$script_dir" --save-dir "$save" 2>&1)
+[[ "$?" != "0" ]]; assert "failed build exits non-zero" "$?"
+[[ "$out" != *STUB-DOCKER-RUN* ]]; assert "failed build does not run the container" "$?"
 
 # ---------------------------------------------------------------------------
 echo "10b. Rebuild image (updates the agents)"
@@ -259,6 +267,27 @@ cat > "$fakehome/.nuget/NuGet/NuGet.Config" <<EOF
 EOF
 out=$(HOME="$fakehome" NUGET_PACKAGES= PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert_contains "globalPackagesFolder from NuGet.Config mounted" "$out" "$nuget_cache:/home/agent1/.nuget/packages-host:ro"
+
+# ... read as XML: attributes in any order or quote style, across lines, CRLF, entities
+mkdir -p "$tmp/nuget & cache"
+printf '<configuration>\r\n  <config>\r\n    <add\r\n      value='"'"'%s'"'"'\r\n      key="globalPackagesFolder" />\r\n  </config>\r\n</configuration>\r\n' \
+    "$tmp/nuget &amp; cache" > "$fakehome/.nuget/NuGet/NuGet.Config"
+out=$(HOME="$fakehome" NUGET_PACKAGES= PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+assert_contains "globalPackagesFolder read like XML" "$out" "$tmp/nuget & cache:/home/agent1/.nuget/packages-host:ro"
+
+# ... but not from a comment, nor from outside the <config> section
+cat > "$fakehome/.nuget/NuGet/NuGet.Config" <<EOF
+<configuration>
+  <packageSources>
+    <add key="globalPackagesFolder" value="$nuget_cache" />
+  </packageSources>
+  <config>
+    <!-- <add key="globalPackagesFolder" value="$nuget_cache" /> -->
+  </config>
+</configuration>
+EOF
+out=$(HOME="$fakehome" NUGET_PACKAGES= PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+[[ "$out" != *packages-host* ]]; assert "globalPackagesFolder ignored in comments and outside <config>" "$?"
 rm -f "$fakehome/.nuget/NuGet/NuGet.Config"
 
 # (c) default ~/.nuget/packages

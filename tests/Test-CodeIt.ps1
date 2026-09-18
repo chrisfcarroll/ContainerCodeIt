@@ -45,6 +45,8 @@ $null = New-Item -ItemType Directory -Force -Path $stubDocker
 if ($onWindows) {
     Set-Content -Path (Join-Path $stubDocker 'docker.cmd') -Value @'
 @echo off
+if "%~1"=="images" if defined STUB_IMAGES_FAIL exit /b 1
+if "%~1"=="build" if defined STUB_BUILD_FAIL exit /b 3
 if "%~1"=="images" echo code-it-alpine-dotnet:latest& goto :eof
 if "%~1"=="build" echo STUB-DOCKER-BUILD %*& goto :eof
 if "%~1"=="run" echo STUB-DOCKER-RUN %*& goto :eof
@@ -54,8 +56,8 @@ echo stub docker: %*
     Set-Content -Path (Join-Path $stubDocker 'docker') -Value @'
 #!/bin/sh
 case "$1" in
-    images) echo "code-it-alpine-dotnet:latest" ;;
-    build)  echo "STUB-DOCKER-BUILD $*" ;;
+    images) [ -n "$STUB_IMAGES_FAIL" ] && exit 1; echo "code-it-alpine-dotnet:latest" ;;
+    build)  [ -n "$STUB_BUILD_FAIL" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
 esac
@@ -80,7 +82,7 @@ echo stub container: %*
 case "$1" in
     image)  echo "code-it-alpine-dotnet  latest" ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
-    run)    echo "STUB-CONTAINER-RUN $*" ;;
+    run)    echo "STUB-CONTAINER-RUN $*"; printf '[%s]' "$@"; echo ;;
     *)      echo "stub container: $*" ;;
 esac
 '@
@@ -197,6 +199,11 @@ Assert "-runtime container exit code 0" ($r.code -eq 0)
 Assert-Contains "-runtime container forces apple container" $r.out 'Using container runtime: container'
 Assert-Contains "container run command" $r.out 'container run -it'
 Assert-Contains "container default fixed ports" $r.out '-p 3000:3000 -p 3001:3001'
+Assert-Contains "container dry-run shows memory limit" $r.out '--memory 3g'
+if (-not $onWindows) {
+    $r = Invoke-Scenario $codeIt @('-runtime', 'container', '-WorkDirToMount', $scriptDir, '-saveDir', $save) "$stubContainer$sep$stubPath"
+    Assert-Contains "container run gets --memory and 3g as separate arguments" $r.out '[--memory][3g]'
+}
 $r = Invoke-Scenario $codeIt (@('-runtime', 'bogus') + $commonArgs) $stubPath
 Assert "-runtime bogus fails" ($r.code -ne 0)
 
@@ -206,6 +213,10 @@ $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', (Join-Path $tmp 'do
 Assert "missing work dir fails" ($r.code -ne 0)
 $r = Invoke-Scenario $codeIt (@('-image', 'no-such-image') + $commonArgs) $stubPath
 Assert "unknown image without -buildImage fails" ($r.code -ne 0)
+$env:STUB_IMAGES_FAIL = '1'
+try { $r = Invoke-Scenario $codeIt $commonArgs $stubPath } finally { $env:STUB_IMAGES_FAIL = $null }
+Assert "failure to list images fails" ($r.code -ne 0)
+Assert-Contains "failure to list images asks if the runtime is running" $r.out 'Could not list docker images'
 
 # ---------------------------------------------------------------------------
 "9. Build image"
@@ -215,6 +226,11 @@ Assert-Contains "docker build invoked" $r.out 'STUB-DOCKER-BUILD'
 Assert-Contains "build tags the image" $r.out '-t code-it-alpine-dotnet:latest'
 $r = Invoke-Scenario $codeIt (@('-buildImage', '-dockerfileDir', $tmp) + $commonArgs) $stubPath
 Assert "-buildImage with no Dockerfile fails" ($r.code -ne 0)
+$env:STUB_BUILD_FAIL = '1'
+try { $r = Invoke-Scenario $codeIt @('-buildImage', '-WorkDirToMount', $scriptDir, '-saveDir', $save) $stubPath }
+finally { $env:STUB_BUILD_FAIL = $null }
+Assert "failed build exits non-zero" ($r.code -ne 0)
+Assert "failed build does not run the container" (-not $r.out.Contains('STUB-DOCKER-RUN'))
 
 # ---------------------------------------------------------------------------
 "9b. Rebuild image (updates the agents)"
@@ -252,6 +268,8 @@ Assert "-buildImage leaves dates unchanged" ($df.Contains('# last changed 2000-0
 "10. Custom options"
 $r = Invoke-ScenarioCommand "& '$codeIt' -portsMap '8000:3000','8001:3001' -dryRun -WorkDirToMount '$scriptDir' -saveDir '$save'" $stubPath
 Assert-Contains "custom ports" $r.out '-p 8000:3000 -p 8001:3001'
+$r = Invoke-ScenarioCommand "& '$codeIt' -portsMap '8000:3000' -dryRun -WorkDirToMount '$scriptDir' -saveDir '$save'" $stubPath
+Assert-Contains "single port padded with the second default" $r.out '-p 8000:3000 -p 0:3001'
 $r = Invoke-Scenario $codeIt (@('-agentName', 'MyAgent') + $commonArgs) $stubPath
 Assert-Contains "agent name lowercased in mounts" $r.out '/home/myagent/.claude'
 Assert-Contains "agent name in git author" $r.out 'GIT_AUTHOR_NAME="MyAgent for'
@@ -300,6 +318,24 @@ try {
 "@ | Set-Content -Path "$fakeHome/.nuget/NuGet/NuGet.Config"
     $r = Invoke-Scenario $codeIt $commonArgs $stubPath
     Assert-Contains "globalPackagesFolder from NuGet.Config mounted" $r.out "$nugetCache`:/home/agent1/.nuget/packages-host:ro"
+    @"
+<configuration>
+  <config>
+    <add value="$nugetCache" key="globalPackagesFolder" />
+  </config>
+</configuration>
+"@ | Set-Content -Path "$fakeHome/.nuget/NuGet/NuGet.Config"
+    $r = Invoke-Scenario $codeIt $commonArgs $stubPath
+    Assert-Contains "globalPackagesFolder with value before key mounted" $r.out "$nugetCache`:/home/agent1/.nuget/packages-host:ro"
+    @"
+<configuration>
+  <config>
+    <!-- <add key="globalPackagesFolder" value="$nugetCache" /> -->
+  </config>
+</configuration>
+"@ | Set-Content -Path "$fakeHome/.nuget/NuGet/NuGet.Config"
+    $r = Invoke-Scenario $codeIt $commonArgs $stubPath
+    Assert "commented-out globalPackagesFolder ignored" (-not $r.out.Contains('packages-host'))
     Remove-Item "$fakeHome/.nuget/NuGet/NuGet.Config"
 
     # (c) default ~/.nuget/packages
