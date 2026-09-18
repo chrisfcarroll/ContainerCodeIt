@@ -1,6 +1,6 @@
 # ContainerCodeIt
 
-Sandbox your agentic AI properly, in a container with access to a single working directory, where it can work free of permissions interruption. 
+Sandbox your agentic AI properly, in a container, with access to a single working directory, where it can work free of permissions interruption. 
 
 The default Dockerfile includes **OpenCode** and **Claude Code** agents.
 
