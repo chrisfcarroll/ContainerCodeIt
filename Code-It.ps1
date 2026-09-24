@@ -63,6 +63,24 @@
     once without port collisions), @("3000:3000","3001:3001") for the Apple container
     runtime. Maximum of 2 port mappings supported; additional mappings are ignored.
 
+.PARAMETER prompt
+    Opens the agent with this text as its first prompt. A leading bare argument means the
+    same thing, so `.\Code-It.ps1 -c "explain this repo"` is equivalent.
+
+.PARAMETER headless
+    Runs the agent in the foreground rather than in tmux, with no TTY allocated. With
+    -prompt the agent answers, exits, and the container shuts down, exiting with the
+    agent's exit code.
+
+.PARAMETER agentArgs
+    Any arguments this script does not recognise are passed to the coding agent verbatim,
+    e.g. `.\Code-It.ps1 -c --continue --model opus`. PowerShell has no usable `--`
+    end-of-parameters token for scripts, so unlike code-it.sh no separator is needed -
+    and none works. A short agent flag that PowerShell reads as one of this script's own
+    parameters (`-p` matches both -portsMap and -prompt) is rejected before the script
+    runs: spell it in full, `--print`, or pass it as `-agentArgs '-p','...'`.
+    See https://code.claude.com/docs/en/cli-reference and https://opencode.ai/docs/cli/
+
 .PARAMETER agentName
     Name of the agent running in the container. Used for Git author attribution and home
     directory naming. This must match the USER set in the Dockerfile for your image.
@@ -87,7 +105,23 @@
     .\Code-It.ps1 -portsMap @("8000:3000", "8001:3001")
     Runs the container with custom port mappings.
 
+.EXAMPLE
+    .\Code-It.ps1 -c "explain this repo"
+    Opens Claude Code with that opening prompt, and stays interactive.
+
+.EXAMPLE
+    .\Code-It.ps1 -c -headless "run the tests and fix any failures"
+    Runs Claude Code headlessly: the agent works, prints its answer, and the container
+    shuts down.
+
+.EXAMPLE
+    .\Code-It.ps1 -c --continue --model opus
+    Passes those flags straight through to Claude Code.
+
 .NOTES
+    - The prompt and any pass-through arguments are translated into each agent's own
+      command line: -prompt becomes `claude PROMPT` or `opencode --prompt PROMPT`, and
+      with -headless it becomes `claude -p PROMPT` or `opencode run PROMPT`
     - Git author name and email are automatically captured from environment or git config
     - Volume mounts preserve both Claude and OpenCode state between container runs, so you
       can destroy the container and create a new one without logging in again
@@ -115,7 +149,10 @@
 #   │ ~/.local/share/opencode/ │ OpenCode data and auth (auth.json, etc.)                       │
 #   └──────────────────────────┴────────────────────────────────────────────────────────────────┘
 
-[CmdletBinding()]
+# PositionalBinding is off so that arguments meant for the coding agent, which often
+# look like parameters (e.g. --continue), all land in $agentArgs instead of being bound
+# positionally. -WorkDirToMount therefore has to be named.
+[CmdletBinding(PositionalBinding = $false)]
 param (
     [string]$WorkDirToMount = (Resolve-Path '.').Path,
     [Alias('c')]
@@ -127,11 +164,17 @@ param (
     [switch]$buildImage     = $false,
     [switch]$rebuildImage   = $false,
     [string]$dockerfileDir  = $PSScriptRoot,
+    [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$runtime        = "",
     [string[]]$portsMap     = @(),
     [string]$agentName      = "Agent1",
+    [string]$prompt         = "",
+    [switch]$headless       = $false,
+    [Alias('h')]
     [switch]$help           = $false,
-    [switch]$dryRun         = $false
+    [switch]$dryRun         = $false,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$agentArgs    = @()
 )
 
 # Handle help request
@@ -146,6 +189,17 @@ if ($claude -and $opencode) {
     exit 1
 }
 $codeAgent = if ($claude) { "claude" } else { "opencode" }
+
+# A leading bare argument is the agent's opening prompt, as in `.\Code-It.ps1 -c "do it"`;
+# anything else goes to the agent verbatim
+if (-not $prompt -and $agentArgs.Count -ge 1 -and -not $agentArgs[0].StartsWith('-')) {
+    $prompt = $agentArgs[0]
+    $agentArgs = @($agentArgs | Select-Object -Skip 1)
+    if (Test-Path -Path $prompt -PathType Container -EA Silent) {
+        Write-Warning "Passing '$prompt' to the agent as its prompt. To choose the directory to work on, use -WorkDirToMount."
+    }
+}
+$promptSet = [bool]$prompt
 
 # -rebuildImage implies -buildImage
 if ($rebuildImage) { $buildImage = $true }
@@ -337,9 +391,43 @@ if ($portsMap.Count -lt 2) {
     while ($portsMap.Count -lt 2) { $portsMap += $pad[$portsMap.Count] }
 }
 
+# Translate the prompt, and any pass-through arguments, into the chosen agent's own
+# command line, which the container entrypoint hands to the agent. See
+#   https://code.claude.com/docs/en/cli-reference
+#   https://opencode.ai/docs/cli/
+$agentCmd = @()
+if ($codeAgent -eq "claude") {
+    # claude [flags] [PROMPT], and -p answers the prompt without going interactive
+    if ($headless -and $promptSet) { $agentCmd += '-p' }
+    $agentCmd += $agentArgs
+    if ($promptSet) { $agentCmd += $prompt }
+}
+elseif ($headless) {
+    # opencode run [flags] [MESSAGE] answers without starting the TUI
+    $agentCmd += 'run'
+    $agentCmd += $agentArgs
+    if ($promptSet) { $agentCmd += $prompt }
+}
+else {
+    # opencode --prompt MESSAGE opens the TUI with the message already sent
+    if ($promptSet) { $agentCmd += @('--prompt', $prompt) }
+    $agentCmd += $agentArgs
+}
+
+# Headless runs are one-shot: no tmux and no TTY, so the container exits when the
+# agent does, and its output can be piped or redirected.
+$ttyArgs     = if ($headless) { @('-i') }                        else { @('-it') }
+$headlessEnv = if ($headless) { @('-e', 'CODE_AGENT_HEADLESS=1') } else { @() }
+$headlessEnvPrint = if ($headless) { "`n                -e CODE_AGENT_HEADLESS=1" } else { "" }
+
+$agentCmdPrint = ($agentCmd | ForEach-Object {
+    if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+}) -join ' '
+if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
+
 @"
-    $runtime run -it --rm -p $($portsMap[0]) -p $($portsMap[1]) $containerArgs `
-                -e CODE_AGENT=`"$codeAgent`" `
+    $runtime run $ttyArgs --rm -p $($portsMap[0]) -p $($portsMap[1]) $containerArgs `
+                -e CODE_AGENT=`"$codeAgent`"$headlessEnvPrint `
                 -e GIT_AUTHOR_NAME=`"$gitAuthorName`" `
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
                 -e GIT_COMMITTER_NAME=`"$gitAuthorName`" `
@@ -348,15 +436,16 @@ if ($portsMap.Count -lt 2) {
                 -v `"$saveDir/.claude`:/home/$agentNameLower/.claude`" `
                 -v `"$saveDir/.claude.json`:/home/$agentNameLower/.claude.json`" `
                 -v `"$saveDir/.local/share/opencode`:/home/$agentNameLower/.local/share/opencode`"$nugetMountPrint
-            $image`:latest
+            $image`:latest$agentCmdPrint
 "@
 
 if ($dryRun) {
     exit 0
 }
 
-& $runtime run -it --rm -p $($portsMap[0]) -p $($portsMap[1]) `
+& $runtime run $ttyArgs --rm -p $($portsMap[0]) -p $($portsMap[1]) `
             $containerArgs `
+            $headlessEnv `
             -e CODE_AGENT="$codeAgent" `
             -e GIT_AUTHOR_NAME="$gitAuthorName" `
             -e GIT_AUTHOR_EMAIL="$gitAuthorEmail" `
@@ -367,4 +456,4 @@ if ($dryRun) {
             -v "$saveDir/.claude.json:/home/$agentNameLower/.claude.json" `
             -v "$saveDir/.local/share/opencode:/home/$agentNameLower/.local/share/opencode" `
             $nugetMountArgs `
-    $image`:latest
+    $image`:latest $agentCmd

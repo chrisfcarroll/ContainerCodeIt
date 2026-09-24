@@ -137,7 +137,7 @@ $commonArgs = @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $save)
 
 # ---------------------------------------------------------------------------
 "1. Parse checks"
-foreach ($f in @('Code-It.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1')) {
+foreach ($f in @('Code-It.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
     $parseErrors = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptDir $f), [ref]$null, [ref]$parseErrors)
     Assert "parses: $f" ($parseErrors.Count -eq 0)
@@ -352,6 +352,77 @@ try {
 } finally {
     Restore-NugetTestEnv
 }
+
+# ---------------------------------------------------------------------------
+"12. Prompt and agent arguments"
+# A leading bare argument, or -prompt, is the opening prompt, spelled each agent's way
+$r = Invoke-Scenario $codeIt (@('-c','explain this repo') + $commonArgs) $stubPath
+Assert "bare prompt exit code 0" ($r.code -eq 0)
+Assert-Contains "claude: bare prompt appended to the image" $r.out 'code-it-alpine-dotnet:latest "explain this repo"'
+$r = Invoke-Scenario $codeIt (@('-c','-prompt','explain this repo') + $commonArgs) $stubPath
+Assert-Contains "claude: -prompt is the same as a bare prompt" $r.out 'code-it-alpine-dotnet:latest "explain this repo"'
+$r = Invoke-Scenario $codeIt (@('-o','explain this repo') + $commonArgs) $stubPath
+Assert-Contains "opencode: prompt becomes --prompt" $r.out 'code-it-alpine-dotnet:latest --prompt "explain this repo"'
+
+# No prompt and no agent args: nothing is appended, and the run stays interactive
+$r = Invoke-Scenario $codeIt $commonArgs $stubPath
+Assert "no prompt appends nothing" ($r.out.TrimEnd().EndsWith('code-it-alpine-dotnet:latest'))
+Assert-Contains "interactive runs allocate a TTY" $r.out 'docker run -it'
+Assert "interactive runs are not headless" (-not $r.out.Contains('CODE_AGENT_HEADLESS'))
+
+# -headless: one-shot, no TTY, and the agent's non-interactive form
+$r = Invoke-Scenario $codeIt (@('-c','-headless','fix the build') + $commonArgs) $stubPath
+Assert-Contains "claude -headless uses -p" $r.out 'code-it-alpine-dotnet:latest -p "fix the build"'
+Assert-Contains "-headless passes CODE_AGENT_HEADLESS" $r.out '-e CODE_AGENT_HEADLESS=1'
+Assert-Contains "-headless allocates no TTY" $r.out 'docker run -i --rm'
+$r = Invoke-Scenario $codeIt (@('-o','-headless','fix the build') + $commonArgs) $stubPath
+Assert-Contains "opencode -headless uses run" $r.out 'code-it-alpine-dotnet:latest run "fix the build"'
+
+# Unrecognised arguments go to the agent verbatim: PowerShell has no usable `--`
+$r = Invoke-Scenario $codeIt (@('-c') + $commonArgs + @('--continue','--model','opus')) $stubPath
+Assert-Contains "unrecognised flags pass through" $r.out 'code-it-alpine-dotnet:latest --continue --model opus'
+$r = Invoke-Scenario $codeIt (@('-c','-headless','-prompt','tidy') + $commonArgs + @('--max-turns','5')) $stubPath
+Assert-Contains "agent flags precede the prompt for claude" $r.out 'code-it-alpine-dotnet:latest -p --max-turns 5 tidy'
+$r = Invoke-Scenario $codeIt (@('-o','-headless','-prompt','tidy') + $commonArgs + @('--model','opus')) $stubPath
+Assert-Contains "agent flags follow run for opencode" $r.out 'code-it-alpine-dotnet:latest run --model opus tidy'
+# -headless without a prompt leaves the agent command to the caller. Short agent flags
+# that PowerShell reads as one of this script's own parameters (-p) have to be spelled out.
+$r = Invoke-Scenario $codeIt (@('-c','-headless') + $commonArgs + @('--print','count the files')) $stubPath
+Assert-Contains "-headless with no prompt adds no -p of its own" $r.out 'code-it-alpine-dotnet:latest --print "count the files"'
+$r = Invoke-Scenario $codeIt (@('-c','-headless') + $commonArgs + @('-p','count the files')) $stubPath
+Assert "an agent flag that collides with a parameter prefix is rejected, not silently bound" ($r.code -ne 0)
+
+# The prompt reaches the container as a single argument
+$r = Invoke-Scenario $codeIt (@('-c','-runtime','container','explain this repo','-WorkDirToMount',$scriptDir,'-saveDir',$save)) "$stubContainer$sep$stubPath"
+Assert-Contains "prompt is passed as one argument" $r.out '[code-it-alpine-dotnet:latest][explain this repo]'
+$r = Invoke-Scenario $codeIt (@('-c','-runtime','container','-headless','fix it','-WorkDirToMount',$scriptDir,'-saveDir',$save)) "$stubContainer$sep$stubPath"
+Assert-Contains "headless run passes -i" $r.out '[-i][--rm]'
+Assert-Contains "headless run passes the prompt after -p" $r.out '[code-it-alpine-dotnet:latest][-p][fix it]'
+
+# The alias scripts forward prompts and agent flags
+$r = Invoke-Scenario (Join-Path $scriptDir 'Claude-It.ps1') (@('explain this repo') + $commonArgs) $stubPath
+Assert-Contains "Claude-It.ps1 forwards a prompt" $r.out 'code-it-alpine-dotnet:latest "explain this repo"'
+$r = Invoke-Scenario (Join-Path $scriptDir 'OpenCode-It.ps1') ($commonArgs + @('--model','opus')) $stubPath
+Assert-Contains "OpenCode-It.ps1 forwards agent flags" $r.out 'code-it-alpine-dotnet:latest --model opus'
+
+# ---------------------------------------------------------------------------
+"13. PowerShell tab completion"
+$completion = Join-Path $scriptDir 'completions/CodeItCompletion.ps1'
+$completerTest = @"
+. '$completion'
+function Complete([string]`$line) {
+    `$r = TabExpansion2 `$line `$line.Length
+    (`$r.CompletionMatches | ForEach-Object { `$_.CompletionText }) -join ' '
+}
+"CLAUDE:"   + (Complete "& '$codeIt' -claude -agentArgs --mod")
+"OPENCODE:" + (Complete "& '$codeIt' -agentArgs --se")
+"RUNTIME:"  + (Complete "& '$codeIt' -runtime ")
+"@
+$r = Invoke-ScenarioCommand $completerTest $stubPath
+Assert "completion script loads" ($r.code -eq 0 -or $null -eq $r.code)
+Assert-Contains "-agentArgs completes claude flags" $r.out 'CLAUDE:--model'
+Assert-Contains "-agentArgs completes opencode flags" $r.out 'OPENCODE:--session'
+Assert-Contains "-runtime completes its values" $r.out 'RUNTIME:docker container'
 
 # ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $tmp -EA Silent

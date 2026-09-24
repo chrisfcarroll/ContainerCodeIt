@@ -90,6 +90,11 @@ set -g history-limit 50000
 setw -g aggressive-resize on
 EOF
 RUN cat <<'EOF' >> ~/go.sh
+#!/usr/bin/env zsh
+# Arguments given to the container after the image name are passed straight to the
+# coding agent, so the launcher scripts can hand it a prompt or its own flags.
+# With CODE_AGENT_HEADLESS=1 the agent runs in the foreground instead of in tmux:
+# it answers, exits, and the container exits with the agent's exit code.
 git config --global --add safe.directory /work
 for d in /work/*/ ; do git config --global --add safe.directory "$d" ; done
 case "${CODE_AGENT:-opencode}" in
@@ -97,7 +102,13 @@ case "${CODE_AGENT:-opencode}" in
     claude)   agent_bin=/home/agent1/.local/bin/claude ;;
     *)        echo "Defaulting to opencode" ; agent_bin=/home/agent1/.opencode/bin/opencode ;;
 esac
-tmux -u new-session -d ; tmux -u new-session "$agent_bin"
+if [ "${CODE_AGENT_HEADLESS:-}" = "1" ] ; then
+    exec "$agent_bin" "$@"
+fi
+# tmux takes one shell-command string, so quote the agent and its arguments into one
+agent_cmd=${(q)agent_bin}
+for arg in "$@" ; do agent_cmd="$agent_cmd ${(q)arg}" ; done
+tmux -u new-session -d ; tmux -u new-session "$agent_cmd"
 EOF
 RUN chmod a+x ~/go.sh
 RUN mkdir -p ~/.config/opencode
@@ -159,4 +170,6 @@ ENV GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL
 #
 RUN if [ -n "$GIT_AUTHOR_NAME"  ] ; then git config --global user.name "Agent1 for $GIT_AUTHOR_NAME" ; fi
 RUN if [ -n "$GIT_AUTHOR_EMAIL" ] ; then git config --global user.email "$GIT_AUTHOR_EMAIL" ; fi
-ENTRYPOINT ["zsh", "-c", "/home/agent1/go.sh"]
+# Run go.sh directly, not via `zsh -c`, so that arguments passed to the container
+# after the image name arrive as "$@" and can be forwarded to the coding agent.
+ENTRYPOINT ["/home/agent1/go.sh"]

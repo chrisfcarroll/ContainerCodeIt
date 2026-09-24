@@ -1,0 +1,81 @@
+#compdef code-it.sh claude-it.sh opencode-it.sh
+# Zsh completion for code-it.sh, claude-it.sh and opencode-it.sh.
+#
+# Install by putting this directory on your fpath before compinit, e.g. in ~/.zshrc:
+#     fpath=(/path/to/ContainerCodeIt/completions $fpath)
+#     autoload -Uz compinit && compinit
+#
+# Completes the launcher's own options, and, after `--`, the flags of whichever
+# coding agent the command line selects: claude-it.sh (or -c) completes Claude Code
+# flags, opencode-it.sh (or -o, the default) completes OpenCode flags.
+#     https://code.claude.com/docs/en/cli-reference
+#     https://opencode.ai/docs/cli/
+
+_code_it() {
+    local cur prev agent=opencode seen_dashdash=0 i
+    local -a opts
+
+    cur=${words[CURRENT]}
+    prev=${words[CURRENT-1]}
+
+    # Which agent's flags to offer: the alias script chooses it, a later -c/-o wins
+    case ${words[1]} in
+        (*claude-it*) agent=claude ;;
+    esac
+    for (( i = 2; i < CURRENT; i++ )); do
+        case ${words[i]} in
+            (--claude|-c)   agent=claude ;;
+            (--opencode|-o) agent=opencode ;;
+            (--)            seen_dashdash=1 ;;
+        esac
+    done
+
+    if (( seen_dashdash )); then
+        if [[ $agent == claude ]]; then
+            # The flags people reach for most, not the full list
+            case $prev in
+                (--model|--fallback-model)
+                    opts=(opus sonnet haiku claude-opus-5 claude-sonnet-5 claude-haiku-4-5) ;;
+                (--permission-mode)
+                    opts=(default acceptEdits plan auto dontAsk bypassPermissions manual) ;;
+                (--effort)        opts=(low medium high xhigh max) ;;
+                (--output-format) opts=(text json stream-json) ;;
+                (--add-dir|--settings|--mcp-config) _files; return ;;
+                (*) opts=(
+                        --print -p --continue -c --resume -r --fork-session --model
+                        --fallback-model --effort --agent --permission-mode
+                        --dangerously-skip-permissions --allowed-tools --disallowed-tools
+                        --add-dir --append-system-prompt --settings --mcp-config
+                        --output-format --max-turns --max-budget-usd --verbose --debug --ide
+                    ) ;;
+            esac
+        else
+            case $prev in
+                (--format)   opts=(default json) ;;
+                (--file|-f)  _files; return ;;
+                (--dir)      _files -/; return ;;
+                (*) opts=(
+                        run --continue -c --session -s --fork --prompt --model -m
+                        --agent --auto --port --hostname --share --file -f --format
+                        --title --thinking --variant --dir
+                    ) ;;
+            esac
+        fi
+        compadd -- $opts
+        return
+    fi
+
+    case $prev in
+        (--work-dir|--save-dir|--dockerfile-dir) _files -/; return ;;
+        (--runtime)    compadd -- docker container; return ;;
+        (--image)      compadd -- code-it-alpine-dotnet; return ;;
+        (--agent-name) compadd -- Agent1; return ;;
+        (--prompt|--ports) return ;;   # free text: leave it to the user
+    esac
+
+    compadd -- --opencode -o --claude -c --prompt --headless --work-dir --save-dir \
+        --image --build-image --rebuild-image --dockerfile-dir --runtime --ports \
+        --agent-name --dry-run --help -h --
+}
+
+_code_it "$@"

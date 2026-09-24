@@ -46,6 +46,9 @@ In principal either powershell or bash scripts should work on any O/S.
 |---|---|---|---|
 | `--claude`, `-c` | `-claude`, `-c` | off | Run Claude Code |
 | `--opencode`, `-o` | `-opencode`, `-o` | on (default) | Run OpenCode |
+| `--prompt`, or a bare argument | `-prompt`, or a bare argument | none | Opening prompt for the agent |
+| `--headless` | `-headless` | off | Run the agent one-shot in the foreground instead of in tmux: no TTY, and the container exits with the agent's exit code |
+| `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
 | `--work-dir` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image` | `-image` | `code-it-alpine-dotnet` | Image name |
@@ -56,6 +59,76 @@ In principal either powershell or bash scripts should work on any O/S.
 | `--ports` | `-portsMap` | `0:3000` `0:3001` (docker); `3000:3000` `3001:3001` (container) | Port mappings (max 2); host port 0 auto-assigns |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
 | `--dry-run` | `-dryRun` | off | Print the run command without executing |
+
+## Prompts and agent flags
+
+Anything you want the coding agent itself to see can be passed through the launcher.
+
+```bash
+./code-it.sh -c "explain this repo"        # opens Claude Code with that first prompt
+./claude-it.sh "explain this repo"         # the same, via the alias script
+
+# One-shot: the agent answers the prompt, exits, and the container shuts down
+./code-it.sh -c --headless "run the tests and fix any failures"
+./code-it.sh -o --headless "summarise the last 10 commits" > summary.txt
+
+# Everything after -- goes to the agent verbatim
+./claude-it.sh -- --continue --model opus
+./claude-it.sh --headless "tidy the imports" -- --max-turns 5
+```
+
+```powershell
+.\Code-It.ps1 -c "explain this repo"
+.\Code-It.ps1 -c -headless "run the tests and fix any failures"
+
+# PowerShell has no usable `--` for scripts, so agent flags need no separator:
+# anything Code-It.ps1 does not recognise is passed to the agent
+.\Claude-It.ps1 --continue --model opus
+.\Claude-It.ps1 -headless -prompt "tidy the imports" --max-turns 5
+```
+
+In PowerShell a bare argument is now the prompt, so `-WorkDirToMount` is no longer bound
+positionally: pass it by name, `.\Code-It.ps1 -WorkDirToMount ~/my-repos`. And a short
+agent flag that PowerShell reads as one of the script's own parameters (`-p` matches both
+`-portsMap` and `-prompt`) is rejected before the script runs: spell it in full, `--print`,
+or pass it as `-agentArgs '-p','...'`. `code-it.sh` has no such problem: use `--`.
+
+The launcher translates the prompt into each agent's own command line
+([Claude Code](https://code.claude.com/docs/en/cli-reference),
+[OpenCode](https://opencode.ai/docs/cli/)):
+
+| | interactive | `--headless` |
+|---|---|---|
+| Claude Code | `claude PROMPT` | `claude -p PROMPT` |
+| OpenCode | `opencode --prompt PROMPT` | `opencode run PROMPT` |
+
+Interactively the agent still runs inside tmux. With `--headless` it runs in the
+foreground with no TTY allocated (`docker run -i`), so output can be piped or redirected
+and the container's exit code is the agent's.
+
+## Tab completion
+
+The `completions/` directory completes the launchers' own options, and, after `--`, the
+flags of whichever agent is selected — `claude-it.sh` completes Claude Code flags,
+`opencode-it.sh` completes OpenCode flags. Edit the flag lists in those files to add your
+own favourites.
+
+```bash
+# bash: in ~/.bashrc
+source /path/to/ContainerCodeIt/completions/code-it.bash
+```
+
+```zsh
+# zsh: in ~/.zshrc, before compinit
+fpath=(/path/to/ContainerCodeIt/completions $fpath)
+autoload -Uz compinit && compinit
+```
+
+```powershell
+# PowerShell: in $PROFILE. Parameters such as -claude, -prompt, -headless and -runtime
+# complete without this; it adds the agent's own flags after -agentArgs.
+. /path/to/ContainerCodeIt/completions/CodeItCompletion.ps1
+```
 
 ### What does the script do?
 
@@ -85,6 +158,10 @@ Edit the **Dockerfile** to taste. The default version includes:
 - A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, `dotnet`, `npm`, and `node`
 
 On startup, the container launches a **tmux** session running the chosen agent, and a `zsh` terminal available via the tmux switch hotkey sequence, `Ctrl-B S`.
+
+Arguments given to the container after the image name are passed straight to the agent, and
+with `-e CODE_AGENT_HEADLESS=1` the agent runs in the foreground instead of in tmux, so the
+container exits when the agent does. That is what `--headless` uses.
 
 ## Rough Edges
 

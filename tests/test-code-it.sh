@@ -90,10 +90,16 @@ common_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
 
 # ---------------------------------------------------------------------------
 echo "1. Syntax checks (bash -n)"
-for f in code-it.sh claude-it.sh opencode-it.sh tests/test-code-it.sh; do
+for f in code-it.sh claude-it.sh opencode-it.sh tests/test-code-it.sh completions/code-it.bash; do
     bash -n "$script_dir/$f"
     assert "bash -n $f" "$?"
 done
+if command -v zsh &>/dev/null; then
+    zsh -n "$script_dir/completions/_code-it"
+    assert "zsh -n completions/_code-it" "$?"
+else
+    echo "  skip: zsh -n completions/_code-it (no zsh)"
+fi
 
 # ---------------------------------------------------------------------------
 echo "2. --help exits 0 and prints usage"
@@ -103,6 +109,9 @@ assert_contains "--help shows usage" "$out" "Usage:"
 assert_contains "--help documents -c" "$out" "--claude, -c"
 assert_contains "--help documents -o" "$out" "--opencode, -o"
 assert_contains "--help documents --rebuild-image" "$out" "--rebuild-image"
+assert_contains "--help documents --prompt" "$out" "--prompt TEXT"
+assert_contains "--help documents --headless" "$out" "--headless"
+assert_contains "--help documents the -- separator" "$out" "-- AGENT-ARGS..."
 
 # ---------------------------------------------------------------------------
 echo "3. Default dry-run with docker: opencode agent, all state mounts"
@@ -303,6 +312,127 @@ case "$out" in
     *packages-host*) assert "no cache: no nuget mount line" 1 ;;
     *)               assert "no cache: no nuget mount line" 0 ;;
 esac
+
+# ---------------------------------------------------------------------------
+echo "13. Prompt and agent arguments"
+# A bare argument, or --prompt, is the agent's opening prompt, spelled each agent's way
+out=$(PATH="$stub_docker:$PATH" "$code_it" -c "explain this repo" "${common_args[@]}")
+assert_contains "claude: bare prompt appended to the image" "$out" 'code-it-alpine-dotnet:latest explain\ this\ repo'
+out=$(PATH="$stub_docker:$PATH" "$code_it" -c --prompt "explain this repo" "${common_args[@]}")
+assert_contains "claude: --prompt is the same as a bare prompt" "$out" 'code-it-alpine-dotnet:latest explain\ this\ repo'
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o "explain this repo" "${common_args[@]}")
+assert_contains "opencode: prompt becomes --prompt" "$out" 'code-it-alpine-dotnet:latest --prompt explain\ this\ repo'
+# No prompt and no agent args: nothing is appended, and the run stays interactive
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+[[ "$out" == *"code-it-alpine-dotnet:latest" ]]; assert "no prompt appends nothing" "$?"
+assert_contains "interactive runs allocate a TTY" "$out" "docker run -it"
+[[ "$out" != *CODE_AGENT_HEADLESS* ]]; assert "interactive runs are not headless" "$?"
+
+# --headless: one-shot, no TTY, and the agent's non-interactive form
+out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless "fix the build" "${common_args[@]}")
+assert_contains "claude --headless uses -p" "$out" 'code-it-alpine-dotnet:latest -p fix\ the\ build'
+assert_contains "--headless passes CODE_AGENT_HEADLESS" "$out" "-e CODE_AGENT_HEADLESS=1"
+assert_contains "--headless allocates no TTY" "$out" "docker run -i --rm"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "fix the build" "${common_args[@]}")
+assert_contains "opencode --headless uses run" "$out" 'code-it-alpine-dotnet:latest run fix\ the\ build'
+
+# -- passes the rest to the agent verbatim
+out=$(PATH="$stub_docker:$PATH" "$code_it" -c "${common_args[@]}" -- --continue --model opus)
+assert_contains "-- passes agent flags through" "$out" "code-it-alpine-dotnet:latest --continue --model opus"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless --prompt "tidy" "${common_args[@]}" -- --max-turns 5)
+assert_contains "agent flags precede the prompt for claude" "$out" "code-it-alpine-dotnet:latest -p --max-turns 5 tidy"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless --prompt "tidy" "${common_args[@]}" -- --model opus)
+assert_contains "agent flags follow run for opencode" "$out" "code-it-alpine-dotnet:latest run --model opus tidy"
+# --headless without a prompt leaves the agent command to the caller
+out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless "${common_args[@]}" -- -p "count the files")
+assert_contains "--headless with no prompt adds no -p of its own" "$out" 'code-it-alpine-dotnet:latest -p count\ the\ files'
+
+# The prompt reaches the container as a single argument
+out=$(PATH="$stub_darwin:$stub_container:$PATH" "$code_it" -c "explain this repo" --work-dir "$script_dir" --save-dir "$save")
+assert_contains "prompt is passed as one argument" "$out" "[code-it-alpine-dotnet:latest][explain this repo]"
+out=$(PATH="$stub_darwin:$stub_container:$PATH" "$code_it" -c --headless "fix it" --work-dir "$script_dir" --save-dir "$save")
+assert_contains "headless run passes -i and the agent args" "$out" "[-i][--rm]"
+assert_contains "headless run passes the prompt after -p" "$out" "[code-it-alpine-dotnet:latest][-p][fix it]"
+
+# Two bare prompts is a mistake worth reporting
+out=$(PATH="$stub_docker:$PATH" "$code_it" -c "one" "two" "${common_args[@]}" 2>&1)
+[[ "$?" != "0" ]]; assert "two bare prompts fails" "$?"
+assert_contains "two bare prompts explains itself" "$out" "Only one prompt"
+
+# ---------------------------------------------------------------------------
+echo "14. Bash tab completion"
+completions_out=$(
+    source "$script_dir/completions/code-it.bash"
+    comp() {
+        COMP_WORDS=("$@")
+        COMP_CWORD=$(( ${#COMP_WORDS[@]} - 1 ))
+        COMPREPLY=()
+        _code_it
+        (( ${#COMPREPLY[@]} )) && printf '%s\n' "${COMPREPLY[@]}"
+    }
+    echo "OPTS:$(comp ./code-it.sh --he | tr '\n' ' ')"
+    echo "RUNTIME:$(comp ./code-it.sh --runtime '' | tr '\n' ' ')"
+    echo "FREETEXT:$(comp ./code-it.sh --prompt '' | tr '\n' ' ')"
+    echo "CLAUDEALIAS:$(comp ./claude-it.sh -- --mod | tr '\n' ' ')"
+    echo "CLAUDEFLAG:$(comp ./code-it.sh -c -- --perm | tr '\n' ' ')"
+    echo "CLAUDEMODE:$(comp ./code-it.sh -c -- --permission-mode '' | tr '\n' ' ')"
+    echo "OPENCODEDEF:$(comp ./code-it.sh -- --se | tr '\n' ' ')"
+    echo "OPENCODEALIAS:$(comp ./opencode-it.sh -- --th | tr '\n' ' ')"
+)
+assert_contains "completes launcher options" "$completions_out" "OPTS:--headless"
+assert_contains "completes --runtime values" "$completions_out" "RUNTIME:docker container"
+assert_contains "offers nothing for a free-text --prompt" "$completions_out" "FREETEXT:
+"
+assert_contains "claude-it.sh completes claude flags after --" "$completions_out" "CLAUDEALIAS:--model"
+assert_contains "-c completes claude flags after --" "$completions_out" "CLAUDEFLAG:--permission-mode"
+assert_contains "completes claude --permission-mode values" "$completions_out" "CLAUDEMODE:default acceptEdits"
+assert_contains "defaults to opencode flags after --" "$completions_out" "OPENCODEDEF:--session"
+assert_contains "opencode-it.sh completes opencode flags after --" "$completions_out" "OPENCODEALIAS:--thinking"
+
+# ---------------------------------------------------------------------------
+echo "15. Container entrypoint (go.sh) passes its arguments to the agent"
+if command -v zsh &>/dev/null; then
+    # Lift go.sh out of the Dockerfile and point it at stubs instead of the image's
+    # own paths, so the entrypoint's argument handling can be tested on the host.
+    gowork="$tmp/gowork"; gobin="$tmp/gobin"
+    mkdir -p "$gowork/repo" "$gobin"
+    sed -n "/^RUN cat <<'EOF' >> ~\/go.sh$/,/^EOF$/p" "$script_dir/Dockerfile" \
+        | sed '1d;$d' \
+        | sed -e "s#/home/agent1/.opencode/bin/opencode#$gobin/opencode#" \
+              -e "s#/home/agent1/.local/bin/claude#$gobin/claude#" \
+              -e "s#/work#$gowork#g" > "$tmp/go.sh"
+    chmod +x "$tmp/go.sh"
+    [[ -s "$tmp/go.sh" ]]; assert "go.sh extracted from the Dockerfile" "$?"
+
+    for agent in claude opencode; do
+        cat > "$gobin/$agent" <<EOF
+#!/bin/sh
+printf 'AGENT-$agent'
+printf '[%s]' "\$@"
+echo
+EOF
+        chmod +x "$gobin/$agent"
+    done
+    # tmux takes the command as one string: run it, so what the agent receives is visible
+    cat > "$gobin/tmux" <<'EOF'
+#!/bin/sh
+case "$*" in *" -d"*) exit 0 ;; esac
+for a in "$@"; do last="$a"; done
+eval "$last"
+EOF
+    chmod +x "$gobin/tmux"
+    printf '#!/bin/sh\nexit 0\n' > "$gobin/git"; chmod +x "$gobin/git"
+
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
+    assert_contains "go.sh runs the chosen agent in tmux" "$out" "AGENT-claude"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "explain this repo" 2>&1)
+    assert_contains "go.sh forwards arguments through tmux, unsplit" "$out" "AGENT-opencode[--prompt][explain this repo]"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" -p "fix it; rm -rf /" 2>&1)
+    assert_contains "headless go.sh runs the agent directly" "$out" "AGENT-claude[-p][fix it; rm -rf /]"
+    [[ "$out" != *AGENT-claude*AGENT-claude* ]]; assert "headless go.sh does not also start tmux" "$?"
+else
+    echo "  skip: go.sh tests (no zsh)"
+fi
 
 # ---------------------------------------------------------------------------
 echo

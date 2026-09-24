@@ -17,11 +17,22 @@
 # - Port mappings
 #
 # Usage:
-#   ./code-it.sh [OPTIONS]
+#   ./code-it.sh [OPTIONS] [PROMPT] [-- AGENT-ARGS...]
 #
 # Options:
 #   --opencode, -o           Run OpenCode in the container (default).
 #   --claude, -c             Run Claude Code in the container.
+#   --prompt TEXT            Open the agent with TEXT as its first prompt. A single bare
+#                            argument means the same thing, so these are equivalent:
+#                              ./code-it.sh -c --prompt "explain this repo"
+#                              ./code-it.sh -c "explain this repo"
+#   --headless               Run the agent in the foreground rather than in tmux, with no
+#                            TTY allocated. With --prompt the agent answers, exits, and the
+#                            container shuts down, exiting with the agent's exit code.
+#   -- AGENT-ARGS...         Everything after -- is passed to the coding agent verbatim,
+#                            e.g. -- --model opus --continue. See
+#                              https://code.claude.com/docs/en/cli-reference
+#                              https://opencode.ai/docs/cli/
 #   --work-dir DIR           Host directory path to mount as /work in the container.
 #                            Defaults to "."
 #   --save-dir DIR           Host directory for storing agent configuration and state volumes.
@@ -39,6 +50,8 @@
 #                            for docker (0 auto-assigns a free host port), "3000:3000" "3001:3001"
 #                            for the Apple container runtime.
 #                            Maximum of 2 port mappings supported; additional mappings are ignored.
+#                            --ports consumes every following non-option argument, so give a
+#                            bare PROMPT before it, or use --prompt.
 #   --agent-name NAME        Name of the agent running in the container. Used for Git author
 #                            attribution and home directory naming. Must match the USER set in
 #                            the Dockerfile. Default: "Agent1"
@@ -58,7 +71,20 @@
 #   ./code-it.sh --ports "8000:3000" "8001:3001"
 #       Runs the container with custom port mappings.
 #
+#   ./code-it.sh -c "explain this repo"
+#       Opens Claude Code with that opening prompt, and stays interactive.
+#
+#   ./code-it.sh -c --headless "run the tests and fix any failures"
+#       Runs Claude Code headlessly: the agent works, prints its answer, and the
+#       container shuts down.
+#
+#   ./code-it.sh -c -- --continue --model opus
+#       Passes those flags straight through to Claude Code.
+#
 # Notes:
+#   - The prompt and any pass-through arguments are translated into each agent's own
+#     command line: --prompt becomes `claude PROMPT` or `opencode --prompt PROMPT`, and
+#     with --headless it becomes `claude -p PROMPT` or `opencode run PROMPT`
 #   - Git author name and email are automatically captured from environment or git config
 #   - Volume mounts preserve both Claude and OpenCode state between container runs, so you
 #     can destroy the container and create a new one without logging in again
@@ -136,6 +162,10 @@ ports=()
 agent_name="Agent1"
 dry_run=false
 container_args=""
+prompt=""
+prompt_set=false
+headless=false
+agent_args=()
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -189,6 +219,20 @@ while [[ $# -gt 0 ]]; do
             agent_name="$2"
             shift 2
             ;;
+        --prompt)
+            prompt="$2"
+            prompt_set=true
+            shift 2
+            ;;
+        --headless)
+            headless=true
+            shift
+            ;;
+        --)
+            shift
+            agent_args=("$@")
+            break
+            ;;
         --dry-run)
             dry_run=true
             shift
@@ -197,10 +241,20 @@ while [[ $# -gt 0 ]]; do
             sed -n '2,/^$/{ s/^# \{0,1\}//; p; }' "$0"
             exit 0
             ;;
-        *)
+        -*)
             echo "Unknown option: $1" >&2
             echo "Run $0 --help for usage." >&2
             exit 1
+            ;;
+        *)
+            # A bare argument is the agent's opening prompt
+            if [[ "$prompt_set" == true ]]; then
+                echo "Only one prompt can be given; use --prompt, or -- to pass arguments to the agent." >&2
+                exit 1
+            fi
+            prompt="$1"
+            prompt_set=true
+            shift
             ;;
     esac
 done
@@ -402,11 +456,58 @@ while [[ ${#ports[@]} -lt 2 ]]; do
     ports+=("${pad_ports[${#ports[@]}]}")
 done
 
+# Translate the prompt, and any -- pass-through arguments, into the chosen agent's own
+# command line, which the container entrypoint hands to the agent. See
+#   https://code.claude.com/docs/en/cli-reference
+#   https://opencode.ai/docs/cli/
+agent_cmd=()
+if [[ "$code_agent" == "claude" ]]; then
+    # claude [flags] [PROMPT], and -p answers the prompt without going interactive
+    if [[ "$headless" == true && "$prompt_set" == true ]]; then
+        agent_cmd+=(-p)
+    fi
+    agent_cmd+=(${agent_args[@]+"${agent_args[@]}"})
+    if [[ "$prompt_set" == true ]]; then
+        agent_cmd+=("$prompt")
+    fi
+elif [[ "$headless" == true ]]; then
+    # opencode run [flags] [MESSAGE] answers without starting the TUI
+    agent_cmd+=(run)
+    agent_cmd+=(${agent_args[@]+"${agent_args[@]}"})
+    if [[ "$prompt_set" == true ]]; then
+        agent_cmd+=("$prompt")
+    fi
+else
+    # opencode --prompt MESSAGE opens the TUI with the message already sent
+    if [[ "$prompt_set" == true ]]; then
+        agent_cmd+=(--prompt "$prompt")
+    fi
+    agent_cmd+=(${agent_args[@]+"${agent_args[@]}"})
+fi
+
+# Headless runs are one-shot: no tmux and no TTY, so the container exits when the
+# agent does, and its output can be piped or redirected.
+if [[ "$headless" == true ]]; then
+    tty_args=(-i)
+    headless_env=(-e CODE_AGENT_HEADLESS=1)
+    headless_env_print="
+                -e CODE_AGENT_HEADLESS=1 \\"
+else
+    tty_args=(-it)
+    headless_env=()
+    headless_env_print=""
+fi
+
+agent_cmd_print=""
+for arg in ${agent_cmd[@]+"${agent_cmd[@]}"}; do
+    agent_cmd_print+=" $(printf '%q' "$arg")"
+done
+
 # Print the command
 cat <<EOF
-    $runtime run -it --rm -p ${ports[0]} -p ${ports[1]} \\
+    $runtime run ${tty_args[*]} --rm -p ${ports[0]} -p ${ports[1]} \\
                 $container_args \\
-                -e CODE_AGENT="$code_agent" \\
+                -e CODE_AGENT="$code_agent" \\$headless_env_print
                 -e GIT_AUTHOR_NAME="$git_author_name" \\
                 -e GIT_AUTHOR_EMAIL="$git_author_email" \\
                 -e GIT_COMMITTER_NAME="$git_author_name" \\
@@ -415,15 +516,16 @@ cat <<EOF
                 -v "$save_dir/.claude:/home/$agent_name_lower/.claude" \\
                 -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \\
                 -v "$save_dir/.local/share/opencode:/home/$agent_name_lower/.local/share/opencode" \\$nuget_mount_print
-            ${image}:latest
+            ${image}:latest$agent_cmd_print
 EOF
 
 if [[ "$dry_run" == true ]]; then
     exit 0
 fi
 
-"$runtime" run -it --rm -p "${ports[0]}" -p "${ports[1]}" \
+"$runtime" run "${tty_args[@]}" --rm -p "${ports[0]}" -p "${ports[1]}" \
             $container_args \
+            ${headless_env[@]+"${headless_env[@]}"} \
             -e CODE_AGENT="$code_agent" \
             -e GIT_AUTHOR_NAME="$git_author_name" \
             -e GIT_AUTHOR_EMAIL="$git_author_email" \
@@ -434,4 +536,4 @@ fi
             -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \
             -v "$save_dir/.local/share/opencode:/home/$agent_name_lower/.local/share/opencode" \
             "${nuget_mount[@]+"${nuget_mount[@]}"}" \
-    "${image}:latest"
+    "${image}:latest" ${agent_cmd[@]+"${agent_cmd[@]}"}
