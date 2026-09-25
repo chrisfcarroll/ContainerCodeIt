@@ -105,6 +105,7 @@
 #   ├──────────────────────────┼────────────────────────────────────────────────────────────────┤
 #   │ ~/.claude.json           │ OAuth session data, MCP configs, theme/editor preferences      │
 #   ├──────────────────────────┼────────────────────────────────────────────────────────────────┤
+#   │ ~/.config/opencode/      │ OpenCode configuration (opencode.json, etc.)                  │
 #   │ ~/.local/share/opencode/ │ OpenCode data and auth (auth.json, etc.)                       │
 #   └──────────────────────────┴────────────────────────────────────────────────────────────────┘
 
@@ -342,7 +343,7 @@ work_dir_to_mount=$(abs_dir "$work_dir_to_mount")
 # Create the save dir structure so mounts always work, even on first run.
 # The .claude.json mount is a single file: pre-create it so the runtime does not
 # create a directory in its place.
-mkdir -p "$save_dir/.claude" "$save_dir/.local/share/opencode"
+mkdir -p "$save_dir/.claude" "$save_dir/.config/opencode" "$save_dir/.local/share/opencode"
 [[ -f "$save_dir/.claude.json" ]] || echo '{}' > "$save_dir/.claude.json"
 save_dir=$(abs_dir "$save_dir")
 
@@ -516,7 +517,8 @@ cat <<EOF
                 -v "$save_dir/.claude:/home/$agent_name_lower/.claude" \\
                 -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \\
                 -v "$save_dir/.local/share/opencode:/home/$agent_name_lower/.local/share/opencode" \\$nuget_mount_print
-            ${image}:latest$agent_cmd_print
+                -v "$save_dir/.config/opencode:/home/$agent_name_lower/.config/opencode" \\
+                ${image}:latest$agent_cmd_print
 EOF
 
 if [[ "$dry_run" == true ]]; then
@@ -534,6 +536,7 @@ fi
             -v "$work_dir_to_mount:/work" \
             -v "$save_dir/.claude:/home/$agent_name_lower/.claude" \
             -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \
+            -v "$save_dir/.config/opencode:/home/$agent_name_lower/.config/opencode" \
             -v "$save_dir/.local/share/opencode:/home/$agent_name_lower/.local/share/opencode" \
             "${nuget_mount[@]+"${nuget_mount[@]}"}" \
     "${image}:latest" ${agent_cmd[@]+"${agent_cmd[@]}"}

@@ -154,12 +154,14 @@ Assert-Contains "image name" $r.out 'code-it-alpine-dotnet:latest'
 Assert-Contains "work dir mount" $r.out "$scriptDir`:/work"
 Assert-Contains "claude dir mount" $r.out '/.claude:/home/agent1/.claude'
 Assert-Contains "claude.json mount" $r.out '/.claude.json:/home/agent1/.claude.json'
+Assert-Contains "opencode config mount" $r.out '/.config/opencode:/home/agent1/.config/opencode'
 Assert-Contains "opencode mount" $r.out '/.local/share/opencode:/home/agent1/.local/share/opencode'
 Assert-Contains "default auto-assign ports" $r.out '-p 0:3000 -p 0:3001'
 
 # ---------------------------------------------------------------------------
 "3. Save dir structure is created for first run"
 Assert "save/.claude created" (Test-Path "$save/.claude" -PathType Container)
+Assert "save/.config/opencode created" (Test-Path "$save/.config/opencode" -PathType Container)
 Assert "save/.local/share/opencode created" (Test-Path "$save/.local/share/opencode" -PathType Container)
 Assert "save/.claude.json created as a file" (Test-Path "$save/.claude.json" -PathType Leaf)
 

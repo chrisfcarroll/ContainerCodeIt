@@ -124,12 +124,14 @@ assert_contains "image name" "$out" "code-it-alpine-dotnet:latest"
 assert_contains "work dir mount" "$out" "$script_dir:/work"
 assert_contains "claude dir mount" "$out" "/.claude:/home/agent1/.claude"
 assert_contains "claude.json mount" "$out" "/.claude.json:/home/agent1/.claude.json"
+assert_contains "opencode config mount" "$out" "/.config/opencode:/home/agent1/.config/opencode"
 assert_contains "opencode mount" "$out" "/.local/share/opencode:/home/agent1/.local/share/opencode"
 assert_contains "docker default auto-assign ports" "$out" "-p 0:3000 -p 0:3001"
 
 # ---------------------------------------------------------------------------
 echo "4. Save dir structure is created for first run"
 [[ -d "$save/.claude" ]];                 assert "save/.claude created" "$?"
+[[ -d "$save/.config/opencode" ]];        assert "save/.config/opencode created" "$?"
 [[ -d "$save/.local/share/opencode" ]];   assert "save/.local/share/opencode created" "$?"
 [[ -f "$save/.claude.json" ]];            assert "save/.claude.json created as a file" "$?"
 

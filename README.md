@@ -145,6 +145,7 @@ docker run -it --rm \
     -v ~/my-repos:/work \
     -v ~/.config/code-it/.claude:/home/agent1/.claude \
     -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
+    -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \
     -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
     code-it-alpine-dotnet:latest
 ```
@@ -188,6 +189,7 @@ The launcher scripts keep all agent state under one save dir (default `~/.config
 | `/work` | Host directory containing git repos for the agent to work on |
 | `/home/agent1/.claude` | Persists Claude credentials, settings, permissions, and memory |
 | `/home/agent1/.claude.json` | Persists Claude OAuth session data, MCP configs, and preferences |
+| `/home/agent1/.config/opencode` | Persists OpenCode configuration, including `opencode.json` |
 | `/home/agent1/.local/share/opencode` | Persists OpenCode data and auth |
 | `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache, mounted only if one is found (see below) |
 

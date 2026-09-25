@@ -20,6 +20,7 @@
     - Port mappings
 
     The script supports optional image building and port mappings. Container mounts preserve:
+    - ~/.config/opencode/      : OpenCode configuration (opencode.json, etc.)
     - ~/.local/share/opencode/ : OpenCode data and auth (auth.json, etc.)
     - ~/.claude/               : Claude credentials, settings, permissions, memory
     - ~/.claude.json           : Claude OAuth session data, MCP configs, preferences
@@ -146,6 +147,7 @@
 #   ├──────────────────────────┼────────────────────────────────────────────────────────────────┤
 #   │ ~/.claude.json           │ OAuth session data, MCP configs, theme/editor preferences      │
 #   ├──────────────────────────┼────────────────────────────────────────────────────────────────┤
+#   │ ~/.config/opencode/      │ OpenCode configuration (opencode.json, etc.)                  │
 #   │ ~/.local/share/opencode/ │ OpenCode data and auth (auth.json, etc.)                       │
 #   └──────────────────────────┴────────────────────────────────────────────────────────────────┘
 
@@ -280,6 +282,7 @@ $WorkDirToMount = (Resolve-Path $WorkDirToMount).Path
 # Create the save dir structure so mounts always work, even on first run.
 # The .claude.json mount is a single file: pre-create it so the runtime does not
 # create a directory in its place.
+$null = New-Item -ItemType Directory -Force -Path "$saveDir/.config/opencode"
 $null = New-Item -ItemType Directory -Force -Path "$saveDir/.local/share/opencode"
 $null = New-Item -ItemType Directory -Force -Path "$saveDir/.claude"
 if (-not (Test-Path -Path "$saveDir/.claude.json")) {
@@ -435,6 +438,7 @@ if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
                 -v `"$WorkDirToMount`:/work`" `
                 -v `"$saveDir/.claude`:/home/$agentNameLower/.claude`" `
                 -v `"$saveDir/.claude.json`:/home/$agentNameLower/.claude.json`" `
+                -v `"$saveDir/.config/opencode`:/home/$agentNameLower/.config/opencode`" `
                 -v `"$saveDir/.local/share/opencode`:/home/$agentNameLower/.local/share/opencode`"$nugetMountPrint
             $image`:latest$agentCmdPrint
 "@
@@ -454,6 +458,7 @@ if ($dryRun) {
             -v "$WorkDirToMount`:/work" `
             -v "$saveDir/.claude:/home/$agentNameLower/.claude" `
             -v "$saveDir/.claude.json:/home/$agentNameLower/.claude.json" `
+            -v "$saveDir/.config/opencode:/home/$agentNameLower/.config/opencode" `
             -v "$saveDir/.local/share/opencode:/home/$agentNameLower/.local/share/opencode" `
             $nugetMountArgs `
     $image`:latest $agentCmd

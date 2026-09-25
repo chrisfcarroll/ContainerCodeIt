@@ -141,12 +141,13 @@ EOF
 WORKDIR /work
 # --------------------------------
 # Repos to work on can be mounted at runtime under /work.
-# Also mount the state directories for whichever agent(s) you use, for up to 5 mounts:
+# Also mount the state directories for whichever agent(s) you use, for up to 6 mounts:
 # 1. Repos directory
 # 2. ~/.claude directory (claude credentials, settings & memory)
 # 3. ~/.claude.json file (claude OAuth session data & MCP configs)
-# 4. ~/.local/share/opencode directory (opencode data & auth)
-# 5. Host's NuGet package cache at ~/.nuget/packages-host, READ-ONLY (optional;
+# 4. ~/.config/opencode directory (opencode configuration)
+# 5. ~/.local/share/opencode directory (opencode data & auth)
+# 6. Host's NuGet package cache at ~/.nuget/packages-host, READ-ONLY (optional;
 #    registered as a NuGet fallback package folder by ~/.nuget/NuGet/NuGet.Config)
 # Choose the agent with -e CODE_AGENT=opencode (default) or -e CODE_AGENT=claude
 # Example :
@@ -159,6 +160,7 @@ WORKDIR /work
 #                -v ~/repos:/work \
 #                -v ~/.config/code-it/.claude:/home/agent1/.claude \
 #                -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
+#                -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \
 #                -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
 #        code-it-alpine-dotnet:latest
 # --------------------------------
