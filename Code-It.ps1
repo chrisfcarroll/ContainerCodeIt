@@ -288,6 +288,34 @@ $null = New-Item -ItemType Directory -Force -Path "$saveDir/.claude"
 if (-not (Test-Path -Path "$saveDir/.claude.json")) {
     Set-Content -Path "$saveDir/.claude.json" -Value '{}'
 }
+if ($codeAgent -eq "opencode") {
+    $opencodeConfig = "$saveDir/.config/opencode/config.json"
+    if (-not (Test-Path -Path $opencodeConfig)) {
+        $configContents = @'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": "allow"
+}
+'@
+        [System.IO.File]::WriteAllText($opencodeConfig, $configContents, [System.Text.UTF8Encoding]::new($false))
+        "    Created OpenCode configuration: $opencodeConfig"
+    }
+}
+else {
+    $claudeSettings = "$saveDir/.claude/settings.json"
+    if (-not (Test-Path -Path $claudeSettings)) {
+        $settingsContents = @'
+{
+  "permissions": {
+    "defaultMode": "auto"
+  },
+  "skipDangerousModePermissionPrompt": true
+}
+'@
+        [System.IO.File]::WriteAllText($claudeSettings, $settingsContents, [System.Text.UTF8Encoding]::new($false))
+        "    Created Claude Code settings: $claudeSettings"
+    }
+}
 $saveDir = (Resolve-Path $saveDir).Path
 
 "    Checking $image ..."

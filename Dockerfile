@@ -112,12 +112,6 @@ tmux -u new-session -d ; tmux -u new-session "$agent_cmd"
 EOF
 RUN chmod a+x ~/go.sh
 RUN mkdir -p ~/.config/opencode
-RUN cat <<'EOF' >> ~/.config/opencode/config.json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "permission": "allow"
-}
-EOF
 # NuGet: the launcher scripts mount the host's NuGet package cache (if one is
 # found) read-only at ~/.nuget/packages-host. Register that mount point as a
 # fallback package folder in the user-level NuGet.Config (the default location

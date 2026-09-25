@@ -147,6 +147,7 @@ foreach ($f in @('Code-It.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-Cod
 "2. Default dry-run: opencode agent, all state mounts"
 $r = Invoke-Scenario $codeIt $commonArgs $stubPath
 Assert "dry-run exit code 0" ($r.code -eq 0)
+Assert-Contains "reports OpenCode config creation" $r.out 'Created OpenCode configuration'
 Assert-Contains "uses docker runtime" $r.out 'Using container runtime: docker'
 Assert-Contains "defaults to opencode" $r.out 'CODE_AGENT="opencode"'
 Assert-Contains "docker run command" $r.out 'docker run -it'
@@ -164,6 +165,8 @@ Assert "save/.claude created" (Test-Path "$save/.claude" -PathType Container)
 Assert "save/.config/opencode created" (Test-Path "$save/.config/opencode" -PathType Container)
 Assert "save/.local/share/opencode created" (Test-Path "$save/.local/share/opencode" -PathType Container)
 Assert "save/.claude.json created as a file" (Test-Path "$save/.claude.json" -PathType Leaf)
+$opencodeConfig = Get-Content "$save/.config/opencode/config.json" -Raw | ConvertFrom-Json
+Assert "OpenCode config permits all actions" ($opencodeConfig.permission -eq 'allow')
 
 # ---------------------------------------------------------------------------
 "4. Agent selection switches"
@@ -173,6 +176,10 @@ $r = Invoke-Scenario $codeIt (@('-o') + $commonArgs) $stubPath
 Assert-Contains "-o selects opencode" $r.out 'CODE_AGENT="opencode"'
 $r = Invoke-Scenario $codeIt (@('-claude') + $commonArgs) $stubPath
 Assert-Contains "-claude selects claude" $r.out 'CODE_AGENT="claude"'
+Assert-Contains "reports Claude settings creation" $r.out 'Created Claude Code settings'
+$claudeSettings = Get-Content "$save/.claude/settings.json" -Raw | ConvertFrom-Json
+Assert "Claude settings enable auto mode" ($claudeSettings.permissions.defaultMode -eq 'auto')
+Assert "Claude settings skip dangerous-mode prompt" ($claudeSettings.skipDangerousModePermissionPrompt -eq $true)
 $r = Invoke-Scenario $codeIt (@('-c') + $commonArgs) $stubPath
 Assert-Contains "-c selects claude" $r.out 'CODE_AGENT="claude"'
 $r = Invoke-Scenario $codeIt (@('-c','-o') + $commonArgs) $stubPath

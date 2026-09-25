@@ -117,6 +117,7 @@ assert_contains "--help documents the -- separator" "$out" "-- AGENT-ARGS..."
 echo "3. Default dry-run with docker: opencode agent, all state mounts"
 out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert "dry-run exit code" "$?"
+assert_contains "reports OpenCode config creation" "$out" "Created OpenCode configuration"
 assert_contains "uses docker runtime" "$out" "Using container runtime: docker"
 assert_contains "defaults to opencode" "$out" 'CODE_AGENT="opencode"'
 assert_contains "docker run command" "$out" "docker run -it"
@@ -134,6 +135,8 @@ echo "4. Save dir structure is created for first run"
 [[ -d "$save/.config/opencode" ]];        assert "save/.config/opencode created" "$?"
 [[ -d "$save/.local/share/opencode" ]];   assert "save/.local/share/opencode created" "$?"
 [[ -f "$save/.claude.json" ]];            assert "save/.claude.json created as a file" "$?"
+[[ "$(tr -d '[:space:]' < "$save/.config/opencode/config.json")" == '{"$schema":"https://opencode.ai/config.json","permission":"allow"}' ]]
+assert "OpenCode config permits all actions" "$?"
 
 # ---------------------------------------------------------------------------
 echo "5. Agent selection switches"
@@ -143,6 +146,9 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -o "${common_args[@]}")
 assert_contains "-o selects opencode" "$out" 'CODE_AGENT="opencode"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --claude "${common_args[@]}")
 assert_contains "--claude selects claude" "$out" 'CODE_AGENT="claude"'
+assert_contains "reports Claude settings creation" "$out" "Created Claude Code settings"
+[[ "$(tr -d '[:space:]' < "$save/.claude/settings.json")" == '{"permissions":{"defaultMode":"auto"},"skipDangerousModePermissionPrompt":true}' ]]
+assert "Claude settings enable auto mode and skip prompt" "$?"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c "${common_args[@]}")
 assert_contains "-c selects claude" "$out" 'CODE_AGENT="claude"'
 

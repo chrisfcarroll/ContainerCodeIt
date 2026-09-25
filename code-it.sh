@@ -345,6 +345,31 @@ work_dir_to_mount=$(abs_dir "$work_dir_to_mount")
 # create a directory in its place.
 mkdir -p "$save_dir/.claude" "$save_dir/.config/opencode" "$save_dir/.local/share/opencode"
 [[ -f "$save_dir/.claude.json" ]] || echo '{}' > "$save_dir/.claude.json"
+if [[ "$code_agent" == "opencode" ]]; then
+    opencode_config="$save_dir/.config/opencode/config.json"
+    if [[ ! -e "$opencode_config" ]]; then
+        cat > "$opencode_config" <<'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": "allow"
+}
+EOF
+        echo "    Created OpenCode configuration: $opencode_config"
+    fi
+else
+    claude_settings="$save_dir/.claude/settings.json"
+    if [[ ! -e "$claude_settings" ]]; then
+        cat > "$claude_settings" <<'EOF'
+{
+  "permissions": {
+    "defaultMode": "auto"
+  },
+  "skipDangerousModePermissionPrompt": true
+}
+EOF
+        echo "    Created Claude Code settings: $claude_settings"
+    fi
+fi
 save_dir=$(abs_dir "$save_dir")
 
 echo "    Checking $image ..."
