@@ -280,8 +280,8 @@ $WorkDirToMount = (Resolve-Path $WorkDirToMount).Path
 # Create the save dir structure so mounts always work, even on first run.
 # The .claude.json mount is a single file: pre-create it so the runtime does not
 # create a directory in its place.
-New-Item -ItemType Directory -Force -Path "$saveDir/.local/share/opencode"
-New-Item -ItemType Directory -Force -Path "$saveDir/.claude"
+$null = New-Item -ItemType Directory -Force -Path "$saveDir/.local/share/opencode"
+$null = New-Item -ItemType Directory -Force -Path "$saveDir/.claude"
 if (-not (Test-Path -Path "$saveDir/.claude.json")) {
     Set-Content -Path "$saveDir/.claude.json" -Value '{}'
 }
