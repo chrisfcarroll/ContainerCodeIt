@@ -1,7 +1,7 @@
 #! /usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Launches an Alpine Linux container with OpenCode, Claude Code, and .NET development tools.
+    Launches an Alpine Linux container with OpenCode, Claude Code, and a parameterisable tech stack.
 
 .DESCRIPTION
     Creates and runs a container for development using OpenCode or Claude Code as an agent.
@@ -16,7 +16,9 @@
     - Volume mounts for code repositories and agent configuration
     - Git author environment variables or config settings (name and email)
     - Paths to preserve agent credentials, settings, and session data across container runs
-    - The host's NuGet package cache, mounted read-only as a fallback package folder
+    - A parameterisable tech stack (dotnet/node/bun and the nuget/npm package repos),
+      chosen with switches and passed to docker build as build args
+    - The enabled host package caches, mounted read-only
     - Port mappings
 
     The script supports optional image building and port mappings. Container mounts preserve:
@@ -39,7 +41,9 @@
     Default: ~/.config/code-it
 
 .PARAMETER image
-    Image name to run. Default: "code-it-alpine-dotnet"
+    Image name to run. Default: "code-it-alpine-<tech>", a slug of the resolved -tech
+    list, e.g. code-it-alpine-dotnet or code-it-alpine-node-bun. Set it explicitly when
+    running an image built with different tech, or give the same -tech.
 
 .PARAMETER buildImage
     If specified, builds the image from the Dockerfile before running the container.
@@ -87,6 +91,18 @@
     directory naming. This must match the USER set in the Dockerfile for your image.
     Default: "Agent1"
 
+.PARAMETER tech
+    Comma-separated tech stacks to build into the image, passed to docker build as
+    the DOTNET/NODE/BUN build args. Known: dotnet, node, bun. Default: "dotnet,node".
+    The list replaces the default set, so there is no per-tech on/off parameter to
+    clash with future tech names, e.g. -tech "node,bun".
+
+.PARAMETER packages
+    Comma-separated package repos whose host cache is mounted read-only. Known:
+    nuget, npm, bun. Default: the repos implied by -tech (dotnet->nuget, node->npm).
+    The list is taken exactly as given, so -tech "node,bun" -packages npm pairs npm
+    with Bun instead of Bun's cache. Pass a comma, -packages ",", to select none.
+
 .PARAMETER dryRun
     Print the run command without executing it.
 
@@ -128,12 +144,13 @@
       can destroy the container and create a new one without logging in again
     - Alternatively, use ANTHROPIC_API_KEY (claude) or a provider API key env var (opencode)
       to avoid volume mounts for credentials
-    - If a NuGet package cache is found on the host, it is mounted read-only at
-      ~/.nuget/packages-host, which the image's NuGet.Config registers as a fallback
-      package folder: restores reuse host-cached packages, and the container can
-      never write to the host cache. Looked up, in order, from: the NUGET_PACKAGES
-      environment variable, the globalPackagesFolder setting in the user-level
-      NuGet.Config, and the default ~/.nuget/packages
+    - Host package caches are mounted read-only (never written) when the matching
+      switch is on and a cache is found, so downloads are reused:
+        NuGet: ~/.nuget/packages-host (a fallbackPackageFolder). Looked up, in order,
+               from the NUGET_PACKAGES env var, the globalPackagesFolder setting in
+               the user-level NuGet.Config, and the default ~/.nuget/packages
+        npm:   ~/.npm-host, seeded into the container's own ~/.npm at startup
+        Bun:   ~/.bun-host, seeded into ~/.bun/install/cache at startup
 
 .LINK
     https://docs.docker.com/engine/reference/commandline/run/
@@ -162,7 +179,7 @@ param (
     [Alias('o')]
     [switch]$opencode       = $false,
     [string]$saveDir        = "$HOME/.config/code-it",
-    [string]$image          = "code-it-alpine-dotnet",
+    [string]$image          = "",
     [switch]$buildImage     = $false,
     [switch]$rebuildImage   = $false,
     [string]$dockerfileDir  = $PSScriptRoot,
@@ -170,6 +187,8 @@ param (
     [string]$runtime        = "",
     [string[]]$portsMap     = @(),
     [string]$agentName      = "Agent1",
+    [string]$tech           = "",
+    [string]$packages       = "",
     [string]$prompt         = "",
     [switch]$headless       = $false,
     [Alias('h')]
@@ -205,6 +224,56 @@ $promptSet = [bool]$prompt
 
 # -rebuildImage implies -buildImage
 if ($rebuildImage) { $buildImage = $true }
+
+# Resolve -tech / -packages. A list replaces the default set rather than toggling
+# it, so there are no per-tech on/off parameters to clash with future tech names.
+# -tech defaults to dotnet,node; -packages defaults to the repos implied by -tech
+# (dotnet->nuget, node->npm).
+$knownTech     = @('dotnet', 'node', 'bun')
+$knownPackages = @('nuget', 'npm', 'bun')
+function Split-List([string]$list) {
+    if (-not $list) { return @() }
+    return @($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+$enabledTech = if ($tech) { Split-List $tech } else { @('dotnet', 'node') }
+foreach ($t in $enabledTech) {
+    if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $knownTech) {
+        Write-Warning "Unknown tech stack '$t'. Known: $($knownTech -join ', ')."
+        Write-Warning "A comma-separated list is expected, e.g. -tech 'node,bun'."
+        exit 1
+    }
+}
+$enabledPackages = if ($packages) { Split-List $packages } else {
+    @(@('nuget') * ($enabledTech -contains 'dotnet') + @('npm') * ($enabledTech -contains 'node'))
+}
+foreach ($p in $enabledPackages) {
+    if ($p -notmatch '^[a-z][a-z0-9-]*$' -or $p -notin $knownPackages) {
+        Write-Warning "Unknown package repo '$p'. Known: $($knownPackages -join ', ')."
+        Write-Warning "A comma-separated list is expected, e.g. -packages nuget,npm."
+        exit 1
+    }
+}
+# Default image name from the tech list, e.g. code-it-alpine-dotnet or
+# code-it-alpine-node-bun. An explicit -image overrides it.
+if (-not $image) { $image = "code-it-alpine-$($enabledTech -join '-')" }
+
+# Warn if the resolved tech does not match the tech slug of a default image name,
+# since the image was likely built for a different stack.
+if ($image -like 'code-it-alpine-*') {
+    $imageTech = ($image.Substring('code-it-alpine-'.Length)) -replace '-', ','
+    if ($imageTech -ne ($enabledTech -join ',')) {
+        Write-Warning "Image '$image' looks built for tech '$imageTech' but -tech is '$($enabledTech -join ',')'."
+        Write-Warning "Pass the same -tech used to build the image, or set -image explicitly."
+    }
+}
+
+# Build args are strings, spelled the way the Dockerfile matches them (lowercase)
+function Bool-Arg([bool]$on) { if ($on) { 'true' } else { 'false' } }
+$techBuildArgs = @(
+    '--build-arg', "DOTNET=$(Bool-Arg ($enabledTech -contains 'dotnet'))", '--build-arg', "NODE=$(Bool-Arg ($enabledTech -contains 'node'))",
+    '--build-arg', "BUN=$(Bool-Arg ($enabledTech -contains 'bun'))", '--build-arg', "NUGET=$(Bool-Arg ($enabledPackages -contains 'nuget'))",
+    '--build-arg', "NPM=$(Bool-Arg ($enabledPackages -contains 'npm'))"
+)
 
 # $IsMacOS/$IsLinux are not defined in Windows PowerShell 5.1, so treat unset as false
 $onMacOS = $IsMacOS -eq $true
@@ -353,44 +422,75 @@ if (-not $onBehalfOf -or -not $gitAuthorEmail) {
     Set them with: git config --global user.name 'Your Name' ; git config --global user.email you@example.com"
 }
 
-# Locate the user's NuGet global packages cache (if any) to mount read-only.
+# Locate the host package caches and mount the ones for the enabled package repos
+# READ-ONLY, so the agent reuses downloads but can never write to the host cache.
+# The image seeds its own writable caches from these mounts at startup.
+$cacheMountArgs = @()
+$cacheMountPrint = ""
+function Add-CacheMount([string]$hostPath, [string]$containerPath, [string]$label) {
+    $resolved = (Resolve-Path $hostPath).Path
+    $script:cacheMountArgs += @('-v', "${resolved}:${containerPath}:ro")
+    $script:cacheMountPrint += "`n                -v `"${resolved}:${containerPath}:ro`""
+    "    Mounting $label read-only: $resolved"
+}
+$containerHome = "/home/$agentNameLower"
+
+# NuGet
 # https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders
-$nugetPackages = ""
-if ($env:NUGET_PACKAGES -and (Test-Path -Path $env:NUGET_PACKAGES -PathType Container)) {
-    $nugetPackages = $env:NUGET_PACKAGES
-} else {
-    $nugetConfigs = @("$HOME/.nuget/NuGet/NuGet.Config", "$HOME/.config/NuGet/NuGet.Config")
-    if ($env:APPDATA) { $nugetConfigs = @("$env:APPDATA/NuGet/NuGet.Config") + $nugetConfigs }
-    foreach ($nugetConfig in $nugetConfigs) {
-        if (Test-Path -Path $nugetConfig -PathType Leaf) {
-            $globalPackagesFolder = $null
-            try {
-                $globalPackagesFolder = ([xml](Get-Content $nugetConfig -Raw)).configuration.config.add |
-                    Where-Object { $_.key -eq 'globalPackagesFolder' } |
-                    Select-Object -First 1 -ExpandProperty value
-            } catch {
-                # Like NuGet, silently ignore a malformed config file
-            }
-            if ($globalPackagesFolder -and (Test-Path -Path $globalPackagesFolder -PathType Container)) {
-                $nugetPackages = $globalPackagesFolder
-                break
+if ($enabledPackages -contains 'nuget') {
+    $nugetPackages = ""
+    if ($env:NUGET_PACKAGES -and (Test-Path -Path $env:NUGET_PACKAGES -PathType Container)) {
+        $nugetPackages = $env:NUGET_PACKAGES
+    } else {
+        $nugetConfigs = @("$HOME/.nuget/NuGet/NuGet.Config", "$HOME/.config/NuGet/NuGet.Config")
+        if ($env:APPDATA) { $nugetConfigs = @("$env:APPDATA/NuGet/NuGet.Config") + $nugetConfigs }
+        foreach ($nugetConfig in $nugetConfigs) {
+            if (Test-Path -Path $nugetConfig -PathType Leaf) {
+                $globalPackagesFolder = $null
+                try {
+                    $globalPackagesFolder = ([xml](Get-Content $nugetConfig -Raw)).configuration.config.add |
+                        Where-Object { $_.key -eq 'globalPackagesFolder' } |
+                        Select-Object -First 1 -ExpandProperty value
+                } catch {
+                    # Like NuGet, silently ignore a malformed config file
+                }
+                if ($globalPackagesFolder -and (Test-Path -Path $globalPackagesFolder -PathType Container)) {
+                    $nugetPackages = $globalPackagesFolder
+                    break
+                }
             }
         }
+        if (-not $nugetPackages -and (Test-Path -Path "$HOME/.nuget/packages" -PathType Container)) {
+            $nugetPackages = "$HOME/.nuget/packages"
+        }
     }
-    if (-not $nugetPackages -and (Test-Path -Path "$HOME/.nuget/packages" -PathType Container)) {
-        $nugetPackages = "$HOME/.nuget/packages"
+    if ($nugetPackages) {
+        Add-CacheMount $nugetPackages "$containerHome/.nuget/packages-host" 'NuGet package cache'
+    } else {
+        "    No NuGet package cache found; restore will use package sources only"
     }
 }
 
-$nugetMountArgs = @()
-$nugetMountPrint = ""
-if ($nugetPackages) {
-    $nugetPackages = (Resolve-Path $nugetPackages).Path
-    $nugetMountArgs = @('-v', "${nugetPackages}:/home/$agentNameLower/.nuget/packages-host:ro")
-    $nugetMountPrint = "`n                -v `"${nugetPackages}`:/home/$agentNameLower/.nuget/packages-host:ro`""
-    "    Mounting NuGet package cache read-only: $nugetPackages"
-} else {
-    "    No NuGet package cache found; restore will use package sources only"
+# npm: NPM_CONFIG_CACHE, then the platform default (~/.npm, or %LocalAppData%\npm-cache)
+if ($enabledPackages -contains 'npm') {
+    $npmCache = @($env:NPM_CONFIG_CACHE, "$env:LOCALAPPDATA/npm-cache", "$HOME/.npm") |
+        Where-Object { $_ -and (Test-Path -Path $_ -PathType Container) } | Select-Object -First 1
+    if ($npmCache) {
+        Add-CacheMount $npmCache "$containerHome/.npm-host" 'npm package cache'
+    } else {
+        "    No npm package cache found; npm will download into the container"
+    }
+}
+
+# Bun: BUN_INSTALL_CACHE_DIR, then the default ~/.bun/install/cache
+if ($enabledPackages -contains 'bun') {
+    $bunCache = @($env:BUN_INSTALL_CACHE_DIR, "$HOME/.bun/install/cache") |
+        Where-Object { $_ -and (Test-Path -Path $_ -PathType Container) } | Select-Object -First 1
+    if ($bunCache) {
+        Add-CacheMount $bunCache "$containerHome/.bun-host" 'Bun package cache'
+    } else {
+        "    No Bun package cache found; Bun will download into the container"
+    }
 }
 
 # Build image if requested
@@ -404,7 +504,8 @@ if ($buildImage) {
         [IO.File]::WriteAllText($dockerfile, $dockerfileText)
         "    Updated '# last changed' dates in $dockerfileDir/Dockerfile to $today"
     }
-    & $runtime build -t "$image`:latest" $dockerfileDir
+    "    Building with tech $($enabledTech -join ','); package repos $($enabledPackages -join ',')"
+    & $runtime build $techBuildArgs -t "$image`:latest" $dockerfileDir
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "$runtime build failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
@@ -467,7 +568,7 @@ if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
                 -v `"$saveDir/.claude`:/home/$agentNameLower/.claude`" `
                 -v `"$saveDir/.claude.json`:/home/$agentNameLower/.claude.json`" `
                 -v `"$saveDir/.config/opencode`:/home/$agentNameLower/.config/opencode`" `
-                -v `"$saveDir/.local/share/opencode`:/home/$agentNameLower/.local/share/opencode`"$nugetMountPrint
+                -v `"$saveDir/.local/share/opencode`:/home/$agentNameLower/.local/share/opencode`"$cacheMountPrint
             $image`:latest$agentCmdPrint
 "@
 
@@ -488,5 +589,5 @@ if ($dryRun) {
             -v "$saveDir/.claude.json:/home/$agentNameLower/.claude.json" `
             -v "$saveDir/.config/opencode:/home/$agentNameLower/.config/opencode" `
             -v "$saveDir/.local/share/opencode:/home/$agentNameLower/.local/share/opencode" `
-            $nugetMountArgs `
+            $cacheMountArgs `
     $image`:latest $agentCmd

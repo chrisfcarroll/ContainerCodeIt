@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Launches an Alpine Linux container with OpenCode, Claude Code, and .NET development tools.
+# Launches an Alpine Linux container with OpenCode, Claude Code, and a parameterisable tech stack.
 #
 # Picks a container runtime automatically:
 # - On macOS, uses the Apple container CLI (container) if installed
@@ -37,7 +37,10 @@
 #                            Defaults to "."
 #   --save-dir DIR           Host directory for storing agent configuration and state volumes.
 #                            Created if missing. Defaults to ~/.config/code-it
-#   --image NAME             Image name to run. Default: "code-it-alpine-dotnet"
+#   --image NAME             Image name to run. Default: "code-it-alpine-<tech>", a
+#                            slug of the resolved --tech list, e.g. code-it-alpine-dotnet,
+#                            code-it-alpine-node-bun. Set it explicitly when running an
+#                            image built with different tech, or give the same --tech.
 #   --build-image            If specified, builds the image from the Dockerfile before running.
 #   --rebuild-image          Like --build-image, but first updates the "# last changed"
 #                            cache-bust dates in the Dockerfile to today, forcing the
@@ -55,6 +58,18 @@
 #   --agent-name NAME        Name of the agent running in the container. Used for Git author
 #                            attribution and home directory naming. Must match the USER set in
 #                            the Dockerfile. Default: "Agent1"
+#
+# Tech stack (used as Docker --build-arg when --build-image is given, and to
+# decide which host package caches are mounted read-only). Passing a list
+# REPLACES the default set, so there are no on/off flags to clash with future
+# tech names:
+#   --tech LIST              Comma-separated tech stacks to build. Default: dotnet,node.
+#                            Known: dotnet, node, bun.
+#   --packages LIST          Comma-separated package repos whose host cache is mounted
+#                            read-only. Default: the package repos implied by --tech
+#                            (dotnet->nuget, node->npm). Known: nuget, npm, bun.
+#                            --packages is taken exactly as given, so --tech node,bun
+#                            --packages npm can pair npm with Bun instead of Bun's cache.
 #   --dry-run                Print the run command without executing it.
 #   --help                   Show this help message.
 #
@@ -90,12 +105,13 @@
 #     can destroy the container and create a new one without logging in again
 #   - Alternatively, use ANTHROPIC_API_KEY (claude) or a provider API key env var (opencode)
 #     to avoid volume mounts for credentials
-#   - If a NuGet package cache is found on the host, it is mounted read-only at
-#     ~/.nuget/packages-host, which the image's NuGet.Config registers as a fallback
-#     package folder: restores reuse host-cached packages, and the container can
-#     never write to the host cache. Looked up, in order, from: the NUGET_PACKAGES
-#     environment variable, the globalPackagesFolder setting in the user-level
-#     NuGet.Config, and the default ~/.nuget/packages
+#   - Host package caches are mounted read-only (never written) for the package
+#     repos in --packages when a cache is found, so downloads are reused:
+#       nuget: ~/.nuget/packages-host (a fallbackPackageFolder). Looked up, in order,
+#              from the NUGET_PACKAGES env var, the globalPackagesFolder setting in
+#              the user-level NuGet.Config, and the default ~/.nuget/packages
+#       npm:   ~/.npm-host, seeded into the container's own ~/.npm at startup
+#       bun:   ~/.bun-host, seeded into ~/.bun/install/cache at startup
 #
 #   What each mount preserves:
 #   ┌──────────────────────────┬────────────────────────────────────────────────────────────────┐
@@ -154,7 +170,7 @@ nuget_config_global_packages_folder() {
 code_agent="opencode"
 work_dir_to_mount="."
 save_dir="$HOME/.config/code-it"
-image="code-it-alpine-dotnet"
+image=""
 build_image=false
 rebuild_image=false
 dockerfile_dir="$script_dir"
@@ -167,6 +183,11 @@ prompt=""
 prompt_set=false
 headless=false
 agent_args=()
+
+# Tech stack (see --help). Empty means "use the defaults": dotnet,node and the
+# package repos they imply (dotnet->nuget, node->npm).
+tech_list=""
+packages_list=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -220,6 +241,14 @@ while [[ $# -gt 0 ]]; do
             agent_name="$2"
             shift 2
             ;;
+        --tech)
+            tech_list="$2"
+            shift 2
+            ;;
+        --packages)
+            packages_list="$2"
+            shift 2
+            ;;
         --prompt)
             prompt="$2"
             prompt_set=true
@@ -259,6 +288,75 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Resolve --tech / --packages into a set of known tech names (space-separated in
+# $enabled_tech) and known package repo names (in $enabled_packages).
+# --tech replaces the default {dotnet,node}; --packages replaces the set implied
+# by --tech (dotnet->nuget, node->npm). An unknown name is a hard error.
+enabled_tech=""
+enabled_packages=""
+
+# comma_list_add LIST ITEM: append ITEM to the space-separated LIST if absent
+comma_list_add() { case " $1 " in *" $2 "*) printf '%s' "$1" ;; *) printf '%s' "${1:+$1 }$2" ;; esac; }
+
+if [[ -n "$tech_list" ]]; then
+    IFS=',' read -r -a requested_tech <<< "$tech_list"
+else
+    requested_tech=(dotnet node)
+fi
+for t in ${requested_tech[@]+"${requested_tech[@]}"}; do
+    case "$t" in
+        dotnet|node|bun) enabled_tech=$(comma_list_add "$enabled_tech" "$t") ;;
+        "") ;;
+        *) echo "Warning: Unknown tech stack '$t'. Known: dotnet, node, bun." >&2; exit 1 ;;
+    esac
+done
+
+if [[ -n "$packages_list" ]]; then
+    IFS=',' read -r -a requested_packages <<< "$packages_list"
+else
+    requested_packages=()
+    case " $enabled_tech " in *" dotnet "*) requested_packages+=(nuget) ;; esac
+    case " $enabled_tech " in *" node "*)   requested_packages+=(npm)   ;; esac
+fi
+for p in ${requested_packages[@]+"${requested_packages[@]}"}; do
+    case "$p" in
+        nuget|npm|bun) enabled_packages=$(comma_list_add "$enabled_packages" "$p") ;;
+        "") ;;
+        *) echo "Warning: Unknown package repo '$p'. Known: nuget, npm, bun." >&2; exit 1 ;;
+    esac
+done
+
+tech_has()      { case " $enabled_tech "     in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+package_has()   { case " $enabled_packages " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+# Default image name from the tech list, e.g. code-it-alpine-dotnet or
+# code-it-alpine-node-bun. --image overrides it.
+if [[ -z "$image" ]]; then
+    image="code-it-alpine-$(printf '%s' "$enabled_tech" | tr ' ' '-')"
+fi
+
+# Build args for the tech stack, passed straight through by --build-image.
+tech_on() { if tech_has "$1"; then echo true; else echo false; fi; }
+pkg_on()  { if package_has "$1"; then echo true; else echo false; fi; }
+tech_build_args=(
+    --build-arg "DOTNET=$(tech_on dotnet)"
+    --build-arg "NODE=$(tech_on node)"
+    --build-arg "BUN=$(tech_on bun)"
+    --build-arg "NUGET=$(pkg_on nuget)"
+    --build-arg "NPM=$(pkg_on npm)"
+)
+
+# Warn if the resolved tech does not match the tech slug of a default image name,
+# since the image was likely built for a different stack.
+if [[ "$image" == code-it-alpine-* ]]; then
+    image_tech="${image#code-it-alpine-}"
+    image_tech=${image_tech//-/,}
+    if [[ "$image_tech" != "$(printf '%s' "$enabled_tech" | tr ' ' ',')" ]]; then
+        echo "Warning: image '$image' looks built for tech '$image_tech' but --tech is '$(printf '%s' "$enabled_tech" | tr ' ' ',')'." >&2
+        echo "    Pass the same --tech used to build the image, or set --image explicitly." >&2
+    fi
+fi
 
 # Detect / validate the container runtime (after parsing, so --runtime is honoured).
 # On macOS prefer the Apple container CLI if present; otherwise use docker if present;
@@ -411,45 +509,85 @@ if [[ -z "$on_behalf_of" || -z "$git_author_email" ]]; then
     echo "    Set them with: git config --global user.name 'Your Name' ; git config --global user.email you@example.com" >&2
 fi
 
-# Locate the user's NuGet global packages cache (if any) to mount read-only.
-# Precedence per https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders :
+# Locate the host package caches and mount the ones for the enabled package repos
+# READ-ONLY, so the agent reuses downloads but can never write to the host cache.
+# The image seeds its own writable caches from these mounts at startup.
+cache_mounts=()
+cache_mounts_print=""
+add_cache_mount() {
+    local host_path container_path label
+    host_path=$(abs_dir "$1")
+    container_path="$2"
+    label="$3"
+    cache_mounts+=(-v "$host_path:$container_path:ro")
+    cache_mounts_print+="
+                -v \"$host_path:$container_path:ro\" \\"
+    echo "    Mounting $label read-only: $host_path"
+}
+container_home="/home/$agent_name_lower"
+
+# NuGet. Precedence per https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders :
 # the NUGET_PACKAGES environment variable, then the globalPackagesFolder setting in
 # the user-level NuGet.Config, then the default ~/.nuget/packages.
-nuget_packages=""
-if [[ -n "${NUGET_PACKAGES:-}" && -d "$NUGET_PACKAGES" ]]; then
-    nuget_packages="$NUGET_PACKAGES"
-else
-    nuget_configs=("$HOME/.nuget/NuGet/NuGet.Config" "$HOME/.config/NuGet/NuGet.Config")
-    if [[ -n "${APPDATA:-}" ]]; then
-        nuget_configs=("$APPDATA/NuGet/NuGet.Config" "${nuget_configs[@]}")
-    fi
-    for nuget_config in "${nuget_configs[@]}"; do
-        if [[ -f "$nuget_config" ]]; then
-            gpf=$(nuget_config_global_packages_folder "$nuget_config")
-            if [[ -n "$gpf" && -d "$gpf" ]]; then
-                nuget_packages="$gpf"
-                break
-            fi
+if package_has nuget; then
+    nuget_packages=""
+    if [[ -n "${NUGET_PACKAGES:-}" && -d "$NUGET_PACKAGES" ]]; then
+        nuget_packages="$NUGET_PACKAGES"
+    else
+        nuget_configs=("$HOME/.nuget/NuGet/NuGet.Config" "$HOME/.config/NuGet/NuGet.Config")
+        if [[ -n "${APPDATA:-}" ]]; then
+            nuget_configs=("$APPDATA/NuGet/NuGet.Config" "${nuget_configs[@]}")
         fi
-    done
-    if [[ -z "$nuget_packages" && -d "$HOME/.nuget/packages" ]]; then
-        nuget_packages="$HOME/.nuget/packages"
+        for nuget_config in "${nuget_configs[@]}"; do
+            if [[ -f "$nuget_config" ]]; then
+                gpf=$(nuget_config_global_packages_folder "$nuget_config")
+                if [[ -n "$gpf" && -d "$gpf" ]]; then
+                    nuget_packages="$gpf"
+                    break
+                fi
+            fi
+        done
+        if [[ -z "$nuget_packages" && -d "$HOME/.nuget/packages" ]]; then
+            nuget_packages="$HOME/.nuget/packages"
+        fi
+    fi
+    if [[ -n "$nuget_packages" ]]; then
+        add_cache_mount "$nuget_packages" "$container_home/.nuget/packages-host" "NuGet package cache"
+    else
+        echo "    No NuGet package cache found; restore will use package sources only"
     fi
 fi
 
-# If a cache was found, mount it read-only; the image's NuGet.Config registers the
-# mount point as a fallback package folder, so restores reuse host-cached packages
-# and the container can never write to the host cache.
-nuget_mount=()
-nuget_mount_print=""
-if [[ -n "$nuget_packages" ]]; then
-    nuget_packages=$(abs_dir "$nuget_packages")
-    nuget_mount=(-v "$nuget_packages:/home/$agent_name_lower/.nuget/packages-host:ro")
-    nuget_mount_print="
-                -v \"$nuget_packages:/home/$agent_name_lower/.nuget/packages-host:ro\" \\"
-    echo "    Mounting NuGet package cache read-only: $nuget_packages"
-else
-    echo "    No NuGet package cache found; restore will use package sources only"
+# npm: NPM_CONFIG_CACHE, then the platform default (~/.npm, or %LocalAppData%\npm-cache)
+if package_has npm; then
+    npm_cache=""
+    for candidate in "${NPM_CONFIG_CACHE:-}" "${LOCALAPPDATA:-}/npm-cache" "$HOME/.npm"; do
+        if [[ -n "$candidate" && -d "$candidate" ]]; then
+            npm_cache="$candidate"
+            break
+        fi
+    done
+    if [[ -n "$npm_cache" ]]; then
+        add_cache_mount "$npm_cache" "$container_home/.npm-host" "npm package cache"
+    else
+        echo "    No npm package cache found; npm will download into the container"
+    fi
+fi
+
+# Bun: BUN_INSTALL_CACHE_DIR, then the default ~/.bun/install/cache
+if package_has bun; then
+    bun_cache=""
+    for candidate in "${BUN_INSTALL_CACHE_DIR:-}" "$HOME/.bun/install/cache"; do
+        if [[ -n "$candidate" && -d "$candidate" ]]; then
+            bun_cache="$candidate"
+            break
+        fi
+    done
+    if [[ -n "$bun_cache" ]]; then
+        add_cache_mount "$bun_cache" "$container_home/.bun-host" "Bun package cache"
+    else
+        echo "    No Bun package cache found; Bun will download into the container"
+    fi
 fi
 
 # Build image if requested
@@ -463,7 +601,8 @@ if [[ "$build_image" == true ]]; then
             && mv "$dockerfile_dir/Dockerfile.tmp" "$dockerfile_dir/Dockerfile"
         echo "    Updated '# last changed' dates in $dockerfile_dir/Dockerfile to $today"
     fi
-    "$runtime" build -t "${image}:latest" "$dockerfile_dir"
+    echo "    Building with tech ${enabled_tech// /,}; package repos ${enabled_packages// /,}"
+    "$runtime" build "${tech_build_args[@]}" -t "${image}:latest" "$dockerfile_dir"
 fi
 
 # Handle port mappings
@@ -541,8 +680,8 @@ cat <<EOF
                 -v "$work_dir_to_mount:/work" \\
                 -v "$save_dir/.claude:/home/$agent_name_lower/.claude" \\
                 -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \\
-                -v "$save_dir/.local/share/opencode:/home/$agent_name_lower/.local/share/opencode" \\$nuget_mount_print
-                -v "$save_dir/.config/opencode:/home/$agent_name_lower/.config/opencode" \\
+                -v "$save_dir/.local/share/opencode:/home/$agent_name_lower/.local/share/opencode" \\
+                -v "$save_dir/.config/opencode:/home/$agent_name_lower/.config/opencode" \\$cache_mounts_print
                 ${image}:latest$agent_cmd_print
 EOF
 
@@ -563,5 +702,5 @@ fi
             -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \
             -v "$save_dir/.config/opencode:/home/$agent_name_lower/.config/opencode" \
             -v "$save_dir/.local/share/opencode:/home/$agent_name_lower/.local/share/opencode" \
-            "${nuget_mount[@]+"${nuget_mount[@]}"}" \
+            "${cache_mounts[@]+"${cache_mounts[@]}"}" \
     "${image}:latest" ${agent_cmd[@]+"${agent_cmd[@]}"}

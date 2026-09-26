@@ -1,9 +1,10 @@
 FROM alpine:3.24
+
+# ===========================================================================
+# Base image: tools every sandbox needs, whatever the tech stack
+# ===========================================================================
 RUN apk add --no-cache zsh curl doas
-RUN apk add --no-cache dotnet10-sdk dotnet8-sdk mono
-RUN dotnet workload update
 RUN apk add --no-cache vim chromium ttf-freefont freetype-dev
-RUN apk add --no-cache nodejs npm git
 RUN apk add --no-cache uv
 RUN apk add --no-cache ca-certificates less ncurses-terminfo-base krb5-libs libgcc libintl libssl3 libstdc++
 RUN apk add --no-cache tzdata userspace-rcu zlib icu-libs
@@ -12,9 +13,74 @@ RUN apk add --no-cache docs oh-my-zsh tmux
 RUN apk add --no-cache libgcc libstdc++ ripgrep bash # Claude.AI & opencode dependencies
 RUN apk add --no-cache musl-locales ncurses-terminfo
 RUN apk add --no-cache krb5
-# PowerShell: Microsoft only ships musl (Alpine) builds for x64, so on other
-# architectures install it as a dotnet tool instead, with gcompat plus a tiny
-# shim for two glibc-only symbols its native library needs (verified on aarch64).
+RUN apk add --no-cache git
+RUN touch /etc/rc.conf
+RUN sed -i 's/#unicode="NO"/#unicode="NO"\nunicode="YES"/' /etc/rc.conf
+
+# ===========================================================================
+# Tech stack selection
+#
+# These build switches are declared as low in the file as the layers that use
+# them allow, so changing one only invalidates the layers below it. Each is a
+# boolean, and each switched off skips its install layer entirely:
+#
+#   DOTNET   .NET SDK + Mono                 (implies NUGET)
+#   NODE     Node.js                         (implies NPM)
+#   BUN      Bun, the all-in-one JS runtime  (implies nothing: it bundles its
+#                                             own runtime, bundler and package
+#                                             manager)
+#   NUGET    NuGet package cache support      (may be selected without DOTNET)
+#   NPM      npm package cache support        (may be selected without NODE)
+#
+# NUGET and NPM may be left empty to follow DOTNET and NODE respectively. The
+# effective values are normalised once into /etc/code-it-tech.env so the later
+# layers can read them.
+# ===========================================================================
+ARG DOTNET=true
+ARG NODE=true
+ARG BUN=false
+ARG NUGET=
+ARG NPM=
+RUN set -e; \
+    case "$NUGET" in true|false) ;; *) NUGET=$DOTNET ;; esac; \
+    case "$NPM"   in true|false) ;; *) NPM=$NODE   ;; esac; \
+    printf 'DOTNET=%s\nNODE=%s\nBUN=%s\nNUGET=%s\nNPM=%s\n' \
+        "$DOTNET" "$NODE" "$BUN" "$NUGET" "$NPM" > /etc/code-it-tech.env
+
+# --- .NET ------------------------------------------------------------------
+RUN . /etc/code-it-tech.env; if [ "$DOTNET" = true ]; then \
+        apk add --no-cache dotnet10-sdk dotnet8-sdk mono; \
+        dotnet workload update; \
+    fi
+
+# --- Node.js ---------------------------------------------------------------
+RUN . /etc/code-it-tech.env; if [ "$NODE" = true ]; then \
+        apk add --no-cache nodejs; \
+    fi
+
+# --- npm -------------------------------------------------------------------
+# Selecting npm without Node.js still works: the apk package pulls nodejs in.
+RUN . /etc/code-it-tech.env; if [ "$NPM" = true ]; then \
+        apk add --no-cache npm; \
+    fi
+
+# --- Bun -------------------------------------------------------------------
+# Bun ships musl builds and its installer already picks the right architecture
+# for Alpine. Install into /usr/local so every user finds it on PATH; unzip is
+# its only requirement.
+RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
+        apk add --no-cache unzip; \
+        curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash; \
+        /usr/local/bin/bun --version; \
+    fi
+
+# ===========================================================================
+# PowerShell
+# ===========================================================================
+# Microsoft only ships musl (Alpine) builds for x64, so on other architectures
+# install it as a dotnet tool instead, with gcompat plus a tiny shim for two
+# glibc-only symbols its native library needs (verified on aarch64). That path
+# needs the .NET SDK, so it is skipped when DOTNET is switched off.
 RUN set -e; \
     if [ "$(uname -m)" = "x86_64" ]; then \
         curl -L https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/powershell-7.6.6-linux-musl-x64.tar.gz -o /tmp/powershell.tar.gz && \
@@ -23,7 +89,7 @@ RUN set -e; \
         chmod +x /opt/microsoft/powershell/7/pwsh && \
         ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh && \
         rm -rf /tmp/powershell*; \
-    else \
+    elif . /etc/code-it-tech.env && [ "$DOTNET" = true ]; then \
         apk add --no-cache gcompat && \
         apk add --no-cache --virtual .pwsh-build build-base && \
         dotnet tool install --tool-path /opt/microsoft/powershell PowerShell && \
@@ -38,18 +104,65 @@ RUN set -e; \
         apk del .pwsh-build && \
         printf '#!/bin/sh\nLD_PRELOAD=/usr/lib/libpsl-chk-shim.so exec /opt/microsoft/powershell/pwsh "$@"\n' > /usr/bin/pwsh && \
         chmod +x /usr/bin/pwsh; \
+    else \
+        echo "Skipping PowerShell: it needs the .NET SDK on non-x86_64"; \
     fi
-RUN touch /etc/rc.conf
-RUN sed -i 's/#unicode="NO"/#unicode="NO"\nunicode="YES"/' /etc/rc.conf
+
+# ===========================================================================
+# User and permissions
+# ===========================================================================
 RUN adduser -S agent1 -G wheel
 RUN sed -i 's#^\(agent1:[^:]*:[^:]*:[^:]*:[^:]*:[^:]*:\)/sbin/nologin$#\1/bin/zsh#' /etc/passwd
+# Passwordless doas lets the agent install further tools itself. apk is always
+# allowed; each enabled tech adds its own command(s), mirroring the switches in
+# the tech stack section above.
 RUN mkdir -p /etc/doas.d
-RUN echo "permit nopass agent1 as root cmd apk" > /etc/doas.d/doas.conf
-RUN echo "permit nopass agent1 as root cmd dotnet" >> /etc/doas.d/doas.conf
-RUN echo "permit nopass agent1 as root cmd npm" >> /etc/doas.d/doas.conf
-RUN echo "permit nopass agent1 as root cmd node" >> /etc/doas.d/doas.conf
-# ---------------------------------------------------------------------
+RUN . /etc/code-it-tech.env; { \
+        echo "permit nopass agent1 as root cmd apk"; \
+        if [ "$DOTNET" = true ]; then echo "permit nopass agent1 as root cmd dotnet"; fi; \
+        if [ "$NUGET" = true ]; then echo "permit nopass agent1 as root cmd nuget"; fi; \
+        if [ "$NODE" = true ] || [ "$NPM" = true ]; then echo "permit nopass agent1 as root cmd node"; fi; \
+        if [ "$NPM" = true ]; then echo "permit nopass agent1 as root cmd npm"; fi; \
+        if [ "$BUN" = true ]; then echo "permit nopass agent1 as root cmd bun"; fi; \
+    } > /etc/doas.d/doas.conf
+
+# ===========================================================================
+# Package caches
+# ===========================================================================
+# The launcher bind-mounts the host package caches READ-ONLY at the "-host"
+# paths below, so the agent reuses downloads without ever writing to the host.
+# The container keeps its own writable cache alongside. /home/agent1/go.sh
+# seeds the writable cache from the read-only mount at startup.
+#
+# NuGet uses a fallbackPackageFolder, so dotnet restore reads the host cache
+# directly (packages not found there are downloaded into ~/.nuget/packages).
 USER agent1
+RUN . /etc/code-it-tech.env; if [ "$NUGET" = true ]; then \
+        mkdir -p ~/.nuget/packages-host ~/.nuget/NuGet; \
+        printf '%s\n' \
+            '<?xml version="1.0" encoding="utf-8"?>' \
+            '<configuration>' \
+            '  <fallbackPackageFolders>' \
+            '    <add key="host-nuget-cache" value="/home/agent1/.nuget/packages-host" />' \
+            '  </fallbackPackageFolders>' \
+            '  <packageSources>' \
+            '    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />' \
+            '    <add key="host-nuget-cache" value="/home/agent1/.nuget/packages-host" />' \
+            '  </packageSources>' \
+            '</configuration>' > ~/.nuget/NuGet/NuGet.Config; \
+    fi
+# npm and Bun use their default writable caches; create both them and the
+# read-only host mount points so the launcher always has somewhere to mount.
+RUN . /etc/code-it-tech.env; if [ "$NPM" = true ]; then \
+        mkdir -p ~/.npm ~/.npm-host; \
+    fi
+RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
+        mkdir -p ~/.bun/install/cache ~/.bun-host; \
+    fi
+
+# ===========================================================================
+# Coding agents and user environment
+# ===========================================================================
 RUN mkdir -p ~/.local/bin
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
 RUN curl -fsSL https://opencode.ai/install | bash # last changed 2026-09-26
@@ -97,6 +210,16 @@ RUN cat <<'EOF' >> ~/go.sh
 # it answers, exits, and the container exits with the agent's exit code.
 git config --global --add safe.directory /work
 for d in /work/*/ ; do git config --global --add safe.directory "$d" ; done
+# Seed the writable package caches from the launcher's read-only host-cache
+# mounts (if any), so downloads are reused without writing to the host caches.
+if [ -d "$HOME/.npm-host" ] ; then
+    mkdir -p "$HOME/.npm"
+    cp -a -n "$HOME/.npm-host/." "$HOME/.npm/" 2>/dev/null || true
+fi
+if [ -d "$HOME/.bun-host" ] ; then
+    mkdir -p "$HOME/.bun/install/cache"
+    cp -a -n "$HOME/.bun-host/." "$HOME/.bun/install/cache/" 2>/dev/null || true
+fi
 case "${CODE_AGENT:-opencode}" in
     opencode) agent_bin=/home/agent1/.opencode/bin/opencode ;;
     claude)   agent_bin=/home/agent1/.local/bin/claude ;;
@@ -112,37 +235,19 @@ tmux -u new-session -d ; tmux -u new-session "$agent_cmd"
 EOF
 RUN chmod a+x ~/go.sh
 RUN mkdir -p ~/.config/opencode
-# NuGet: the launcher scripts mount the host's NuGet package cache (if one is
-# found) read-only at ~/.nuget/packages-host. Register that mount point as a
-# fallback package folder in the user-level NuGet.Config (the default location
-# for the dotnet CLI on Linux), so restores reuse host-cached packages without
-# downloading them, and can never write to the host cache; packages not found
-# there are downloaded into the container's own ~/.nuget/packages as usual.
-# Create the mount point so the fallback folder always exists, even if empty.
-RUN mkdir -p ~/.nuget/packages-host ~/.nuget/NuGet
-RUN cat <<'EOF' > ~/.nuget/NuGet/NuGet.Config
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <fallbackPackageFolders>
-    <add key="host-nuget-cache" value="/home/agent1/.nuget/packages-host" />
-  </fallbackPackageFolders>
-  <packageSources>
-    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
-    <add key="host-nuget-cache" value="/home/agent1/.nuget/packages-host" />
-  </packageSources>
-</configuration>
-EOF
 WORKDIR /work
 # --------------------------------
 # Repos to work on can be mounted at runtime under /work.
-# Also mount the state directories for whichever agent(s) you use, for up to 6 mounts:
+# Also mount the state directories for whichever agent(s) you use, for up to 7 mounts:
 # 1. Repos directory
 # 2. ~/.claude directory (claude credentials, settings & memory)
 # 3. ~/.claude.json file (claude OAuth session data & MCP configs)
 # 4. ~/.config/opencode directory (opencode configuration)
 # 5. ~/.local/share/opencode directory (opencode data & auth)
-# 6. Host's NuGet package cache at ~/.nuget/packages-host, READ-ONLY (optional;
-#    registered as a NuGet fallback package folder by ~/.nuget/NuGet/NuGet.Config)
+# 6. Host package caches, READ-ONLY, for the package repos selected at build time:
+#    ~/.nuget/packages-host (NuGet, a fallbackPackageFolder)
+#    ~/.npm-host           (npm cache, seeded into ~/.npm at startup)
+#    ~/.bun-host           (Bun cache, seeded into ~/.bun/install/cache at startup)
 # Choose the agent with -e CODE_AGENT=opencode (default) or -e CODE_AGENT=claude
 # Example :
 #     docker run -it --rm \
@@ -156,7 +261,8 @@ WORKDIR /work
 #                -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
 #                -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \
 #                -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
-#        code-it-alpine-dotnet:latest
+#                -v ~/.nuget/packages:/home/agent1/.nuget/packages-host:ro \
+#        code-it-alpine-dotnet-node:latest
 # --------------------------------
 ARG GIT_AUTHOR_NAME
 ARG GIT_AUTHOR_EMAIL

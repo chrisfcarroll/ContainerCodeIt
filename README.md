@@ -51,14 +51,52 @@ In principal either powershell or bash scripts should work on any O/S.
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
 | `--work-dir` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
-| `--image` | `-image` | `code-it-alpine-dotnet` | Image name |
+| `--image` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--tech` (e.g. `code-it-alpine-node-bun`) |
 | `--build-image` | `-buildImage` | off | Build the image before running |
 | `--rebuild-image` | `-rebuildImage` | off | Build the image, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
 | `--runtime` | `-runtime` | auto-detect | `docker` or `container` |
 | `--ports` | `-portsMap` | `0:3000` `0:3001` (docker); `3000:3000` `3001:3001` (container) | Port mappings (max 2); host port 0 auto-assigns |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
+| `--tech LIST` | `-tech LIST` | `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun` |
+| `--packages LIST` | `-packages LIST` | implied by `tech` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run` | `-dryRun` | off | Print the run command without executing |
+
+## Tech stacks
+
+The Dockerfile takes build-time switches for the tech stacks to include, and the
+launchers expose them as two comma-separated lists, passed to `docker build` as
+`--build-arg`s:
+
+- `--tech` / `-tech` — tech stacks to build: `dotnet`, `node`, `bun`. Default `dotnet,node`.
+- `--packages` / `-packages` — package repos whose host cache is mounted read-only:
+  `nuget`, `npm`, `bun`. Default: the repos implied by `--tech` (`dotnet`->`nuget`,
+  `node`->`npm`).
+
+A list *replaces* the default set rather than toggling it, so there is no per-tech
+on/off flag to clash with future tech names as the list grows. Each tech left out skips
+its layers entirely.
+
+```bash
+# Match the original image: .NET + Node.js (nuget + npm implied)
+./code-it.sh --build-image
+
+# A Bun-only sandbox with a read-only host Bun cache
+./code-it.sh --build-image --tech bun --packages bun
+
+# Node.js and Bun, but npm only (e.g. you drive Bun through npm)
+./code-it.sh --build-image --tech node,bun --packages npm
+```
+
+```powershell
+.\Code-It.ps1 -buildImage -tech 'node,bun' -packages npm
+```
+
+Each enabled tech also adds a passwordless `doas` rule, so the agent can install more
+tools itself (`doas dotnet`, `doas node`, `doas npm`, `doas bun`).
+
+Each enabled tech also adds a passwordless `doas` rule, so the agent can install more
+tools itself (`doas dotnet`, `doas node`, `doas npm`, `doas bun`).
 
 ## Prompts and agent flags
 
@@ -135,7 +173,7 @@ autoload -Uz compinit && compinit
 Something like this:
 
 ```bash
-# docker build . -t code-it-alpine-dotnet:latest
+# docker build . -t code-it-alpine-dotnet-node:latest
 
 docker run -it --rm \
     -p 3000:3000 -p 3001:3001 \
@@ -147,16 +185,20 @@ docker run -it --rm \
     -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
     -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \
     -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
-    code-it-alpine-dotnet:latest
+    code-it-alpine-dotnet-node:latest
 ```
 
 ## What's in the image
 
-Edit the **Dockerfile** to taste. The default version includes:
+Edit the **Dockerfile** to taste. The default build includes:
 
 - **Alpine Linux 3.24** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
 - **Claude Code CLI** and **OpenCode CLI**
-- A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, `dotnet`, `npm`, and `node`
+- A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, plus
+  `dotnet`, `node`, `npm` and/or `bun` for whichever techs/packages are enabled
+
+Use the [tech lists](#tech-stacks) to build an image with a different mix, for example
+Bun instead of .NET + Node.js.
 
 On startup, the container launches a **tmux** session running the chosen agent, and a `zsh` terminal available via the tmux switch hotkey sequence, `Ctrl-B S`.
 
@@ -166,7 +208,11 @@ container exits when the agent does. That is what `--headless` uses.
 
 ## Rough Edges
 
-- There's a choice between creating a huge “kitchen-sink” Dockerfile that includes All The Tech Stacks and All The Coding Agents; or a list of Dockerfiles for combinations of tech stack & agent ; or just the one example. This repo currently has just the one example techstack, intended to be easy to to copy and edit.
+- One Dockerfile now supports build-time tech-stack lists (`dotnet`, `node`, `bun`, and
+  the package repos `nuget`, `npm`), so combinations do not need separate files. Python
+  and Java are the obvious next techs to add.
+- The image still ships both coding agents; making the agents build-time switches too is
+  the next step.
 - Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it --rebuild-image` / `code-it.ps1 -rebuildImage`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
 
@@ -191,7 +237,9 @@ The launcher scripts keep all agent state under one save dir (default `~/.config
 | `/home/agent1/.claude.json` | Persists Claude OAuth session data, MCP configs, and preferences |
 | `/home/agent1/.config/opencode` | Persists OpenCode configuration, including `opencode.json` |
 | `/home/agent1/.local/share/opencode` | Persists OpenCode data and auth |
-| `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache, mounted only if one is found (see below) |
+| `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache (a `fallbackPackageFolder`), if `nuget` is enabled and a cache is found |
+| `/home/agent1/.npm-host` | **Read-only.** Host npm cache, if `npm` is enabled and a cache is found; seeded into `~/.npm` at startup |
+| `/home/agent1/.bun-host` | **Read-only.** Host Bun cache, if `bun` is enabled and a cache is found; seeded into `~/.bun/install/cache` at startup |
 
 Alternatively, pass `-e ANTHROPIC_API_KEY=sk-...` (claude) or a provider API key env var (opencode) instead of mounting state.
 
@@ -243,7 +291,19 @@ To avoid giving agents access to your non-public package sources, and also to av
 
 If you use NuGet, the launcher scripts mounts your NuGet package cache at `/home/agent1/.nuget/packages-host`, where `dotnet restore` etc can use it. NuGet downloads added in the container will go in `~/.nuget/packages` and will disappear when the container exits. (See [Managing the global packages and cache folders](https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders) to understand nuget package cache locations).
 
-### npm, PyPi, etc.
+### npm
+
+`npm` (in `--packages`, implied by `--tech node`) mounts your npm cache read-only at
+`/home/agent1/.npm-host`. The container's `go.sh` seeds its own writable `~/.npm` from
+that mount at startup, so packages already downloaded on the host are reused and the
+host cache is never written to.
+
+### Bun
+
+`bun` (in `--packages`) mounts your Bun cache read-only at `/home/agent1/.bun-host`,
+seeded at startup into `~/.bun/install/cache` in the same way.
+
+### PyPi, etc.
 
 To do.
 

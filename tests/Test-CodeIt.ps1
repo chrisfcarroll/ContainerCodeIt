@@ -47,7 +47,7 @@ if ($onWindows) {
 @echo off
 if "%~1"=="images" if defined STUB_IMAGES_FAIL exit /b 1
 if "%~1"=="build" if defined STUB_BUILD_FAIL exit /b 3
-if "%~1"=="images" echo code-it-alpine-dotnet:latest& goto :eof
+if "%~1"=="images" echo code-it-alpine-dotnet-node:latest& goto :eof
 if "%~1"=="build" echo STUB-DOCKER-BUILD %*& goto :eof
 if "%~1"=="run" echo STUB-DOCKER-RUN %*& goto :eof
 echo stub docker: %*
@@ -56,7 +56,7 @@ echo stub docker: %*
     Set-Content -Path (Join-Path $stubDocker 'docker') -Value @'
 #!/bin/sh
 case "$1" in
-    images) [ -n "$STUB_IMAGES_FAIL" ] && exit 1; echo "code-it-alpine-dotnet:latest" ;;
+    images) [ -n "$STUB_IMAGES_FAIL" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
     build)  [ -n "$STUB_BUILD_FAIL" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -71,7 +71,7 @@ $null = New-Item -ItemType Directory -Force -Path $stubContainer
 if ($onWindows) {
     Set-Content -Path (Join-Path $stubContainer 'container.cmd') -Value @'
 @echo off
-if "%~1"=="image" echo code-it-alpine-dotnet  latest& goto :eof
+if "%~1"=="image" echo code-it-alpine-dotnet-node  latest& goto :eof
 if "%~1"=="build" echo STUB-CONTAINER-BUILD %*& goto :eof
 if "%~1"=="run" echo STUB-CONTAINER-RUN %*& goto :eof
 echo stub container: %*
@@ -80,7 +80,7 @@ echo stub container: %*
     Set-Content -Path (Join-Path $stubContainer 'container') -Value @'
 #!/bin/sh
 case "$1" in
-    image)  echo "code-it-alpine-dotnet  latest" ;;
+    image)  echo "code-it-alpine-dotnet-node  latest" ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
     run)    echo "STUB-CONTAINER-RUN $*"; printf '[%s]' "$@"; echo ;;
     *)      echo "stub container: $*" ;;
@@ -151,7 +151,7 @@ Assert-Contains "reports OpenCode config creation" $r.out 'Created OpenCode conf
 Assert-Contains "uses docker runtime" $r.out 'Using container runtime: docker'
 Assert-Contains "defaults to opencode" $r.out 'CODE_AGENT="opencode"'
 Assert-Contains "docker run command" $r.out 'docker run -it'
-Assert-Contains "image name" $r.out 'code-it-alpine-dotnet:latest'
+Assert-Contains "image name" $r.out 'code-it-alpine-dotnet-node:latest'
 Assert-Contains "work dir mount" $r.out "$scriptDir`:/work"
 Assert-Contains "claude dir mount" $r.out '/.claude:/home/agent1/.claude'
 Assert-Contains "claude.json mount" $r.out '/.claude.json:/home/agent1/.claude.json'
@@ -232,7 +232,7 @@ Assert-Contains "failure to list images asks if the runtime is running" $r.out '
 $r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
 Assert "-buildImage exit code 0" ($r.code -eq 0)
 Assert-Contains "docker build invoked" $r.out 'STUB-DOCKER-BUILD'
-Assert-Contains "build tags the image" $r.out '-t code-it-alpine-dotnet:latest'
+Assert-Contains "build tags the image" $r.out '-t code-it-alpine-dotnet-node:latest'
 $r = Invoke-Scenario $codeIt (@('-buildImage', '-dockerfileDir', $tmp) + $commonArgs) $stubPath
 Assert "-buildImage with no Dockerfile fails" ($r.code -ne 0)
 $env:STUB_BUILD_FAIL = '1'
@@ -254,7 +254,7 @@ $today = [DateTime]::Today.ToString('yyyy-MM-dd')
 $r = Invoke-Scenario $codeIt (@('-rebuildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
 Assert "-rebuildImage exit code 0" ($r.code -eq 0)
 Assert-Contains "rebuild invokes docker build" $r.out 'STUB-DOCKER-BUILD'
-Assert-Contains "rebuild implies build (no -buildImage needed)" $r.out '-t code-it-alpine-dotnet:latest'
+Assert-Contains "rebuild implies build (no -buildImage needed)" $r.out '-t code-it-alpine-dotnet-node:latest'
 $df = Get-Content $dfPath -Raw
 Assert "Dockerfile dates bumped to today" ($df.Contains("# last changed $today"))
 Assert "old dates gone from Dockerfile" (-not $df.Contains('# last changed 2000-01-01'))
@@ -363,56 +363,122 @@ try {
 }
 
 # ---------------------------------------------------------------------------
+"11b. Tech stack: -tech / -packages build args and read-only caches"
+$r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
+Assert-Contains "default build passes DOTNET=true" $r.out '--build-arg DOTNET=true'
+Assert-Contains "default build passes NODE=true" $r.out '--build-arg NODE=true'
+Assert-Contains "default build passes BUN=false" $r.out '--build-arg BUN=false'
+Assert-Contains "dotnet implies NUGET=true" $r.out '--build-arg NUGET=true'
+Assert-Contains "node implies NPM=true" $r.out '--build-arg NPM=true'
+Assert-Contains "reports the resolved tech" $r.out 'tech dotnet,node; package repos nuget,npm'
+
+# -tech replaces the default set
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','node,bun') + $commonArgs) $stubPath
+Assert-Contains "-tech node,bun drops DOTNET" $r.out '--build-arg DOTNET=false'
+Assert-Contains "-tech node,bun keeps NODE" $r.out '--build-arg NODE=true'
+Assert-Contains "-tech node,bun keeps BUN" $r.out '--build-arg BUN=true'
+Assert-Contains "-tech node,bun drops NUGET (dotnet gone)" $r.out '--build-arg NUGET=false'
+Assert-Contains "-tech node,bun keeps NPM (node present)" $r.out '--build-arg NPM=true'
+
+# -packages replaces the implied set, independently of -tech
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','node,bun','-packages','npm') + $commonArgs) $stubPath
+Assert-Contains "-packages npm keeps NPM" $r.out '--build-arg NPM=true'
+Assert-Contains "-packages npm excludes NUGET" $r.out '--build-arg NUGET=false'
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','node,bun','-packages','bun') + $commonArgs) $stubPath
+Assert-Contains "-packages bun selects the BUN package cache" $r.out '--build-arg NPM=false'
+Assert-Contains "-packages bun excludes NUGET" $r.out '--build-arg NUGET=false'
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','bun','-packages','nuget') + $commonArgs) $stubPath
+Assert-Contains "nuget package cache without dotnet" $r.out '--build-arg NUGET=true'
+
+# The default image name follows -tech
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','node,bun') + $commonArgs) $stubPath
+Assert-Contains "image name derives from -tech" $r.out '-t code-it-alpine-node-bun:latest'
+$r = Invoke-Scenario $codeIt (@('-tech','node,bun','-image','code-it-alpine-dotnet') + $commonArgs) $stubPath
+Assert-Contains "warns when the image tech slug disagrees with -tech" $r.out "looks built for tech 'dotnet'"
+
+# Unknown names are hard errors
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','cobol') + $commonArgs) $stubPath
+Assert "-tech with an unknown name fails" ($r.code -ne 0)
+$r = Invoke-Scenario $codeIt (@('-buildImage','-packages','pip') + $commonArgs) $stubPath
+Assert "-packages with an unknown name fails" ($r.code -ne 0)
+
+$npmCache = Join-Path $tmp 'npm-cache'; $bunCache = Join-Path $tmp 'bun-cache'
+$null = New-Item -ItemType Directory -Force -Path $npmCache, $bunCache
+$savedCacheEnv = @{}
+foreach ($v in 'NPM_CONFIG_CACHE','BUN_INSTALL_CACHE_DIR','NUGET_PACKAGES','HOME','USERPROFILE') { $savedCacheEnv[$v] = [Environment]::GetEnvironmentVariable($v) }
+try {
+    $env:HOME = $fakeHome; $env:USERPROFILE = $fakeHome
+    $env:NPM_CONFIG_CACHE = $npmCache
+    $r = Invoke-Scenario $codeIt $commonArgs $stubPath
+    Assert-Contains "npm cache mounted read-only" $r.out "-v `"$npmCache`:/home/agent1/.npm-host:ro`""
+    $env:NPM_CONFIG_CACHE = $null
+    $env:BUN_INSTALL_CACHE_DIR = $bunCache
+    $r = Invoke-Scenario $codeIt (@('-packages','bun') + $commonArgs) $stubPath
+    Assert-Contains "bun cache mounted read-only" $r.out "-v `"$bunCache`:/home/agent1/.bun-host:ro`""
+    $env:BUN_INSTALL_CACHE_DIR = $null
+    $env:NPM_CONFIG_CACHE = $npmCache
+    # An explicit but empty -packages: ',' (PowerShell cannot easily pass a bare "")
+    $r = Invoke-Scenario $codeIt (@('-tech','node','-packages',',') + $commonArgs) $stubPath
+    Assert "empty -packages: no npm mount" (-not $r.out.Contains('.npm-host'))
+    $env:NPM_CONFIG_CACHE = $null
+    $env:NUGET_PACKAGES = (Resolve-Path "$fakeHome/.nuget/packages").Path
+    $r = Invoke-Scenario $codeIt (@('-tech','dotnet','-packages','npm') + $commonArgs) $stubPath
+    Assert "packages without nuget: no nuget mount" (-not $r.out.Contains('packages-host'))
+} finally {
+    foreach ($k in $savedCacheEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $savedCacheEnv[$k]) }
+}
+
+# ---------------------------------------------------------------------------
 "12. Prompt and agent arguments"
 # A leading bare argument, or -prompt, is the opening prompt, spelled each agent's way
 $r = Invoke-Scenario $codeIt (@('-c','explain this repo') + $commonArgs) $stubPath
 Assert "bare prompt exit code 0" ($r.code -eq 0)
-Assert-Contains "claude: bare prompt appended to the image" $r.out 'code-it-alpine-dotnet:latest "explain this repo"'
+Assert-Contains "claude: bare prompt appended to the image" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-c','-prompt','explain this repo') + $commonArgs) $stubPath
-Assert-Contains "claude: -prompt is the same as a bare prompt" $r.out 'code-it-alpine-dotnet:latest "explain this repo"'
+Assert-Contains "claude: -prompt is the same as a bare prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-o','explain this repo') + $commonArgs) $stubPath
-Assert-Contains "opencode: prompt becomes --prompt" $r.out 'code-it-alpine-dotnet:latest --prompt "explain this repo"'
+Assert-Contains "opencode: prompt becomes --prompt" $r.out 'code-it-alpine-dotnet-node:latest --prompt "explain this repo"'
 
 # No prompt and no agent args: nothing is appended, and the run stays interactive
 $r = Invoke-Scenario $codeIt $commonArgs $stubPath
-Assert "no prompt appends nothing" ($r.out.TrimEnd().EndsWith('code-it-alpine-dotnet:latest'))
+Assert "no prompt appends nothing" ($r.out.TrimEnd().EndsWith('code-it-alpine-dotnet-node:latest'))
 Assert-Contains "interactive runs allocate a TTY" $r.out 'docker run -it'
 Assert "interactive runs are not headless" (-not $r.out.Contains('CODE_AGENT_HEADLESS'))
 
 # -headless: one-shot, no TTY, and the agent's non-interactive form
 $r = Invoke-Scenario $codeIt (@('-c','-headless','fix the build') + $commonArgs) $stubPath
-Assert-Contains "claude -headless uses -p" $r.out 'code-it-alpine-dotnet:latest -p "fix the build"'
+Assert-Contains "claude -headless uses -p" $r.out 'code-it-alpine-dotnet-node:latest -p "fix the build"'
 Assert-Contains "-headless passes CODE_AGENT_HEADLESS" $r.out '-e CODE_AGENT_HEADLESS=1'
 Assert-Contains "-headless allocates no TTY" $r.out 'docker run -i --rm'
 $r = Invoke-Scenario $codeIt (@('-o','-headless','fix the build') + $commonArgs) $stubPath
-Assert-Contains "opencode -headless uses run" $r.out 'code-it-alpine-dotnet:latest run "fix the build"'
+Assert-Contains "opencode -headless uses run" $r.out 'code-it-alpine-dotnet-node:latest run "fix the build"'
 
 # Unrecognised arguments go to the agent verbatim: PowerShell has no usable `--`
 $r = Invoke-Scenario $codeIt (@('-c') + $commonArgs + @('--continue','--model','opus')) $stubPath
-Assert-Contains "unrecognised flags pass through" $r.out 'code-it-alpine-dotnet:latest --continue --model opus'
+Assert-Contains "unrecognised flags pass through" $r.out 'code-it-alpine-dotnet-node:latest --continue --model opus'
 $r = Invoke-Scenario $codeIt (@('-c','-headless','-prompt','tidy') + $commonArgs + @('--max-turns','5')) $stubPath
-Assert-Contains "agent flags precede the prompt for claude" $r.out 'code-it-alpine-dotnet:latest -p --max-turns 5 tidy'
+Assert-Contains "agent flags precede the prompt for claude" $r.out 'code-it-alpine-dotnet-node:latest -p --max-turns 5 tidy'
 $r = Invoke-Scenario $codeIt (@('-o','-headless','-prompt','tidy') + $commonArgs + @('--model','opus')) $stubPath
-Assert-Contains "agent flags follow run for opencode" $r.out 'code-it-alpine-dotnet:latest run --model opus tidy'
+Assert-Contains "agent flags follow run for opencode" $r.out 'code-it-alpine-dotnet-node:latest run --model opus tidy'
 # -headless without a prompt leaves the agent command to the caller. Short agent flags
 # that PowerShell reads as one of this script's own parameters (-p) have to be spelled out.
 $r = Invoke-Scenario $codeIt (@('-c','-headless') + $commonArgs + @('--print','count the files')) $stubPath
-Assert-Contains "-headless with no prompt adds no -p of its own" $r.out 'code-it-alpine-dotnet:latest --print "count the files"'
+Assert-Contains "-headless with no prompt adds no -p of its own" $r.out 'code-it-alpine-dotnet-node:latest --print "count the files"'
 $r = Invoke-Scenario $codeIt (@('-c','-headless') + $commonArgs + @('-p','count the files')) $stubPath
 Assert "an agent flag that collides with a parameter prefix is rejected, not silently bound" ($r.code -ne 0)
 
 # The prompt reaches the container as a single argument
 $r = Invoke-Scenario $codeIt (@('-c','-runtime','container','explain this repo','-WorkDirToMount',$scriptDir,'-saveDir',$save)) "$stubContainer$sep$stubPath"
-Assert-Contains "prompt is passed as one argument" $r.out '[code-it-alpine-dotnet:latest][explain this repo]'
+Assert-Contains "prompt is passed as one argument" $r.out '[code-it-alpine-dotnet-node:latest][explain this repo]'
 $r = Invoke-Scenario $codeIt (@('-c','-runtime','container','-headless','fix it','-WorkDirToMount',$scriptDir,'-saveDir',$save)) "$stubContainer$sep$stubPath"
 Assert-Contains "headless run passes -i" $r.out '[-i][--rm]'
-Assert-Contains "headless run passes the prompt after -p" $r.out '[code-it-alpine-dotnet:latest][-p][fix it]'
+Assert-Contains "headless run passes the prompt after -p" $r.out '[code-it-alpine-dotnet-node:latest][-p][fix it]'
 
 # The alias scripts forward prompts and agent flags
 $r = Invoke-Scenario (Join-Path $scriptDir 'Claude-It.ps1') (@('explain this repo') + $commonArgs) $stubPath
-Assert-Contains "Claude-It.ps1 forwards a prompt" $r.out 'code-it-alpine-dotnet:latest "explain this repo"'
+Assert-Contains "Claude-It.ps1 forwards a prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario (Join-Path $scriptDir 'OpenCode-It.ps1') ($commonArgs + @('--model','opus')) $stubPath
-Assert-Contains "OpenCode-It.ps1 forwards agent flags" $r.out 'code-it-alpine-dotnet:latest --model opus'
+Assert-Contains "OpenCode-It.ps1 forwards agent flags" $r.out 'code-it-alpine-dotnet-node:latest --model opus'
 
 # ---------------------------------------------------------------------------
 "13. PowerShell tab completion"

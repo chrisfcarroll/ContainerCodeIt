@@ -47,7 +47,7 @@ mkdir -p "$stub_docker"
 cat > "$stub_docker/docker" <<'EOF'
 #!/bin/sh
 case "$1" in
-    images) [ -n "${STUB_IMAGES_FAIL:-}" ] && exit 1; echo "code-it-alpine-dotnet:latest" ;;
+    images) [ -n "${STUB_IMAGES_FAIL:-}" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
     build)  [ -n "${STUB_BUILD_FAIL:-}" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -60,7 +60,7 @@ mkdir -p "$stub_container"
 cat > "$stub_container/container" <<'EOF'
 #!/bin/sh
 case "$1" in
-    image)  echo "code-it-alpine-dotnet  latest" ;;
+    image)  echo "code-it-alpine-dotnet-node  latest" ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
     run)    echo "STUB-CONTAINER-RUN $*"; printf '[%s]' "$@"; echo ;;
     *)      echo "stub container: $*" ;;
@@ -121,7 +121,7 @@ assert_contains "reports OpenCode config creation" "$out" "Created OpenCode conf
 assert_contains "uses docker runtime" "$out" "Using container runtime: docker"
 assert_contains "defaults to opencode" "$out" 'CODE_AGENT="opencode"'
 assert_contains "docker run command" "$out" "docker run -it"
-assert_contains "image name" "$out" "code-it-alpine-dotnet:latest"
+assert_contains "image name" "$out" "code-it-alpine-dotnet-node:latest"
 assert_contains "work dir mount" "$out" "$script_dir:/work"
 assert_contains "claude dir mount" "$out" "/.claude:/home/agent1/.claude"
 assert_contains "claude.json mount" "$out" "/.claude.json:/home/agent1/.claude.json"
@@ -218,7 +218,7 @@ echo "10. Build image"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image "${common_args[@]}")
 assert "--build-image exit code" "$?"
 assert_contains "docker build invoked" "$out" "STUB-DOCKER-BUILD"
-assert_contains "build tags the image" "$out" "-t code-it-alpine-dotnet:latest"
+assert_contains "build tags the image" "$out" "-t code-it-alpine-dotnet-node:latest"
 PATH="$stub_docker:$PATH" "$code_it" --build-image --dockerfile-dir "$tmp" "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "--build-image with no Dockerfile fails" "$?"
 out=$(STUB_BUILD_FAIL=1 PATH="$stub_docker:$PATH" "$code_it" --build-image --work-dir "$script_dir" --save-dir "$save" 2>&1)
@@ -233,7 +233,7 @@ today=$(date +%Y-%m-%d)
 out=$(PATH="$stub_docker:$PATH" "$code_it" --rebuild-image --dockerfile-dir "$dfdir" "${common_args[@]}")
 assert "--rebuild-image exit code" "$?"
 assert_contains "rebuild invokes docker build" "$out" "STUB-DOCKER-BUILD"
-assert_contains "rebuild implies build (no --build-image needed)" "$out" "-t code-it-alpine-dotnet:latest"
+assert_contains "rebuild implies build (no --build-image needed)" "$out" "-t code-it-alpine-dotnet-node:latest"
 grep -q "# last changed $today" "$dfdir/Dockerfile"
 assert "Dockerfile dates bumped to today" "$?"
 grep -q "# last changed 2000-01-01" "$dfdir/Dockerfile" >/dev/null 2>&1
@@ -322,45 +322,111 @@ case "$out" in
 esac
 
 # ---------------------------------------------------------------------------
+echo "12b. Tech stack: --tech / --packages build args and read-only caches"
+npm_cache="$tmp/npm-cache"; mkdir -p "$npm_cache"
+bun_cache="$tmp/bun-cache"; mkdir -p "$bun_cache"
+
+# Defaults: tech dotnet,node and the package repos they imply (nuget, npm)
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image "${common_args[@]}")
+assert_contains "default build passes DOTNET=true" "$out" "--build-arg DOTNET=true"
+assert_contains "default build passes NODE=true" "$out" "--build-arg NODE=true"
+assert_contains "default build passes BUN=false" "$out" "--build-arg BUN=false"
+assert_contains "dotnet implies NUGET=true" "$out" "--build-arg NUGET=true"
+assert_contains "node implies NPM=true" "$out" "--build-arg NPM=true"
+assert_contains "reports the resolved tech" "$out" "tech dotnet,node; package repos nuget,npm"
+
+# --tech replaces the default set
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech node,bun "${common_args[@]}")
+assert_contains "--tech node,bun drops DOTNET" "$out" "--build-arg DOTNET=false"
+assert_contains "--tech node,bun keeps NODE" "$out" "--build-arg NODE=true"
+assert_contains "--tech node,bun keeps BUN" "$out" "--build-arg BUN=true"
+assert_contains "--tech node,bun drops NUGET (dotnet gone)" "$out" "--build-arg NUGET=false"
+assert_contains "--tech node,bun keeps NPM (node present)" "$out" "--build-arg NPM=true"
+
+# --packages replaces the implied set, independently of --tech
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech node,bun --packages npm "${common_args[@]}")
+assert_contains "--packages npm keeps NPM" "$out" "--build-arg NPM=true"
+assert_contains "--packages npm excludes BUN cache" "$out" "--build-arg NUGET=false"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech node,bun --packages bun "${common_args[@]}")
+assert_contains "--packages bun selects the BUN package cache" "$out" "--build-arg NPM=false"
+assert_contains "--packages bun excludes NPM" "$out" "--build-arg NUGET=false"
+
+# --packages nuget with no dotnet still selects the NuGet cache (nuget without dotnet)
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech bun --packages nuget "${common_args[@]}")
+assert_contains "nuget package cache without dotnet" "$out" "--build-arg NUGET=true"
+
+# The default image name follows --tech, so the built and run images agree
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech node,bun "${common_args[@]}")
+assert_contains "image name derives from --tech" "$out" "-t code-it-alpine-node-bun:latest"
+
+# A default-style image name that disagrees with --tech is called out
+out=$(PATH="$stub_docker:$PATH" "$code_it" --tech node,bun --image code-it-alpine-dotnet "${common_args[@]}" 2>&1)
+assert_contains "warns when the image tech slug disagrees with --tech" "$out" "looks built for tech 'dotnet'"
+
+# Unknown names are hard errors
+PATH="$stub_docker:$PATH" "$code_it" --build-image --tech cobol "${common_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "--tech with an unknown name fails" "$?"
+PATH="$stub_docker:$PATH" "$code_it" --build-image --packages pip "${common_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "--packages with an unknown name fails" "$?"
+
+# Host caches for enabled package repos are mounted read-only
+out=$(HOME="$fakehome" NPM_CONFIG_CACHE="$npm_cache" PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+assert_contains "npm cache mounted read-only" "$out" "-v \"$npm_cache:/home/agent1/.npm-host:ro\""
+out=$(HOME="$fakehome" BUN_INSTALL_CACHE_DIR="$bun_cache" PATH="$stub_docker:$PATH" "$code_it" --packages bun "${common_args[@]}")
+assert_contains "bun cache mounted read-only" "$out" "-v \"$bun_cache:/home/agent1/.bun-host:ro\""
+
+# Omitting a package repo from --packages suppresses its mount entirely
+out=$(HOME="$fakehome" NPM_CONFIG_CACHE="$npm_cache" PATH="$stub_docker:$PATH" "$code_it" --tech node --packages= "${common_args[@]}")
+case "$out" in
+    *.npm-host*) assert "empty --packages: no npm mount" 1 ;;
+    *)           assert "empty --packages: no npm mount" 0 ;;
+esac
+out=$(HOME="$fakehome" NUGET_PACKAGES="$nuget_cache" PATH="$stub_docker:$PATH" "$code_it" --tech dotnet --packages npm "${common_args[@]}")
+case "$out" in
+    *packages-host*) assert "packages without nuget: no nuget mount" 1 ;;
+    *)               assert "packages without nuget: no nuget mount" 0 ;;
+esac
+
+# ---------------------------------------------------------------------------
 echo "13. Prompt and agent arguments"
 # A bare argument, or --prompt, is the agent's opening prompt, spelled each agent's way
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c "explain this repo" "${common_args[@]}")
-assert_contains "claude: bare prompt appended to the image" "$out" 'code-it-alpine-dotnet:latest explain\ this\ repo'
+assert_contains "claude: bare prompt appended to the image" "$out" 'code-it-alpine-dotnet-node:latest explain\ this\ repo'
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --prompt "explain this repo" "${common_args[@]}")
-assert_contains "claude: --prompt is the same as a bare prompt" "$out" 'code-it-alpine-dotnet:latest explain\ this\ repo'
+assert_contains "claude: --prompt is the same as a bare prompt" "$out" 'code-it-alpine-dotnet-node:latest explain\ this\ repo'
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o "explain this repo" "${common_args[@]}")
-assert_contains "opencode: prompt becomes --prompt" "$out" 'code-it-alpine-dotnet:latest --prompt explain\ this\ repo'
+assert_contains "opencode: prompt becomes --prompt" "$out" 'code-it-alpine-dotnet-node:latest --prompt explain\ this\ repo'
 # No prompt and no agent args: nothing is appended, and the run stays interactive
 out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
-[[ "$out" == *"code-it-alpine-dotnet:latest" ]]; assert "no prompt appends nothing" "$?"
+[[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "no prompt appends nothing" "$?"
 assert_contains "interactive runs allocate a TTY" "$out" "docker run -it"
 [[ "$out" != *CODE_AGENT_HEADLESS* ]]; assert "interactive runs are not headless" "$?"
 
 # --headless: one-shot, no TTY, and the agent's non-interactive form
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless "fix the build" "${common_args[@]}")
-assert_contains "claude --headless uses -p" "$out" 'code-it-alpine-dotnet:latest -p fix\ the\ build'
+assert_contains "claude --headless uses -p" "$out" 'code-it-alpine-dotnet-node:latest -p fix\ the\ build'
 assert_contains "--headless passes CODE_AGENT_HEADLESS" "$out" "-e CODE_AGENT_HEADLESS=1"
 assert_contains "--headless allocates no TTY" "$out" "docker run -i --rm"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "fix the build" "${common_args[@]}")
-assert_contains "opencode --headless uses run" "$out" 'code-it-alpine-dotnet:latest run fix\ the\ build'
+assert_contains "opencode --headless uses run" "$out" 'code-it-alpine-dotnet-node:latest run fix\ the\ build'
 
 # -- passes the rest to the agent verbatim
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c "${common_args[@]}" -- --continue --model opus)
-assert_contains "-- passes agent flags through" "$out" "code-it-alpine-dotnet:latest --continue --model opus"
+assert_contains "-- passes agent flags through" "$out" "code-it-alpine-dotnet-node:latest --continue --model opus"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless --prompt "tidy" "${common_args[@]}" -- --max-turns 5)
-assert_contains "agent flags precede the prompt for claude" "$out" "code-it-alpine-dotnet:latest -p --max-turns 5 tidy"
+assert_contains "agent flags precede the prompt for claude" "$out" "code-it-alpine-dotnet-node:latest -p --max-turns 5 tidy"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless --prompt "tidy" "${common_args[@]}" -- --model opus)
-assert_contains "agent flags follow run for opencode" "$out" "code-it-alpine-dotnet:latest run --model opus tidy"
+assert_contains "agent flags follow run for opencode" "$out" "code-it-alpine-dotnet-node:latest run --model opus tidy"
 # --headless without a prompt leaves the agent command to the caller
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless "${common_args[@]}" -- -p "count the files")
-assert_contains "--headless with no prompt adds no -p of its own" "$out" 'code-it-alpine-dotnet:latest -p count\ the\ files'
+assert_contains "--headless with no prompt adds no -p of its own" "$out" 'code-it-alpine-dotnet-node:latest -p count\ the\ files'
 
 # The prompt reaches the container as a single argument
 out=$(PATH="$stub_darwin:$stub_container:$PATH" "$code_it" -c "explain this repo" --work-dir "$script_dir" --save-dir "$save")
-assert_contains "prompt is passed as one argument" "$out" "[code-it-alpine-dotnet:latest][explain this repo]"
+assert_contains "prompt is passed as one argument" "$out" "[code-it-alpine-dotnet-node:latest][explain this repo]"
 out=$(PATH="$stub_darwin:$stub_container:$PATH" "$code_it" -c --headless "fix it" --work-dir "$script_dir" --save-dir "$save")
 assert_contains "headless run passes -i and the agent args" "$out" "[-i][--rm]"
-assert_contains "headless run passes the prompt after -p" "$out" "[code-it-alpine-dotnet:latest][-p][fix it]"
+assert_contains "headless run passes the prompt after -p" "$out" "[code-it-alpine-dotnet-node:latest][-p][fix it]"
 
 # Two bare prompts is a mistake worth reporting
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c "one" "two" "${common_args[@]}" 2>&1)
