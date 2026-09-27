@@ -94,9 +94,9 @@
 
 .PARAMETER toolChains
     Comma-separated tech stacks to build into the image, passed to docker build as
-    the DOTNET/NODE/BUN build args. Known: dotnet, node (aliases js-node, ts-node),
-    bun (aliases js-bun, ts-bun). 
-    Default: "dotnet,node".
+    the DOTNET/NODE/BUN/PYTHON build args. Known: dotnet, node (aliases js-node,
+    ts-node), bun (aliases js-bun, ts-bun), python (alias uv).
+    Default: "dotnet,node". Alias: -stack.
 
 .PARAMETER packageCaches
     Comma-separated package repos whose host cache is mounted read-only. 
@@ -192,7 +192,7 @@ param (
     [string]$runtime        = "",
     [int]$port              = 0,
     [string]$agentName      = "Agent1",
-    [Alias('tech')]
+    [Alias('tech', 'stack')]
     [string]$toolChains     = "",
     [string]$packageCaches  = "",
     [string]$prompt         = "",

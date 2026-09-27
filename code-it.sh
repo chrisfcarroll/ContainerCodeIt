@@ -63,10 +63,10 @@
 # decide which host package caches are mounted read-only). Passing a list
 # REPLACES the default set, so there are no on/off flags to clash with future
 # tech names:
-#   --tool-chains, -t LIST   Comma-separated tech stacks to build. 
+#   --tool-chains, -t LIST   Comma-separated tech stacks to build. --stack is an alias.
 #                            Default: dotnet,node.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
-#                            (aliases js-bun, ts-bun).
+#                            (aliases js-bun, ts-bun), python (alias uv).
 #   --package-caches LIST    Comma-separated package repos whose host cache is mounted
 #                            read-only. 
 #                            Known: nuget, npm, bun.
@@ -247,7 +247,7 @@ while [[ $# -gt 0 ]]; do
             agent_name="$2"
             shift 2
             ;;
-        --tool-chains|--tech|-t)
+        --tool-chains|--tech|--stack|-t)
             tool_chains="$2"
             shift 2
             ;;

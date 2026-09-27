@@ -11,7 +11,8 @@
 
 .PARAMETER toolChains
     Comma-separated tool chains to build. Known: dotnet, node (aliases js-node,
-    ts-node), bun (aliases js-bun, ts-bun). Default: "dotnet,node".
+    ts-node), bun (aliases js-bun, ts-bun), python (alias uv). Default: "dotnet,node".
+    Alias: -stack.
 
 .PARAMETER packageCaches
     Comma-separated package repos to support, independent of -toolChains. Known:
@@ -44,7 +45,7 @@
 
 [CmdletBinding(PositionalBinding = $false)]
 param (
-    [Alias('tech')]
+    [Alias('tech', 'stack')]
     [string]$toolChains    = "",
     [string]$packageCaches = "",
     [switch]$rebuild       = $false,
@@ -97,7 +98,7 @@ if ($rebuild) {
 # Build args for the tool chains and package caches, spelled the way the Dockerfile's
 # ARGs match them (uppercase), plus a label recording the resolution.
 $buildArgs = @()
-foreach ($tc in @('dotnet', 'node', 'bun')) {
+foreach ($tc in @('dotnet', 'node', 'bun', 'python')) {
     $buildArgs += @('--build-arg', "$($tc.ToUpper())=$(Bool-Arg ($enabledToolChains -contains $tc))")
 }
 foreach ($pc in @('nuget', 'npm')) {

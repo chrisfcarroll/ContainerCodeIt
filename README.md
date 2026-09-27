@@ -93,13 +93,15 @@ The Dockerfile takes build-time switches for the tech stacks to include, and the
 launchers expose them as two comma-separated lists, passed to `docker build` as
 `--build-arg`s:
 
-- `--tool-chains` / `-toolChains` — tech stacks to build: `dotnet`, `node`, `bun`. Default `dotnet,node`.
+- `--tool-chains` / `-toolChains` (alias `--stack` / `-stack`) — tech stacks to build:
+  `dotnet`, `node`, `bun`, `python`. Default `dotnet,node`.
   `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
-  `bun`. Aliases resolve to the canonical name, so `--tool-chains ts-node` is `--tool-chains node` and
-  produces the same image name.
+  `bun`; `uv` is an alias for `python`. Aliases resolve to the canonical name, so
+  `--tool-chains ts-node` is `--tool-chains node` and produces the same image name.
 - `--package-caches` / `-packageCaches` — package repos whose host cache is mounted
   read-only: `nuget`, `npm`, `bun`. Default: the repos implied by `--tool-chains`
-  (`dotnet`->`nuget`, `node`->`npm`).
+  (`dotnet`->`nuget`, `node`->`npm`). Python has no host cache mount: uv must write its
+  own cache, so the container keeps it in the agent's home (`UV_CACHE_DIR`).
 
 A list *replaces* the default set rather than toggling it, so there is no per-tech
 on/off flag to clash with future tech names as the list grows. Each tech left out skips
@@ -114,6 +116,9 @@ its layers entirely.
 
 # Node.js and Bun, but npm only (e.g. you drive Bun through npm)
 ./code-it.sh --build-image --tool-chains node,bun --package-caches npm
+
+# Python 3 with uv (uv is in every image): --stack is an alias for --tool-chains
+./code-it-build.sh --stack python
 ```
 
 ```powershell
@@ -121,10 +126,15 @@ its layers entirely.
 ```
 
 Each enabled tech also adds a passwordless `doas` rule, so the agent can install more
-tools itself (`doas dotnet`, `doas node`, `doas npm`, `doas bun`).
+tools itself (`doas dotnet`, `doas node`, `doas npm`, `doas bun`, `doas python3`).
 
-Each enabled tech also adds a passwordless `doas` rule, so the agent can install more
-tools itself (`doas dotnet`, `doas node`, `doas npm`, `doas bun`).
+### Python
+
+`--tool-chains python` (or `--stack python`, or the old alias `uv`) adds Python 3 from
+Alpine's repos. `uv` and `uvx` are installed for every image, including the default.
+The system Python is externally managed, so use `uv venv` / `uv tool` rather than
+`pip install` into it; uv keeps its cache in the agent's home via `UV_CACHE_DIR` and
+fetches musl CPython builds for x86_64 and aarch64.
 
 ## Prompts and agent flags
 
@@ -222,12 +232,12 @@ docker run -it --rm \
 Edit the **Dockerfile** to taste. The default build includes:
 
 - **Alpine Linux 3.24** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
-- **Claude Code CLI** and **OpenCode CLI**
+- **Claude Code CLI** and **OpenCode CLI**, and **uv/uvx** (in every image)
 - A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, plus
-  `dotnet`, `node`, `npm` and/or `bun` for whichever techs/packages are enabled
+  `dotnet`, `node`, `npm`, `bun` and/or `python3` for whichever techs/packages are enabled
 
 Use the [tech lists](#tech-stacks) to build an image with a different mix, for example
-Bun instead of .NET + Node.js.
+Bun instead of .NET + Node.js, or add Python with `--stack python`.
 
 On startup, the container launches a **tmux** session running the chosen agent, and a `zsh` terminal available via the tmux switch hotkey sequence, `Ctrl-B S`.
 
@@ -237,9 +247,9 @@ container exits when the agent does. That is what `--headless` uses.
 
 ## Rough Edges
 
-- One Dockerfile now supports build-time tech-stack lists (`dotnet`, `node`, `bun`, and
-  the package repos `nuget`, `npm`), so combinations do not need separate files. Python
-  and Java are the obvious next techs to add.
+- One Dockerfile now supports build-time tech-stack lists (`dotnet`, `node`, `bun`,
+  `python`, and the package repos `nuget`, `npm`), so combinations do not need separate
+  files. Java is the obvious next tech to add.
 - The image still ships both coding agents; making the agents build-time switches too is
   the next step.
 - Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it --rebuild-image` / `code-it.ps1 -rebuildImage`)

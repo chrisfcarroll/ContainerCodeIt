@@ -16,7 +16,7 @@
 # and returns 1, so the caller can exit.
 
 CI_DEFAULT_TOOL_CHAINS="dotnet node"
-CI_KNOWN_TOOL_CHAINS="dotnet node bun"
+CI_KNOWN_TOOL_CHAINS="dotnet node bun python"
 CI_KNOWN_PACKAGE_CACHES="nuget npm bun"
 CI_CONTAINER_PORT=3000
 
@@ -31,6 +31,8 @@ ci_tool_chain_alias() {
     case "$1" in
         js-node|ts-node) printf 'node' ;;
         js-bun|ts-bun)   printf 'bun' ;;
+        # uv is Python's package manager here, so it selects the python tool chain
+        uv)              printf 'python' ;;
         *)               printf '%s' "$1" ;;
     esac
 }
@@ -57,9 +59,9 @@ ci_resolve_tool_chains() {
         t=$(ci_tool_chain_alias "$t")
         case "$t" in
             "") ;;
-            dotnet|node|bun) out=$(ci_comma_list_add "$out" "$t") ;;
+            dotnet|node|bun|python) out=$(ci_comma_list_add "$out" "$t") ;;
             *)
-                echo "Warning: Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun)." >&2
+                echo "Warning: Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv)." >&2
                 return 1
                 ;;
         esac

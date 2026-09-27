@@ -10,7 +10,8 @@
 # Options:
 #   --tool-chains, -t LIST   Comma-separated tool chains to build. Default: dotnet,node.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
-#                            (aliases js-bun, ts-bun).
+#                            (aliases js-bun, ts-bun), python (alias uv).
+#                            --stack is an alias for --tool-chains.
 #   --package-caches LIST    Comma-separated package repos to support, independent of
 #                            --tool-chains. Known: nuget, npm, bun.
 #                            Default: the repos implied by --tool-chains
@@ -50,7 +51,7 @@ dry_run=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --tool-chains|--tech|-t)
+        --tool-chains|--tech|--stack|-t)
             tool_chains="$2"
             shift 2
             ;;
@@ -131,7 +132,7 @@ fi
 # Build args for the tool chains and package caches, spelled the way the
 # Dockerfile's ARGs match them (uppercase).
 build_args=()
-for tc in dotnet node bun; do
+for tc in dotnet node bun python; do
     if ci_has "$enabled_tool_chains" "$tc"; then v=true; else v=false; fi
     build_args+=(--build-arg "$(printf '%s' "$tc" | tr '[:lower:]' '[:upper:]')=$v")
 done

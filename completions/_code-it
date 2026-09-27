@@ -70,14 +70,14 @@ _code_it() {
         (--runtime|-r)    compadd -- docker container; return ;;
         (--image|-i)      compadd -- code-it-alpine-dotnet-node; return ;;
         (--agent-name) compadd -- Agent1; return ;;
-        (--tool-chains|-t)    compadd -- dotnet node js-node ts-node bun js-bun ts-bun; return ;;
+        (--tool-chains|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
         (--prompt|-p|--port) return ;;   # free text: leave it to the user
     esac
 
     compadd -- --opencode -o --claude -c --prompt -p --headless --work-dir -w --save-dir -s \
         --image -i --build-image -b --rebuild-image -B --dockerfile-dir --runtime -r --port \
-        --agent-name --tool-chains -t --package-caches --dry-run -d --help -h --
+        --agent-name --tool-chains -t --stack --package-caches --dry-run -d --help -h --
 }
 
 _code_it "$@"

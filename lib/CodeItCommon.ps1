@@ -11,10 +11,11 @@
 #>
 
 $script:CodeItDefaultToolChains  = @('dotnet', 'node')
-$script:CodeItKnownToolChains    = @('dotnet', 'node', 'bun')
+$script:CodeItKnownToolChains    = @('dotnet', 'node', 'bun', 'python')
 $script:CodeItKnownPackageCaches = @('nuget', 'npm', 'bun')
-# js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both)
-$script:CodeItToolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun' }
+# js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both);
+# uv is Python's package manager here, so it selects the python tool chain
+$script:CodeItToolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun'; 'uv' = 'python' }
 $script:CodeItContainerPort      = 3000
 
 function Split-CodeItList([string]$list) {
@@ -30,7 +31,7 @@ function Resolve-CodeItToolChains([string]$raw) {
     } | Where-Object { $_ } | Select-Object -Unique)
     foreach ($t in $resolved) {
         if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $script:CodeItKnownToolChains) {
-            Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun)."
+            Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv)."
             Write-Warning "A comma-separated list is expected, e.g. -toolChains 'node,bun'."
             return $null
         }

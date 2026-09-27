@@ -14,11 +14,11 @@ _code_it_build() {
         (--dockerfile-dir) _files -/; return ;;
         (--runtime|-r)     compadd -- docker container; return ;;
         (--image|-i)       compadd -- code-it-alpine-dotnet-node; return ;;
-        (--tool-chains|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun; return ;;
+        (--tool-chains|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
     esac
 
-    compadd -- --tool-chains -t --package-caches --rebuild --image -i \
+    compadd -- --tool-chains -t --stack --package-caches --rebuild --image -i \
         --dockerfile-dir --runtime -r --dry-run -d --help -h
 }
 

@@ -340,6 +340,21 @@ Assert-Contains "warns when the image label disagrees with -toolChains" $r.out "
 $r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
 Assert-Contains "the -buildImage shim prints a deprecation note" $r.out 'deprecated'
 
+"9e. Python tool chain (python / uv / -stack)"
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-stack', 'python') $stubPath
+Assert-Contains "-stack python sets PYTHON=true" $r.out '--build-arg PYTHON=true'
+Assert-Contains "-stack python derives the image name" $r.out '-t code-it-alpine-python:latest'
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolChains', 'uv') $stubPath
+Assert-Contains "uv aliases python (PYTHON=true)" $r.out '--build-arg PYTHON=true'
+Assert-Contains "uv canonical image name" $r.out '-t code-it-alpine-python:latest'
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+Assert-Contains "default build sets PYTHON=false" $r.out '--build-arg PYTHON=false'
+$r = Invoke-Scenario $codeIt (@('-stack', 'python', '-buildImage') + $commonArgs) $stubPath
+Assert-Contains "code-it -stack python delegates a PYTHON=true build" $r.out '--build-arg PYTHON=true'
+$dfText = Get-Content (Join-Path $scriptDir 'Dockerfile') -Raw
+Assert "Dockerfile installs uv for every image" ($dfText.Contains('apk add --no-cache uv'))
+Assert "Dockerfile gates python3 on PYTHON" ($dfText.Contains('if [ "$PYTHON" = true ]'))
+
 # ---------------------------------------------------------------------------
 "10. Custom options"
 $r = Invoke-Scenario $codeIt (@('-port', '8000') + $commonArgs) $stubPath

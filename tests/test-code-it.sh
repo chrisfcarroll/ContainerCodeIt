@@ -314,6 +314,24 @@ assert_contains "warns when the image label disagrees with --tool-chains" "$out"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image "${common_args[@]}")
 assert_contains "the --build-image shim prints a deprecation note" "$out" "deprecated"
 
+echo "10e. Python tool chain (python / uv / --stack)"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --stack python 2>&1)
+assert_contains "--stack python sets PYTHON=true" "$out" "--build-arg PYTHON=true"
+assert_contains "--stack python derives the image name" "$out" "-t code-it-alpine-python:latest"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tool-chains uv 2>&1)
+assert_contains "uv aliases python (PYTHON=true)" "$out" "--build-arg PYTHON=true"
+assert_contains "uv canonical image name" "$out" "-t code-it-alpine-python:latest"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+assert_contains "default build sets PYTHON=false" "$out" "--build-arg PYTHON=false"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --stack python -b "${common_args[@]}" 2>&1)
+assert_contains "code-it --stack python delegates a PYTHON=true build" "$out" "--build-arg PYTHON=true"
+# uv is installed for every image (base layer), so the default image still has it;
+# python3 is gated on the tool chain
+grep -q "apk add --no-cache uv" "$script_dir/Dockerfile"
+assert "Dockerfile installs uv for every image" "$?"
+grep -q 'if \[ "\$PYTHON" = true \]' "$script_dir/Dockerfile"
+assert "Dockerfile gates python3 on PYTHON" "$?"
+
 # ---------------------------------------------------------------------------
 echo "11. Custom options"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --port 8000 "${common_args[@]}")

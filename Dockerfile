@@ -29,6 +29,7 @@ RUN sed -i 's/#unicode="NO"/#unicode="NO"\nunicode="YES"/' /etc/rc.conf
 #   BUN      Bun, the all-in-one JS runtime  (implies nothing: it bundles its
 #                                             own runtime, bundler and package
 #                                             manager)
+#   PYTHON   Python 3 (uv is installed for every image, see the base layer)
 #   NUGET    NuGet package cache support      (may be selected without DOTNET)
 #   NPM      npm package cache support        (may be selected without NODE)
 #
@@ -39,13 +40,14 @@ RUN sed -i 's/#unicode="NO"/#unicode="NO"\nunicode="YES"/' /etc/rc.conf
 ARG DOTNET=true
 ARG NODE=true
 ARG BUN=false
+ARG PYTHON=false
 ARG NUGET=
 ARG NPM=
 RUN set -e; \
     case "$NUGET" in true|false) ;; *) NUGET=$DOTNET ;; esac; \
     case "$NPM"   in true|false) ;; *) NPM=$NODE   ;; esac; \
-    printf 'DOTNET=%s\nNODE=%s\nBUN=%s\nNUGET=%s\nNPM=%s\n' \
-        "$DOTNET" "$NODE" "$BUN" "$NUGET" "$NPM" > /etc/code-it-tech.env
+    printf 'DOTNET=%s\nNODE=%s\nBUN=%s\nPYTHON=%s\nNUGET=%s\nNPM=%s\n' \
+        "$DOTNET" "$NODE" "$BUN" "$PYTHON" "$NUGET" "$NPM" > /etc/code-it-tech.env
 
 # --- .NET ------------------------------------------------------------------
 RUN . /etc/code-it-tech.env; if [ "$DOTNET" = true ]; then \
@@ -72,6 +74,15 @@ RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
         apk add --no-cache unzip; \
         curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash; \
         /usr/local/bin/bun --version; \
+    fi
+
+# --- Python ----------------------------------------------------------------
+# Python 3 from Alpine's own repos. uv (installed for every image in the base
+# layer) is the package manager: the system Python is externally managed, so
+# never pip-install into it. uv fetches musl CPython builds on x86_64/aarch64.
+RUN . /etc/code-it-tech.env; if [ "$PYTHON" = true ]; then \
+        apk add --no-cache python3; \
+        python3 --version; \
     fi
 
 # ===========================================================================
@@ -124,6 +135,7 @@ RUN . /etc/code-it-tech.env; { \
         if [ "$NODE" = true ] || [ "$NPM" = true ]; then echo "permit nopass agent1 as root cmd node"; fi; \
         if [ "$NPM" = true ]; then echo "permit nopass agent1 as root cmd npm"; fi; \
         if [ "$BUN" = true ]; then echo "permit nopass agent1 as root cmd bun"; fi; \
+        if [ "$PYTHON" = true ]; then echo "permit nopass agent1 as root cmd python3"; fi; \
     } > /etc/doas.d/doas.conf
 
 # ===========================================================================
@@ -165,6 +177,11 @@ RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
 # ===========================================================================
 RUN mkdir -p ~/.local/bin
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
+# uv keeps its cache and tool installs inside the agent's home. It is never the
+# host cache, which the launcher does not mount (uv needs to write to its cache).
+RUN mkdir -p ~/.cache/uv
+RUN echo "export UV_CACHE_DIR=\"\$HOME/.cache/uv\"" >> ~/.zshrc
+ENV UV_CACHE_DIR=/home/agent1/.cache/uv
 RUN curl -fsSL https://opencode.ai/install | bash # last changed 2026-09-26
 RUN curl -fsSL https://claude.ai/install.sh | bash # last changed 2026-09-26
 RUN git config --global rerere.enabled true
