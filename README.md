@@ -51,15 +51,15 @@ In principal either powershell or bash scripts should work on any O/S.
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
 | `--work-dir` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
-| `--image` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--tech` (e.g. `code-it-alpine-node-bun`) |
+| `--image` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--tool-chains` (e.g. `code-it-alpine-node-bun`) |
 | `--build-image` | `-buildImage` | off | Build the image before running |
 | `--rebuild-image` | `-rebuildImage` | off | Build the image, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
 | `--runtime` | `-runtime` | auto-detect | `docker` or `container` |
 | `--ports` | `-portsMap` | `0:3000` `0:3001` (docker); `3000:3000` `3001:3001` (container) | Port mappings (max 2); host port 0 auto-assigns |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--tech LIST` | `-tech LIST` | `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`) |
-| `--package-caches LIST` | `-packageCaches LIST` | implied by `tech` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
+| `--tool-chains LIST` | `-toolChains LIST` | `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`) |
+| `--package-caches LIST` | `-packageCaches LIST` | implied by `tool-chains` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run` | `-dryRun` | off | Print the run command without executing |
 
 ## Tech stacks
@@ -68,12 +68,12 @@ The Dockerfile takes build-time switches for the tech stacks to include, and the
 launchers expose them as two comma-separated lists, passed to `docker build` as
 `--build-arg`s:
 
-- `--tech` / `-tech` — tech stacks to build: `dotnet`, `node`, `bun`. Default `dotnet,node`.
+- `--tool-chains` / `-toolChains` — tech stacks to build: `dotnet`, `node`, `bun`. Default `dotnet,node`.
   `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
-  `bun`. Aliases resolve to the canonical name, so `--tech ts-node` is `--tech node` and
+  `bun`. Aliases resolve to the canonical name, so `--tool-chains ts-node` is `--tool-chains node` and
   produces the same image name.
 - `--package-caches` / `-packageCaches` — package repos whose host cache is mounted
-  read-only: `nuget`, `npm`, `bun`. Default: the repos implied by `--tech`
+  read-only: `nuget`, `npm`, `bun`. Default: the repos implied by `--tool-chains`
   (`dotnet`->`nuget`, `node`->`npm`).
 
 A list *replaces* the default set rather than toggling it, so there is no per-tech
@@ -85,14 +85,14 @@ its layers entirely.
 ./code-it.sh --build-image
 
 # A Bun-only sandbox with a read-only host Bun cache
-./code-it.sh --build-image --tech bun --package-caches bun
+./code-it.sh --build-image --tool-chains bun --package-caches bun
 
 # Node.js and Bun, but npm only (e.g. you drive Bun through npm)
-./code-it.sh --build-image --tech node,bun --package-caches npm
+./code-it.sh --build-image --tool-chains node,bun --package-caches npm
 ```
 
 ```powershell
-.\Code-It.ps1 -buildImage -tech 'node,bun' -packageCaches npm
+.\Code-It.ps1 -buildImage -toolChains 'node,bun' -packageCaches npm
 ```
 
 Each enabled tech also adds a passwordless `doas` rule, so the agent can install more
@@ -296,7 +296,7 @@ If you use NuGet, the launcher scripts mounts your NuGet package cache at `/home
 
 ### npm
 
-`npm` (in `--package-caches`, implied by `--tech node`) mounts your npm cache read-only at
+`npm` (in `--package-caches`, implied by `--tool-chains node`) mounts your npm cache read-only at
 `/home/agent1/.npm-host`. The container's `go.sh` seeds its own writable `~/.npm` from
 that mount at startup, so packages already downloaded on the host are reused and the
 host cache is never written to.

@@ -41,9 +41,9 @@
     Default: ~/.config/code-it
 
 .PARAMETER image
-    Image name to run. Default: "code-it-alpine-<tech>", a slug of the resolved -tech
+    Image name to run. Default: "code-it-alpine-<tech>", a slug of the resolved -toolChains
     list, e.g. code-it-alpine-dotnet or code-it-alpine-node-bun. Set it explicitly when
-    running an image built with different tech, or give the same -tech.
+    running an image built with different tech, or give the same -toolChains.
 
 .PARAMETER buildImage
     If specified, builds the image from the Dockerfile before running the container.
@@ -91,7 +91,7 @@
     directory naming. This must match the USER set in the Dockerfile for your image.
     Default: "Agent1"
 
-.PARAMETER tech
+.PARAMETER toolChains
     Comma-separated tech stacks to build into the image, passed to docker build as
     the DOTNET/NODE/BUN build args. Known: dotnet, node (aliases js-node, ts-node),
     bun (aliases js-bun, ts-bun). 
@@ -100,7 +100,7 @@
 .PARAMETER packageCaches
     Comma-separated package repos whose host cache is mounted read-only. 
     Known: nuget, npm, bun. 
-    Default: the repos implied by -tech (dotnet->nuget, node->npm), so not specifying 
+    Default: the repos implied by -toolChains (dotnet->nuget, node->npm), so not specifying 
     this parameter is the simplest choice.
     If the given package manager has a well-known global cache directory; and if that
     directory exists on the host when the script runs; then that directory will be 
@@ -191,7 +191,8 @@ param (
     [string]$runtime        = "",
     [string[]]$portsMap     = @(),
     [string]$agentName      = "Agent1",
-    [string]$tech           = "",
+    [Alias('tech')]
+    [string[]]$toolChains   = @(),
     [string]$packageCaches  = "",
     [string]$prompt         = "",
     [switch]$headless       = $false,
@@ -229,10 +230,10 @@ $promptSet = [bool]$prompt
 # -rebuildImage implies -buildImage
 if ($rebuildImage) { $buildImage = $true }
 
-# Resolve -tech / -packageCaches. A list replaces the default set rather than
+# Resolve -toolChains / -packageCaches. A list replaces the default set rather than
 # toggling it, so there are no per-tech on/off parameters to clash with future tech
-# names. -tech defaults to dotnet,node; -packageCaches defaults to the repos implied
-# by -tech (dotnet->nuget, node->npm).
+# names. -toolChains defaults to dotnet,node; -packageCaches defaults to the repos
+# implied by -toolChains (dotnet->nuget, node->npm).
 $knownTech     = @('dotnet', 'node', 'bun')
 $knownPackages = @('nuget', 'npm', 'bun')
 # js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both)
@@ -241,12 +242,12 @@ function Split-List([string]$list) {
     if (-not $list) { return @() }
     return @($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
-$enabledTech = if ($tech) { Split-List $tech } else { @('dotnet', 'node') }
+$enabledTech = if ($toolChains) { $toolChains } else { @('dotnet', 'node') }
 $enabledTech = @($enabledTech | ForEach-Object { if ($techAliases.ContainsKey($_)) { $techAliases[$_] } else { $_ } } | Select-Object -Unique)
 foreach ($t in $enabledTech) {
     if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $knownTech) {
         Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun)."
-        Write-Warning "A comma-separated list is expected, e.g. -tech 'node,bun'."
+        Write-Warning "A comma-separated list is expected, e.g. -toolChains 'node,bun'."
         exit 1
     }
 }
@@ -269,8 +270,8 @@ if (-not $image) { $image = "code-it-alpine-$($enabledTech -join '-')" }
 if ($image -like 'code-it-alpine-*') {
     $imageTech = ($image.Substring('code-it-alpine-'.Length)) -replace '-', ','
     if ($imageTech -ne ($enabledTech -join ',')) {
-        Write-Warning "Image '$image' looks built for tech '$imageTech' but -tech is '$($enabledTech -join ',')'."
-        Write-Warning "Pass the same -tech used to build the image, or set -image explicitly."
+        Write-Warning "Image '$image' looks built for tech '$imageTech' but -toolChains is '$($enabledTech -join ',')'."
+        Write-Warning "Pass the same -toolChains used to build the image, or set -image explicitly."
     }
 }
 

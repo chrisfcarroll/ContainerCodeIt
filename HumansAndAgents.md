@@ -6,3 +6,4 @@
 ## These Scripts
 
 - These scripts must remain cross-platform, running on MacOs, Linux and Windows on both bash and PowerShell.
+- The Dockerfile is for Alpone linux, so everything must work on musl for x86_64 and aarch64

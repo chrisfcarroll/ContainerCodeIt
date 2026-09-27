@@ -38,9 +38,9 @@
 #   --save-dir DIR           Host directory for storing agent configuration and state volumes.
 #                            Created if missing. Defaults to ~/.config/code-it
 #   --image NAME             Image name to run. Default: "code-it-alpine-<tech>", a
-#                            slug of the resolved --tech list, e.g. code-it-alpine-dotnet,
+#                            slug of the resolved --tool-chains list, e.g. code-it-alpine-dotnet,
 #                            code-it-alpine-node-bun. Set it explicitly when running an
-#                            image built with different tech, or give the same --tech.
+#                            image built with different tech, or give the same --tool-chains.
 #   --build-image            If specified, builds the image from the Dockerfile before running.
 #   --rebuild-image          Like --build-image, but first updates the "# last changed"
 #                            cache-bust dates in the Dockerfile to today, forcing the
@@ -63,14 +63,14 @@
 # decide which host package caches are mounted read-only). Passing a list
 # REPLACES the default set, so there are no on/off flags to clash with future
 # tech names:
-#   --tech LIST              Comma-separated tech stacks to build. 
+#   --tool-chains LIST       Comma-separated tech stacks to build. 
 #                            Default: dotnet,node.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun).
 #   --package-caches LIST    Comma-separated package repos whose host cache is mounted
 #                            read-only. 
 #                            Known: nuget, npm, bun.
-#                            Default: the package repos implied by --tech
+#                            Default: the package repos implied by --tool-chains
 #                            (dotnet->nuget, node->npm).
 #                            If the given package manager has a well-known global 
 #                            cache directory; and if that directory exists on the host 
@@ -194,7 +194,7 @@ agent_args=()
 
 # Tech stack (see --help). Empty means "use the defaults": dotnet,node and the
 # package repos they imply (dotnet->nuget, node->npm).
-tech_list=""
+tool_chains_list=""
 package_caches_list=""
 
 # Parse arguments
@@ -249,8 +249,8 @@ while [[ $# -gt 0 ]]; do
             agent_name="$2"
             shift 2
             ;;
-        --tech)
-            tech_list="$2"
+        --tool-chains|--tech)
+            tool_chains_list="$2"
             shift 2
             ;;
         --package-caches)
@@ -297,10 +297,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Resolve --tech / --package-caches into a set of known tech names (space-separated
+# Resolve --tool-chains / --package-caches into a set of known tech names (space-separated
 # in $enabled_tech) and known package repo names (in $enabled_packages).
-# --tech replaces the default {dotnet,node}; --package-caches replaces the set implied
-# by --tech (dotnet->nuget, node->npm). An unknown name is a hard error.
+# --tool-chains replaces the default {dotnet,node}; --package-caches replaces the set implied
+# by --tool-chains (dotnet->nuget, node->npm). An unknown name is a hard error.
 enabled_tech=""
 enabled_packages=""
 
@@ -317,8 +317,8 @@ tech_alias() {
     esac
 }
 
-if [[ -n "$tech_list" ]]; then
-    IFS=',' read -r -a requested_tech <<< "$tech_list"
+if [[ -n "$tool_chains_list" ]]; then
+    IFS=',' read -r -a requested_tech <<< "$tool_chains_list"
 else
     requested_tech=(dotnet node)
 fi
@@ -372,8 +372,8 @@ if [[ "$image" == code-it-alpine-* ]]; then
     image_tech="${image#code-it-alpine-}"
     image_tech=${image_tech//-/,}
     if [[ "$image_tech" != "$(printf '%s' "$enabled_tech" | tr ' ' ',')" ]]; then
-        echo "Warning: image '$image' looks built for tech '$image_tech' but --tech is '$(printf '%s' "$enabled_tech" | tr ' ' ',')'." >&2
-        echo "    Pass the same --tech used to build the image, or set --image explicitly." >&2
+        echo "Warning: image '$image' looks built for tech '$image_tech' but --tool-chains is '$(printf '%s' "$enabled_tech" | tr ' ' ',')'." >&2
+        echo "    Pass the same --tool-chains used to build the image, or set --image explicitly." >&2
     fi
 fi
 

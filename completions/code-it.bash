@@ -11,7 +11,7 @@
 
 _code_it_opts='--opencode -o --claude -c --prompt --headless --work-dir --save-dir
     --image --build-image --rebuild-image --dockerfile-dir --runtime --ports
-    --agent-name --tech --package-caches --dry-run --help -h --'
+    --agent-name --tool-chains --package-caches --dry-run --help -h --'
 
 # The flags people reach for most, not the full list; add your own favourites here.
 _code_it_claude_opts='--print -p --continue -c --resume -r --fork-session --model
@@ -79,7 +79,7 @@ _code_it() {
             COMPREPLY=( $(compgen -W "code-it-alpine-dotnet-node $(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
         --agent-name)
             COMPREPLY=( $(compgen -W "Agent1" -- "$cur") ); return ;;
-        --tech)
+        --tool-chains)
             COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun" -- "$cur") ); return ;;
         --package-caches)
             COMPREPLY=( $(compgen -W "nuget npm bun" -- "$cur") ); return ;;
