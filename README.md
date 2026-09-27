@@ -62,6 +62,31 @@ In principal either powershell or bash scripts should work on any O/S.
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `tool-chains` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
+`--build-image` and `--rebuild-image` are now thin shims: they print a deprecation
+note and delegate to `code-it-build` with the same tool chains, package caches, image,
+runtime and Dockerfile directory, then run the container. Prefer calling
+`code-it-build` directly.
+
+## code-it-build options
+
+`code-it-build.sh` and `Code-It-Build.ps1` build the image (and label it with its tool
+chains and package caches). They accept the same logical parameters:
+
+| bash | PowerShell | Default | Description |
+|---|---|---|---|
+| `--tool-chains LIST`, `-t` | `-toolChains LIST` | `dotnet,node` | Tool chains to build (aliases as above) |
+| `--package-caches LIST` | `-packageCaches LIST` | implied by `tool-chains` | Package repos to support; an explicit empty list means none |
+| `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today first |
+| `--image`, `-i` | `-image` | `code-it-alpine-<chains>` | Image name to build |
+| `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
+| `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
+| `--dry-run`, `-d` | `-dryRun` | off | Print the build command without executing it |
+
+The image is labelled `code-it.tool-chains=<chains>` and
+`code-it.package-caches=<caches>`; `code-it` reads that label to warn if the image was
+built for a different tool-chain set, falling back to the image-name guess for images
+that predate the label.
+
 ## Tech stacks
 
 The Dockerfile takes build-time switches for the tech stacks to include, and the
@@ -157,6 +182,7 @@ own favourites.
 ```bash
 # bash: in ~/.bashrc
 source /path/to/ContainerCodeIt/completions/code-it.bash
+source /path/to/ContainerCodeIt/completions/code-it-build.bash
 ```
 
 ```zsh

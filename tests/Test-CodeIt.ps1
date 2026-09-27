@@ -48,6 +48,10 @@ if ($onWindows) {
 if "%~1"=="images" if defined STUB_IMAGES_FAIL exit /b 1
 if "%~1"=="build" if defined STUB_BUILD_FAIL exit /b 3
 if "%~1"=="images" echo code-it-alpine-dotnet-node:latest& goto :eof
+if "%~1"=="image" if "%~2"=="inspect" (
+    if defined STUB_IMAGE_TOOL_CHAINS (echo %STUB_IMAGE_TOOL_CHAINS%) else (echo dotnet,node)
+    goto :eof
+)
 if "%~1"=="build" echo STUB-DOCKER-BUILD %*& goto :eof
 if "%~1"=="run" echo STUB-DOCKER-RUN %*& goto :eof
 echo stub docker: %*
@@ -57,6 +61,7 @@ echo stub docker: %*
 #!/bin/sh
 case "$1" in
     images) [ -n "$STUB_IMAGES_FAIL" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
+    image)  case "$2" in inspect) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; *) echo "stub docker: $*" ;; esac ;;
     build)  [ -n "$STUB_BUILD_FAIL" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -71,7 +76,11 @@ $null = New-Item -ItemType Directory -Force -Path $stubContainer
 if ($onWindows) {
     Set-Content -Path (Join-Path $stubContainer 'container.cmd') -Value @'
 @echo off
-if "%~1"=="image" echo code-it-alpine-dotnet-node  latest& goto :eof
+if "%~1"=="image" if "%~2"=="ls" echo code-it-alpine-dotnet-node  latest& goto :eof
+if "%~1"=="image" if "%~2"=="inspect" (
+    if defined STUB_IMAGE_TOOL_CHAINS (echo %STUB_IMAGE_TOOL_CHAINS%) else (echo dotnet,node)
+    goto :eof
+)
 if "%~1"=="build" echo STUB-CONTAINER-BUILD %*& goto :eof
 if "%~1"=="run" echo STUB-CONTAINER-RUN %*& goto :eof
 echo stub container: %*
@@ -80,7 +89,11 @@ echo stub container: %*
     Set-Content -Path (Join-Path $stubContainer 'container') -Value @'
 #!/bin/sh
 case "$1" in
-    image)  echo "code-it-alpine-dotnet-node  latest" ;;
+    image)  case "$2" in
+                ls)      echo "code-it-alpine-dotnet-node  latest" ;;
+                inspect) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;;
+                *)       echo "stub container: $*" ;;
+            esac ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
     run)    echo "STUB-CONTAINER-RUN $*"; printf '[%s]' "$@"; echo ;;
     *)      echo "stub container: $*" ;;
@@ -137,7 +150,7 @@ $commonArgs = @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $save)
 
 # ---------------------------------------------------------------------------
 "1. Parse checks"
-foreach ($f in @('Code-It.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
+foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
     $parseErrors = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptDir $f), [ref]$null, [ref]$parseErrors)
     Assert "parses: $f" ($parseErrors.Count -eq 0)
@@ -272,6 +285,60 @@ $r = Invoke-Scenario $codeIt (@('-buildImage', '-dockerfileDir', $dfDir) + $comm
 Assert "-buildImage exit code 0 (dfdir)" ($r.code -eq 0)
 $df = Get-Content $dfPath -Raw
 Assert "-buildImage leaves dates unchanged" ($df.Contains('# last changed 2000-01-01'))
+
+# ---------------------------------------------------------------------------
+"9c. Code-It-Build.ps1: dry-run, labels, -tech, -rebuild"
+$codeItBuild = Join-Path $scriptDir 'Code-It-Build.ps1'
+
+# -dryRun prints the build command without executing it
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+Assert "Code-It-Build -dryRun exit code 0" ($r.code -eq 0)
+Assert-Contains "build dry-run prints the build command" $r.out 'docker build'
+Assert-Contains "build dry-run passes DOTNET=true" $r.out '--build-arg DOTNET=true'
+Assert-Contains "build dry-run passes NODE=true" $r.out '--build-arg NODE=true'
+Assert-Contains "build dry-run passes NUGET=true (implied by dotnet)" $r.out '--build-arg NUGET=true'
+Assert-Contains "build dry-run passes NPM=true (implied by node)" $r.out '--build-arg NPM=true'
+Assert-Contains "build dry-run labels the tool chains" $r.out '--label code-it.tool-chains=dotnet,node'
+Assert-Contains "build dry-run labels the package caches" $r.out '--label code-it.package-caches=nuget,npm'
+Assert-Contains "build dry-run derives the default image name" $r.out '-t code-it-alpine-dotnet-node:latest'
+Assert "build dry-run does not execute the build" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
+
+# -tech is the kept alias of -toolChains
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath
+Assert-Contains "build -tech alias selects BUN" $r.out '--build-arg BUN=true'
+Assert-Contains "build -tech alias derives the image name" $r.out '-t code-it-alpine-bun:latest'
+
+# -packageCaches replaces the implied set
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolChains', 'bun', '-packageCaches', 'nuget') $stubPath
+Assert-Contains "build -packageCaches nuget without dotnet" $r.out '--build-arg NUGET=true'
+Assert-Contains "build -packageCaches nuget excludes NPM" $r.out '--build-arg NPM=false'
+
+# Unknown names are hard errors
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolChains', 'cobol') $stubPath
+Assert "Code-It-Build unknown tool chain fails" ($r.code -ne 0)
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-packageCaches', 'pip') $stubPath
+Assert "Code-It-Build unknown package cache fails" ($r.code -ne 0)
+
+# -rebuild bumps the dates and then really builds
+$bDfDir = Join-Path $tmp 'build-dfdir'
+$null = New-Item -ItemType Directory -Force -Path $bDfDir
+$bDfPath = Join-Path $bDfDir 'Dockerfile'
+[IO.File]::WriteAllText($bDfPath, $dfLF)
+$r = Invoke-Scenario $codeItBuild @('-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker') $stubPath
+Assert "Code-It-Build -rebuild exit code 0" ($r.code -eq 0)
+Assert-Contains "Code-It-Build -rebuild invokes docker build" $r.out 'STUB-DOCKER-BUILD'
+Assert "Code-It-Build -rebuild bumps the dates" ((Get-Content $bDfPath -Raw).Contains("# last changed $today"))
+# A missing Dockerfile is an error
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $tmp) $stubPath
+Assert "Code-It-Build without a Dockerfile fails" ($r.code -ne 0)
+
+"9d. Code-It reads the image label"
+$env:STUB_IMAGE_TOOL_CHAINS = 'node,bun'
+try { $r = Invoke-Scenario $codeIt (@('-image', 'code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
+finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
+Assert-Contains "warns when the image label disagrees with -toolChains" $r.out "looks built for tech 'node,bun'"
+$r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
+Assert-Contains "the -buildImage shim prints a deprecation note" $r.out 'deprecated'
 
 # ---------------------------------------------------------------------------
 "10. Custom options"
@@ -418,8 +485,15 @@ $r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','bun','-packages','n
 Assert-Contains "removed -packages is forwarded to the agent" $r.out '-packages npm'
 Assert-Contains "removed -packages no longer selects NPM" $r.out '--build-arg NPM=false'
 
-$r = Invoke-Scenario $codeIt (@('-toolChains','node,bun','-image','code-it-alpine-dotnet') + $commonArgs) $stubPath
-Assert-Contains "warns when the image tech slug disagrees with -toolChains" $r.out "looks built for tech 'dotnet'"
+$env:STUB_IMAGE_TOOL_CHAINS = 'dotnet'
+try { $r = Invoke-Scenario $codeIt (@('-toolChains','node,bun','-image','code-it-alpine-dotnet') + $commonArgs) $stubPath }
+finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
+Assert-Contains "warns when the image label disagrees with -toolChains" $r.out "looks built for tech 'dotnet'"
+# Without a label (older images), fall back to the name-based guess
+$env:STUB_IMAGE_TOOL_CHAINS = ''
+try { $r = Invoke-Scenario $codeIt (@('-toolChains','node,bun','-image','code-it-alpine-dotnet') + $commonArgs) $stubPath }
+finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
+Assert-Contains "falls back to the image-name guess without a label" $r.out "looks built for tech 'dotnet'"
 
 # Unknown names are hard errors
 $r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','cobol') + $commonArgs) $stubPath

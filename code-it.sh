@@ -136,6 +136,8 @@
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=lib/code-it-common.sh
+. "$script_dir/lib/code-it-common.sh"
 
 # Absolute path of an existing directory, without realpath (absent on older macOS)
 abs_dir() { (CDPATH= cd -- "$1" && pwd); }
@@ -297,132 +299,46 @@ done
 # in $enabled_tool_chains) and known package repo names (in $enabled_package_caches).
 # --tool-chains replaces the default {dotnet,node}; --package-caches replaces the set implied
 # by --tool-chains (dotnet->nuget, node->npm). An unknown name is a hard error.
-enabled_tool_chains=""
-enabled_package_caches=""
+enabled_tool_chains=$(ci_resolve_tool_chains "$tool_chains") || exit 1
+enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_tool_chains") || exit 1
 
-# comma_list_add LIST ITEM: append ITEM to the space-separated LIST if absent
-comma_list_add() { case " $1 " in *" $2 "*) printf '%s' "$1" ;; *) printf '%s' "${1:+$1 }$2" ;; esac; }
+tool_chain_has()    { ci_has "$enabled_tool_chains" "$1"; }
+package_cache_has() { ci_has "$enabled_package_caches" "$1"; }
 
-# tool_chain_alias NAME: canonical tech name for NAME, or NAME itself. js-/ts- spellings
-# are aliases for the one runtime tech (Node.js or Bun runs both).
-tool_chain_alias() {
-    case "$1" in
-        js-node|ts-node) printf 'node' ;;
-        js-bun|ts-bun)   printf 'bun' ;;
-        *)               printf '%s' "$1" ;;
-    esac
-}
-
-if [[ -n "$tool_chains" ]]; then
-    IFS=',' read -r -a requested_tool_chains <<< "$tool_chains"
-else
-    requested_tool_chains=(dotnet node)
-fi
-for t in ${requested_tool_chains[@]+"${requested_tool_chains[@]}"}; do
-    t=$(tool_chain_alias "$t")
-    case "$t" in
-        dotnet|node|bun) enabled_tool_chains=$(comma_list_add "$enabled_tool_chains" "$t") ;;
-        "") ;;
-        *) echo "Warning: Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun)." >&2; exit 1 ;;
-    esac
-done
-
-if [[ -n "$package_caches" ]]; then
-    IFS=',' read -r -a requested_package_caches <<< "$package_caches"
-else
-    requested_package_caches=()
-    case " $enabled_tool_chains " in *" dotnet "*) requested_package_caches+=(nuget) ;; esac
-    case " $enabled_tool_chains " in *" node "*)   requested_package_caches+=(npm)   ;; esac
-fi
-for p in ${requested_package_caches[@]+"${requested_package_caches[@]}"}; do
-    case "$p" in
-        nuget|npm|bun) enabled_package_caches=$(comma_list_add "$enabled_package_caches" "$p") ;;
-        "") ;;
-        *) echo "Warning: Unknown package repo '$p'. Known: nuget, npm, bun." >&2; exit 1 ;;
-    esac
-done
-
-tool_chain_has()      { case " $enabled_tool_chains "     in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
-package_cache_has()   { case " $enabled_package_caches " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
-
-# Default image name from the tech list, e.g. code-it-alpine-dotnet or
+# Default image name from the tool-chain list, e.g. code-it-alpine-dotnet or
 # code-it-alpine-node-bun. --image overrides it.
 if [[ -z "$image" ]]; then
-    image="code-it-alpine-$(printf '%s' "$enabled_tool_chains" | tr ' ' '-')"
-fi
-
-# Build args for the tech stack, passed straight through by --build-image.
-tool_chain_on() { if tool_chain_has "$1"; then echo true; else echo false; fi; }
-package_cache_on()  { if package_cache_has "$1"; then echo true; else echo false; fi; }
-tool_chain_build_args=(
-    --build-arg "DOTNET=$(tool_chain_on dotnet)"
-    --build-arg "NODE=$(tool_chain_on node)"
-    --build-arg "BUN=$(tool_chain_on bun)"
-    --build-arg "NUGET=$(package_cache_on nuget)"
-    --build-arg "NPM=$(package_cache_on npm)"
-)
-
-# Warn if the resolved tech does not match the tech slug of a default image name,
-# since the image was likely built for a different stack.
-if [[ "$image" == code-it-alpine-* ]]; then
-    image_tech="${image#code-it-alpine-}"
-    image_tech=${image_tech//-/,}
-    if [[ "$image_tech" != "$(printf '%s' "$enabled_tool_chains" | tr ' ' ',')" ]]; then
-        echo "Warning: image '$image' looks built for tech '$image_tech' but --tool-chains is '$(printf '%s' "$enabled_tool_chains" | tr ' ' ',')'." >&2
-        echo "    Pass the same --tool-chains used to build the image, or set --image explicitly." >&2
-    fi
+    image=$(ci_default_image_name "$enabled_tool_chains")
 fi
 
 # Detect / validate the container runtime (after parsing, so --runtime is honoured).
-# On macOS prefer the Apple container CLI if present; otherwise use docker if present;
-# otherwise suggest what is best for the current platform.
-platform=$(uname -s)
+runtime=$(ci_detect_runtime "$runtime") || exit 1
+
+# Warn if the image was built for a different tool-chain set than the one we are
+# about to run. Prefer the label code-it-build stamped on the image; fall back to
+# the old name-based guess when the runtime cannot inspect labels.
+image_tool_chains=""
 case "$runtime" in
-    "")
-        if [[ "$platform" == "Darwin" ]] && command -v container &>/dev/null; then
-            runtime="container"
-        elif command -v docker &>/dev/null; then
-            runtime="docker"
-        elif command -v container &>/dev/null; then
-            runtime="container"
-        else
-            echo "Warning: No container runtime found." >&2
-            case "$platform" in
-                Darwin)
-                    echo "On macOS, the best options are:" >&2
-                    echo "  - Apple container CLI (native, lightweight):" >&2
-                    echo "      https://github.com/apple/container/blob/main/docs/tutorials/start-here.md" >&2
-                    echo "  - Docker Desktop: https://docs.docker.com/desktop/setup/install/mac-install/" >&2
-                    ;;
-                Linux)
-                    echo "On Linux, the best option is Docker Engine:" >&2
-                    echo "      https://docs.docker.com/engine/install/" >&2
-                    echo "  e.g. Debian/Ubuntu: sudo apt-get install docker.io" >&2
-                    echo "       Alpine:        doas apk add docker" >&2
-                    echo "       Fedora:        sudo dnf install docker" >&2
-                    ;;
-                MINGW*|MSYS*|CYGWIN*)
-                    echo "On Windows, the best option is Docker Desktop with WSL2:" >&2
-                    echo "      https://docs.docker.com/desktop/setup/install/windows-install/" >&2
-                    ;;
-                *)
-                    echo "On $platform, try Docker: https://docs.docker.com/engine/install/" >&2
-                    ;;
-            esac
-            exit 1
-        fi
+    docker)
+        image_tool_chains=$(docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "${image}:latest" 2>/dev/null || true)
         ;;
-    docker|container)
-        if ! command -v "$runtime" &>/dev/null; then
-            echo "Warning: Requested runtime '$runtime' not found. Please install it and ensure it is in your PATH." >&2
-            exit 1
-        fi
-        ;;
-    *)
-        echo "Warning: Unknown runtime '$runtime'. Valid values are 'docker' or 'container'." >&2
-        exit 1
+    container)
+        image_tool_chains=$(container image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "${image}:latest" 2>/dev/null || true)
         ;;
 esac
+# A runtime that does not know the format prints its own error text to stdout; keep
+# only a plausible comma-separated tool-chain list.
+case "$image_tool_chains" in
+    *[!a-z,]*|"") image_tool_chains="" ;;
+esac
+if [[ -z "$image_tool_chains" && "$image" == code-it-alpine-* ]]; then
+    image_tool_chains="${image#code-it-alpine-}"
+    image_tool_chains=${image_tool_chains//-/,}
+fi
+if [[ -n "$image_tool_chains" && "$image_tool_chains" != "$(ci_join , "$enabled_tool_chains")" ]]; then
+    echo "Warning: image '$image' looks built for tech '$image_tool_chains' but --tool-chains is '$(ci_join , "$enabled_tool_chains")'." >&2
+    echo "    Pass the same --tool-chains used to build the image, or set --image explicitly." >&2
+fi
 # Give the Apple container runtime enough memory for the agent to work with
 if [[ "$runtime" == "container" ]]; then
     container_args="--memory 3g"
@@ -517,13 +433,8 @@ if [[ "${images_rc:-0}" != 0 ]]; then
     exit 1
 fi
 
-if [[ "$build_image" == true ]]; then
-    if [[ ! -f "$dockerfile_dir/Dockerfile" ]]; then
-        echo "Warning: You asked for --build-image, but Dockerfile not found at: $dockerfile_dir/Dockerfile" >&2
-        exit 1
-    fi
-    dockerfile_dir=$(abs_dir "$dockerfile_dir")
-elif ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
+# An existing image is only required when we are not about to build one.
+if [[ "$build_image" == false ]] && ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
     echo "Warning: $runtime image '$image' does not exist and --build-image was not specified." >&2
     echo "Either build the image with the --build-image flag or ensure the image is available locally." >&2
     exit 1
@@ -624,19 +535,21 @@ if package_cache_has bun; then
     fi
 fi
 
-# Build image if requested
+# Build image if requested. This is a thin shim: code-it-build.sh owns building,
+# the Dockerfile's "# last changed" bump and the image label.
 if [[ "$build_image" == true ]]; then
-    # --rebuild-image: bump the "# last changed" cache-bust dates in the
-    # Dockerfile to today, so the agent install layers rebuild and update the agents.
-    # (Write to a temp file and move: portable in-place edit for BSD and GNU sed.)
+    echo "    Note: --build-image is deprecated; use code-it-build.sh. Delegating."
+    build_shim_args=(
+        --tool-chains "$(ci_join , "$enabled_tool_chains")"
+        --package-caches "$(ci_join , "$enabled_package_caches")"
+        --image "$image"
+        --dockerfile-dir "$dockerfile_dir"
+        --runtime "$runtime"
+    )
     if [[ "$rebuild_image" == true ]]; then
-        today=$(date +%Y-%m-%d)
-        sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed $today/" "$dockerfile_dir/Dockerfile" > "$dockerfile_dir/Dockerfile.tmp" \
-            && mv "$dockerfile_dir/Dockerfile.tmp" "$dockerfile_dir/Dockerfile"
-        echo "    Updated '# last changed' dates in $dockerfile_dir/Dockerfile to $today"
+        build_shim_args+=(--rebuild)
     fi
-    echo "    Building with tech ${enabled_tool_chains// /,}; package repos ${enabled_package_caches// /,}"
-    "$runtime" build "${tool_chain_build_args[@]}" -t "${image}:latest" "$dockerfile_dir"
+    "$script_dir/code-it-build.sh" "${build_shim_args[@]}"
 fi
 
 # Translate the prompt, and any -- pass-through arguments, into the chosen agent's own

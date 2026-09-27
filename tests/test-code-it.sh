@@ -48,6 +48,7 @@ cat > "$stub_docker/docker" <<'EOF'
 #!/bin/sh
 case "$1" in
     images) [ -n "${STUB_IMAGES_FAIL:-}" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
+    image)  case "$2" in inspect) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; *) echo "stub docker: $*" ;; esac ;;
     build)  [ -n "${STUB_BUILD_FAIL:-}" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -60,7 +61,11 @@ mkdir -p "$stub_container"
 cat > "$stub_container/container" <<'EOF'
 #!/bin/sh
 case "$1" in
-    image)  echo "code-it-alpine-dotnet-node  latest" ;;
+    image)  case "$2" in
+                ls)      echo "code-it-alpine-dotnet-node  latest" ;;
+                inspect) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;;
+                *)       echo "stub container: $*" ;;
+            esac ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
     run)    echo "STUB-CONTAINER-RUN $*"; printf '[%s]' "$@"; echo ;;
     *)      echo "stub container: $*" ;;
@@ -97,15 +102,18 @@ common_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
 
 # ---------------------------------------------------------------------------
 echo "1. Syntax checks (bash -n)"
-for f in code-it.sh claude-it.sh opencode-it.sh tests/test-code-it.sh completions/code-it.bash; do
+for f in code-it.sh code-it-build.sh lib/code-it-common.sh claude-it.sh opencode-it.sh \
+         tests/test-code-it.sh completions/code-it.bash completions/code-it-build.bash; do
     bash -n "$script_dir/$f"
     assert "bash -n $f" "$?"
 done
 if command -v zsh &>/dev/null; then
-    zsh -n "$script_dir/completions/_code-it"
-    assert "zsh -n completions/_code-it" "$?"
+    for f in completions/_code-it completions/_code-it-build; do
+        zsh -n "$script_dir/$f"
+        assert "zsh -n $f" "$?"
+    done
 else
-    echo "  skip: zsh -n completions/_code-it (no zsh)"
+    echo "  skip: zsh -n completions (no zsh)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -251,6 +259,60 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --dockerfile-dir "$dfdi
 assert "--build-image exit code (dfdir)" "$?"
 grep -q "# last changed 2000-01-01" "$dfdir/Dockerfile"
 assert "--build-image leaves dates unchanged" "$?"
+
+# ---------------------------------------------------------------------------
+echo "10c. code-it-build: dry-run, labels, --tech, --rebuild"
+build_it="$script_dir/code-it-build.sh"
+
+# --dry-run prints the build command (the same args code-it passes) without executing
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+assert "code-it-build --dry-run exit code" "$?"
+assert_contains "build dry-run prints the build command" "$out" "docker build"
+assert_contains "build dry-run passes DOTNET=true" "$out" "--build-arg DOTNET=true"
+assert_contains "build dry-run passes NODE=true" "$out" "--build-arg NODE=true"
+assert_contains "build dry-run passes NUGET=true (implied by dotnet)" "$out" "--build-arg NUGET=true"
+assert_contains "build dry-run passes NPM=true (implied by node)" "$out" "--build-arg NPM=true"
+assert_contains "build dry-run labels the tool chains" "$out" "--label code-it.tool-chains=dotnet,node"
+assert_contains "build dry-run labels the package caches" "$out" "--label code-it.package-caches=nuget,npm"
+assert_contains "build dry-run derives the default image name" "$out" "-t code-it-alpine-dotnet-node:latest"
+case "$out" in
+    *STUB-DOCKER-BUILD*) assert "code-it-build --dry-run does not execute the build" 1 ;;
+    *)                   assert "code-it-build --dry-run does not execute the build" 0 ;;
+esac
+
+# --tech is the kept alias of --tool-chains
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tech bun 2>&1)
+assert_contains "build --tech alias selects BUN" "$out" "--build-arg BUN=true"
+assert_contains "build --tech alias derives the image name" "$out" "-t code-it-alpine-bun:latest"
+
+# --package-caches replaces the implied set
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tool-chains bun --package-caches nuget 2>&1)
+assert_contains "build --package-caches nuget without dotnet" "$out" "--build-arg NUGET=true"
+assert_contains "build --package-caches nuget excludes NPM" "$out" "--build-arg NPM=false"
+
+# Unknown names are hard errors
+PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tool-chains cobol >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "code-it-build unknown tool chain fails" "$?"
+PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --package-caches pip >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "code-it-build unknown package cache fails" "$?"
+
+# --rebuild bumps the dates and then really builds
+bdfdir="$tmp/build-dfdir"; mkdir -p "$bdfdir"
+sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$script_dir/Dockerfile" > "$bdfdir/Dockerfile"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --rebuild --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
+assert "code-it-build --rebuild exit code" "$?"
+assert_contains "code-it-build --rebuild invokes docker build" "$out" "STUB-DOCKER-BUILD"
+grep -q "# last changed $today" "$bdfdir/Dockerfile"
+assert "code-it-build --rebuild bumps the dates" "$?"
+# A missing Dockerfile is an error
+PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$tmp" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "code-it-build without a Dockerfile fails" "$?"
+
+echo "10d. code-it reads the image label"
+out=$(STUB_IMAGE_TOOL_CHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+assert_contains "warns when the image label disagrees with --tool-chains" "$out" "looks built for tech 'node,bun'"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image "${common_args[@]}")
+assert_contains "the --build-image shim prints a deprecation note" "$out" "deprecated"
 
 # ---------------------------------------------------------------------------
 echo "11. Custom options"
@@ -407,9 +469,12 @@ assert_contains "ts-bun aliases bun and dedupes with bun" "$out" "-t code-it-alp
 PATH="$stub_docker:$PATH" "$code_it" --build-image --packages npm "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "removed --packages spelling fails" "$?"
 
-# A default-style image name that disagrees with --tool-chains is called out
-out=$(PATH="$stub_docker:$PATH" "$code_it" --tool-chains node,bun --image code-it-alpine-dotnet "${common_args[@]}" 2>&1)
-assert_contains "warns when the image tech slug disagrees with --tool-chains" "$out" "looks built for tech 'dotnet'"
+# An image label that disagrees with --tool-chains is called out
+out=$(STUB_IMAGE_TOOL_CHAINS=dotnet PATH="$stub_docker:$PATH" "$code_it" --tool-chains node,bun --image code-it-alpine-dotnet "${common_args[@]}" 2>&1)
+assert_contains "warns when the image label disagrees with --tool-chains" "$out" "looks built for tech 'dotnet'"
+# Without a label (older images), fall back to the name-based guess
+out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --tool-chains node,bun --image code-it-alpine-dotnet "${common_args[@]}" 2>&1)
+assert_contains "falls back to the image-name guess without a label" "$out" "looks built for tech 'dotnet'"
 
 # Unknown names are hard errors
 PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains cobol "${common_args[@]}" >/dev/null 2>&1

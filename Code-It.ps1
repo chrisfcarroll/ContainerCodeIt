@@ -210,6 +210,8 @@ if ($help) {
     exit 0
 }
 
+. "$PSScriptRoot/lib/CodeItCommon.ps1"
+
 # Resolve which agent to run
 if ($claude -and $opencode) {
     Write-Warning "Specify only one of -claude or -opencode."
@@ -235,102 +237,18 @@ if ($rebuildImage) { $buildImage = $true }
 # toggling it, so there are no per-tech on/off parameters to clash with future tech
 # names. -toolChains defaults to dotnet,node; -packageCaches defaults to the repos
 # implied by -toolChains (dotnet->nuget, node->npm).
-$knownToolChains      = @('dotnet', 'node', 'bun')
-$knownPackages        = @('nuget', 'npm', 'bun')
-# js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both)
-$toolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun' }
-function Split-List([string]$list) {
-    if (-not $list) { return @() }
-    return @($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-}
-$enabledToolChains = if ($toolChains) { Split-List $toolChains } else { @('dotnet', 'node') }
-$enabledToolChains = @($enabledToolChains | ForEach-Object { if ($toolChainAliases.ContainsKey($_)) { $toolChainAliases[$_] } else { $_ } } | Select-Object -Unique)
-foreach ($t in $enabledToolChains) {
-    if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $knownToolChains) {
-        Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun)."
-        Write-Warning "A comma-separated list is expected, e.g. -toolChains 'node,bun'."
-        exit 1
-    }
-}
-$enabledPackageCaches = if ($packageCaches) { Split-List $packageCaches } else {
-    @(@('nuget') * ($enabledToolChains -contains 'dotnet') + @('npm') * ($enabledToolChains -contains 'node'))
-}
-foreach ($p in $enabledPackageCaches) {
-    if ($p -notmatch '^[a-z][a-z0-9-]*$' -or $p -notin $knownPackages) {
-        Write-Warning "Unknown package repo '$p'. Known: $($knownPackages -join ', ')."
-        Write-Warning "A comma-separated list is expected, e.g. -packageCaches nuget,npm."
-        exit 1
-    }
-}
-# Default image name from the tech list, e.g. code-it-alpine-dotnet or
+$enabledToolChains = Resolve-CodeItToolChains $toolChains
+if ($null -eq $enabledToolChains) { exit 1 }
+$enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolChains
+if ($null -eq $enabledPackageCaches) { exit 1 }
+
+# Default image name from the tool-chain list, e.g. code-it-alpine-dotnet or
 # code-it-alpine-node-bun. An explicit -image overrides it.
-if (-not $image) { $image = "code-it-alpine-$($enabledToolChains -join '-')" }
-
-# Warn if the resolved tech does not match the tech slug of a default image name,
-# since the image was likely built for a different stack.
-if ($image -like 'code-it-alpine-*') {
-    $imageToolChains = ($image.Substring('code-it-alpine-'.Length)) -replace '-', ','
-    if ($imageToolChains -ne ($enabledToolChains -join ',')) {
-        Write-Warning "Image '$image' looks built for tech '$imageToolChains' but -toolChains is '$($enabledToolChains -join ',')'."
-        Write-Warning "Pass the same -toolChains used to build the image, or set -image explicitly."
-    }
-}
-
-# Build args are strings, spelled the way the Dockerfile matches them (lowercase)
-function Bool-Arg([bool]$on) { if ($on) { 'true' } else { 'false' } }
-$toolChainBuildArgs = @(
-    '--build-arg', "DOTNET=$(Bool-Arg ($enabledToolChains -contains 'dotnet'))", '--build-arg', "NODE=$(Bool-Arg ($enabledToolChains -contains 'node'))",
-    '--build-arg', "BUN=$(Bool-Arg ($enabledToolChains -contains 'bun'))", '--build-arg', "NUGET=$(Bool-Arg ($enabledPackageCaches -contains 'nuget'))",
-    '--build-arg', "NPM=$(Bool-Arg ($enabledPackageCaches -contains 'npm'))"
-)
-
-# $IsMacOS/$IsLinux are not defined in Windows PowerShell 5.1, so treat unset as false
-$onMacOS = $IsMacOS -eq $true
-$onLinux = $IsLinux -eq $true
+if (-not $image) { $image = CodeIt-ImageName $enabledToolChains }
 
 # Detect / validate the container runtime.
-# On macOS prefer the Apple container CLI if present; otherwise use docker if present;
-# otherwise suggest what is best for the current platform.
-if (-not $runtime) {
-    if ($onMacOS -and (Get-Command container -EA Silent)) {
-        $runtime = "container"        
-    }
-    elseif (Get-Command docker -EA Silent) {
-        $runtime = "docker"
-    }
-    elseif (Get-Command container -EA Silent) {
-        $runtime = "container"
-    }
-    else {
-        Write-Warning "No container runtime found."
-        if ($onMacOS) {
-            Write-Host "On macOS, the best options are:"
-            Write-Host "  - Apple container CLI (native, lightweight):"
-            Write-Host "      https://github.com/apple/container/blob/main/docs/tutorials/start-here.md"
-            Write-Host "  - Docker Desktop: https://docs.docker.com/desktop/setup/install/mac-install/"
-        }
-        elseif ($onLinux) {
-            Write-Host "On Linux, the best option is Docker Engine:"
-            Write-Host "      https://docs.docker.com/engine/install/"
-            Write-Host "  e.g. Debian/Ubuntu: sudo apt-get install docker.io"
-            Write-Host "       Alpine:        doas apk add docker"
-            Write-Host "       Fedora:        sudo dnf install docker"
-        }
-        else {
-            Write-Host "On Windows, the best option is Docker Desktop with WSL2:"
-            Write-Host "      https://docs.docker.com/desktop/setup/install/windows-install/"
-        }
-        exit 1
-    }
-}
-elseif ($runtime -notin @("docker", "container")) {
-    Write-Warning "Unknown runtime '$runtime'. Valid values are 'docker' or 'container'."
-    exit 1
-}
-elseif (-not (Get-Command $runtime -EA Silent)) {
-    Write-Warning "Requested runtime '$runtime' not found. Please install it and ensure it is in your PATH."
-    exit 1
-}
+$runtime = Detect-CodeItRuntime $runtime
+if ($null -eq $runtime) { exit 1 }
 "    Using container runtime: $runtime"
 "    Using code agent: $codeAgent"
 
@@ -426,11 +344,29 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Verbose ([string]::join("`n", @("    $runtime images") + $validImages)).ToString()
 
-if ($buildImage -and -not (Test-Path -Path "$dockerfileDir/Dockerfile")) {
-    Write-Warning "You asked for buildImage, but Dockerfile not found in directory: $dockerfileDir"
-    exit 1
+# Warn if the image was built for a different tool-chain set than the one we are
+# about to run. Prefer the label Code-It-Build stamped on the image; fall back to
+# the old name-based guess when the runtime cannot inspect labels.
+$imageToolChains = ""
+if ($runtime -eq "docker") {
+    $imageToolChains = (docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image`:latest" 2>$null)
+} else {
+    $imageToolChains = (container image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image`:latest" 2>$null)
 }
-elseif (-not $buildImage -and -not ($validImages | Where-Object { $_ -and ($_ -eq $image -or $_ -match "^$([regex]::Escape($image))[: ]") } | Select-Object -First 1)) {
+$imageToolChains = "$imageToolChains".Trim()
+# A runtime that does not know the format prints its own error text; keep only a
+# plausible comma-separated tool-chain list.
+if ($imageToolChains -notmatch '^[a-z,]+$') { $imageToolChains = "" }
+if (-not $imageToolChains -and $image -like 'code-it-alpine-*') {
+    $imageToolChains = ($image.Substring('code-it-alpine-'.Length)) -replace '-', ','
+}
+if ($imageToolChains -and $imageToolChains -ne ($enabledToolChains -join ',')) {
+    Write-Warning "Image '$image' looks built for tech '$imageToolChains' but -toolChains is '$($enabledToolChains -join ',')'."
+    Write-Warning "Pass the same -toolChains used to build the image, or set -image explicitly."
+}
+
+# An existing image is only required when we are not about to build one.
+if (-not $buildImage -and -not ($validImages | Where-Object { $_ -and ($_ -eq $image -or $_ -match "^$([regex]::Escape($image))[: ]") } | Select-Object -First 1)) {
     Write-Warning "$runtime image '$image' does not exist and -buildImage was not specified.
     Either build the image with -buildImage flag or ensure the image is available locally."
     exit 1
@@ -518,21 +454,21 @@ if ($enabledPackageCaches -contains 'bun') {
     }
 }
 
-# Build image if requested
+# Build image if requested. This is a thin shim: Code-It-Build.ps1 owns building,
+# the Dockerfile's "# last changed" bump and the image label.
 if ($buildImage) {
-    $dockerfileDir = (Resolve-Path $dockerfileDir).Path
-    if ($rebuildImage) {
-        # Bump the "# last changed" cache-bust dates in the Dockerfile to force re-run of installations.
-        $today = [DateTime]::Today.ToString('yyyy-MM-dd')
-        $dockerfile = "$dockerfileDir/Dockerfile"
-        $dockerfileText = [IO.File]::ReadAllText($dockerfile) -replace '# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}', "# last changed $today"
-        [IO.File]::WriteAllText($dockerfile, $dockerfileText)
-        "    Updated '# last changed' dates in $dockerfileDir/Dockerfile to $today"
+    "    Note: -buildImage is deprecated; use Code-It-Build.ps1. Delegating."
+    $buildShimParams = @{
+        toolChains    = ($enabledToolChains -join ',')
+        packageCaches = ($enabledPackageCaches -join ',')
+        image         = $image
+        dockerfileDir = $dockerfileDir
+        runtime       = $runtime
     }
-    "    Building with tech $($enabledToolChains -join ','); package repos $($enabledPackageCaches -join ',')"
-    & $runtime build $toolChainBuildArgs -t "$image`:latest" $dockerfileDir
+    if ($rebuildImage) { $buildShimParams['rebuild'] = $true }
+    & "$PSScriptRoot/Code-It-Build.ps1" @buildShimParams
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "$runtime build failed with exit code $LASTEXITCODE"
+        Write-Warning "Code-It-Build.ps1 failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
     }
 }
