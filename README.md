@@ -58,8 +58,8 @@ In principal either powershell or bash scripts should work on any O/S.
 | `--runtime` | `-runtime` | auto-detect | `docker` or `container` |
 | `--ports` | `-portsMap` | `0:3000` `0:3001` (docker); `3000:3000` `3001:3001` (container) | Port mappings (max 2); host port 0 auto-assigns |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--tech LIST` | `-tech LIST` | `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun` |
-| `--packages LIST` | `-packages LIST` | implied by `tech` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
+| `--tech LIST` | `-tech LIST` | `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`) |
+| `--package-caches LIST` | `-packageCaches LIST` | implied by `tech` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run` | `-dryRun` | off | Print the run command without executing |
 
 ## Tech stacks
@@ -69,9 +69,12 @@ launchers expose them as two comma-separated lists, passed to `docker build` as
 `--build-arg`s:
 
 - `--tech` / `-tech` — tech stacks to build: `dotnet`, `node`, `bun`. Default `dotnet,node`.
-- `--packages` / `-packages` — package repos whose host cache is mounted read-only:
-  `nuget`, `npm`, `bun`. Default: the repos implied by `--tech` (`dotnet`->`nuget`,
-  `node`->`npm`).
+  `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
+  `bun`. Aliases resolve to the canonical name, so `--tech ts-node` is `--tech node` and
+  produces the same image name.
+- `--package-caches` / `-packageCaches` — package repos whose host cache is mounted
+  read-only: `nuget`, `npm`, `bun`. Default: the repos implied by `--tech`
+  (`dotnet`->`nuget`, `node`->`npm`).
 
 A list *replaces* the default set rather than toggling it, so there is no per-tech
 on/off flag to clash with future tech names as the list grows. Each tech left out skips
@@ -82,14 +85,14 @@ its layers entirely.
 ./code-it.sh --build-image
 
 # A Bun-only sandbox with a read-only host Bun cache
-./code-it.sh --build-image --tech bun --packages bun
+./code-it.sh --build-image --tech bun --package-caches bun
 
 # Node.js and Bun, but npm only (e.g. you drive Bun through npm)
-./code-it.sh --build-image --tech node,bun --packages npm
+./code-it.sh --build-image --tech node,bun --package-caches npm
 ```
 
 ```powershell
-.\Code-It.ps1 -buildImage -tech 'node,bun' -packages npm
+.\Code-It.ps1 -buildImage -tech 'node,bun' -packageCaches npm
 ```
 
 Each enabled tech also adds a passwordless `doas` rule, so the agent can install more
@@ -293,14 +296,14 @@ If you use NuGet, the launcher scripts mounts your NuGet package cache at `/home
 
 ### npm
 
-`npm` (in `--packages`, implied by `--tech node`) mounts your npm cache read-only at
+`npm` (in `--package-caches`, implied by `--tech node`) mounts your npm cache read-only at
 `/home/agent1/.npm-host`. The container's `go.sh` seeds its own writable `~/.npm` from
 that mount at startup, so packages already downloaded on the host are reused and the
 host cache is never written to.
 
 ### Bun
 
-`bun` (in `--packages`) mounts your Bun cache read-only at `/home/agent1/.bun-host`,
+`bun` (in `--package-caches`) mounts your Bun cache read-only at `/home/agent1/.bun-host`,
 seeded at startup into `~/.bun/install/cache` in the same way.
 
 ### PyPi, etc.

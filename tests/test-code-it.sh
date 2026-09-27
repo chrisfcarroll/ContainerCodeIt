@@ -322,7 +322,7 @@ case "$out" in
 esac
 
 # ---------------------------------------------------------------------------
-echo "12b. Tech stack: --tech / --packages build args and read-only caches"
+echo "12b. Tech stack: --tech / --package-caches build args and read-only caches"
 npm_cache="$tmp/npm-cache"; mkdir -p "$npm_cache"
 bun_cache="$tmp/bun-cache"; mkdir -p "$bun_cache"
 
@@ -343,21 +343,39 @@ assert_contains "--tech node,bun keeps BUN" "$out" "--build-arg BUN=true"
 assert_contains "--tech node,bun drops NUGET (dotnet gone)" "$out" "--build-arg NUGET=false"
 assert_contains "--tech node,bun keeps NPM (node present)" "$out" "--build-arg NPM=true"
 
-# --packages replaces the implied set, independently of --tech
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech node,bun --packages npm "${common_args[@]}")
-assert_contains "--packages npm keeps NPM" "$out" "--build-arg NPM=true"
-assert_contains "--packages npm excludes BUN cache" "$out" "--build-arg NUGET=false"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech node,bun --packages bun "${common_args[@]}")
-assert_contains "--packages bun selects the BUN package cache" "$out" "--build-arg NPM=false"
-assert_contains "--packages bun excludes NPM" "$out" "--build-arg NUGET=false"
+# --package-caches replaces the implied set, independently of --tech
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech node,bun --package-caches npm "${common_args[@]}")
+assert_contains "--package-caches npm keeps NPM" "$out" "--build-arg NPM=true"
+assert_contains "--package-caches npm excludes BUN cache" "$out" "--build-arg NUGET=false"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech node,bun --package-caches bun "${common_args[@]}")
+assert_contains "--package-caches bun selects the BUN package cache" "$out" "--build-arg NPM=false"
+assert_contains "--package-caches bun excludes NPM" "$out" "--build-arg NUGET=false"
 
-# --packages nuget with no dotnet still selects the NuGet cache (nuget without dotnet)
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech bun --packages nuget "${common_args[@]}")
+# --package-caches nuget with no dotnet still selects the NuGet cache (nuget without dotnet)
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech bun --package-caches nuget "${common_args[@]}")
 assert_contains "nuget package cache without dotnet" "$out" "--build-arg NUGET=true"
 
 # The default image name follows --tech, so the built and run images agree
 out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech node,bun "${common_args[@]}")
 assert_contains "image name derives from --tech" "$out" "-t code-it-alpine-node-bun:latest"
+
+# Tech aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech js-node "${common_args[@]}")
+assert_contains "js-node aliases node (NODE=true)" "$out" "--build-arg NODE=true"
+assert_contains "js-node canonical image name" "$out" "-t code-it-alpine-node:latest"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech ts-node "${common_args[@]}")
+assert_contains "ts-node aliases node (NODE=true)" "$out" "--build-arg NODE=true"
+assert_contains "ts-node canonical image name" "$out" "-t code-it-alpine-node:latest"
+assert_contains "ts-node implies the npm package cache" "$out" "--build-arg NPM=true"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech js-bun "${common_args[@]}")
+assert_contains "js-bun aliases bun (BUN=true)" "$out" "--build-arg BUN=true"
+assert_contains "js-bun canonical image name" "$out" "-t code-it-alpine-bun:latest"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech ts-bun,bun "${common_args[@]}")
+assert_contains "ts-bun aliases bun and dedupes with bun" "$out" "-t code-it-alpine-bun:latest"
+
+# The old --packages spelling is gone, not an alias
+PATH="$stub_docker:$PATH" "$code_it" --build-image --packages npm "${common_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "removed --packages spelling fails" "$?"
 
 # A default-style image name that disagrees with --tech is called out
 out=$(PATH="$stub_docker:$PATH" "$code_it" --tech node,bun --image code-it-alpine-dotnet "${common_args[@]}" 2>&1)
@@ -366,22 +384,22 @@ assert_contains "warns when the image tech slug disagrees with --tech" "$out" "l
 # Unknown names are hard errors
 PATH="$stub_docker:$PATH" "$code_it" --build-image --tech cobol "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "--tech with an unknown name fails" "$?"
-PATH="$stub_docker:$PATH" "$code_it" --build-image --packages pip "${common_args[@]}" >/dev/null 2>&1
-[[ "$?" != "0" ]]; assert "--packages with an unknown name fails" "$?"
+PATH="$stub_docker:$PATH" "$code_it" --build-image --package-caches pip "${common_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "--package-caches with an unknown name fails" "$?"
 
 # Host caches for enabled package repos are mounted read-only
 out=$(HOME="$fakehome" NPM_CONFIG_CACHE="$npm_cache" PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert_contains "npm cache mounted read-only" "$out" "-v \"$npm_cache:/home/agent1/.npm-host:ro\""
-out=$(HOME="$fakehome" BUN_INSTALL_CACHE_DIR="$bun_cache" PATH="$stub_docker:$PATH" "$code_it" --packages bun "${common_args[@]}")
+out=$(HOME="$fakehome" BUN_INSTALL_CACHE_DIR="$bun_cache" PATH="$stub_docker:$PATH" "$code_it" --package-caches bun "${common_args[@]}")
 assert_contains "bun cache mounted read-only" "$out" "-v \"$bun_cache:/home/agent1/.bun-host:ro\""
 
-# Omitting a package repo from --packages suppresses its mount entirely
-out=$(HOME="$fakehome" NPM_CONFIG_CACHE="$npm_cache" PATH="$stub_docker:$PATH" "$code_it" --tech node --packages= "${common_args[@]}")
+# Omitting a package repo from --package-caches suppresses its mount entirely
+out=$(HOME="$fakehome" NPM_CONFIG_CACHE="$npm_cache" PATH="$stub_docker:$PATH" "$code_it" --tech node --package-caches= "${common_args[@]}")
 case "$out" in
-    *.npm-host*) assert "empty --packages: no npm mount" 1 ;;
-    *)           assert "empty --packages: no npm mount" 0 ;;
+    *.npm-host*) assert "empty --package-caches: no npm mount" 1 ;;
+    *)           assert "empty --package-caches: no npm mount" 0 ;;
 esac
-out=$(HOME="$fakehome" NUGET_PACKAGES="$nuget_cache" PATH="$stub_docker:$PATH" "$code_it" --tech dotnet --packages npm "${common_args[@]}")
+out=$(HOME="$fakehome" NUGET_PACKAGES="$nuget_cache" PATH="$stub_docker:$PATH" "$code_it" --tech dotnet --package-caches npm "${common_args[@]}")
 case "$out" in
     *packages-host*) assert "packages without nuget: no nuget mount" 1 ;;
     *)               assert "packages without nuget: no nuget mount" 0 ;;

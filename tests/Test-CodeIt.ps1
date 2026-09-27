@@ -363,7 +363,7 @@ try {
 }
 
 # ---------------------------------------------------------------------------
-"11b. Tech stack: -tech / -packages build args and read-only caches"
+"11b. Tech stack: -tech / -packageCaches build args and read-only caches"
 $r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
 Assert-Contains "default build passes DOTNET=true" $r.out '--build-arg DOTNET=true'
 Assert-Contains "default build passes NODE=true" $r.out '--build-arg NODE=true'
@@ -380,27 +380,48 @@ Assert-Contains "-tech node,bun keeps BUN" $r.out '--build-arg BUN=true'
 Assert-Contains "-tech node,bun drops NUGET (dotnet gone)" $r.out '--build-arg NUGET=false'
 Assert-Contains "-tech node,bun keeps NPM (node present)" $r.out '--build-arg NPM=true'
 
-# -packages replaces the implied set, independently of -tech
-$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','node,bun','-packages','npm') + $commonArgs) $stubPath
-Assert-Contains "-packages npm keeps NPM" $r.out '--build-arg NPM=true'
-Assert-Contains "-packages npm excludes NUGET" $r.out '--build-arg NUGET=false'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','node,bun','-packages','bun') + $commonArgs) $stubPath
-Assert-Contains "-packages bun selects the BUN package cache" $r.out '--build-arg NPM=false'
-Assert-Contains "-packages bun excludes NUGET" $r.out '--build-arg NUGET=false'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','bun','-packages','nuget') + $commonArgs) $stubPath
+# -packageCaches replaces the implied set, independently of -tech
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','node,bun','-packageCaches','npm') + $commonArgs) $stubPath
+Assert-Contains "-packageCaches npm keeps NPM" $r.out '--build-arg NPM=true'
+Assert-Contains "-packageCaches npm excludes NUGET" $r.out '--build-arg NUGET=false'
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','node,bun','-packageCaches','bun') + $commonArgs) $stubPath
+Assert-Contains "-packageCaches bun selects the BUN package cache" $r.out '--build-arg NPM=false'
+Assert-Contains "-packageCaches bun excludes NUGET" $r.out '--build-arg NUGET=false'
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','bun','-packageCaches','nuget') + $commonArgs) $stubPath
 Assert-Contains "nuget package cache without dotnet" $r.out '--build-arg NUGET=true'
 
 # The default image name follows -tech
 $r = Invoke-Scenario $codeIt (@('-buildImage','-tech','node,bun') + $commonArgs) $stubPath
 Assert-Contains "image name derives from -tech" $r.out '-t code-it-alpine-node-bun:latest'
+
+# Tech aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','js-node') + $commonArgs) $stubPath
+Assert-Contains "js-node aliases node (NODE=true)" $r.out '--build-arg NODE=true'
+Assert-Contains "js-node canonical image name" $r.out '-t code-it-alpine-node:latest'
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','ts-node') + $commonArgs) $stubPath
+Assert-Contains "ts-node aliases node (NODE=true)" $r.out '--build-arg NODE=true'
+Assert-Contains "ts-node canonical image name" $r.out '-t code-it-alpine-node:latest'
+Assert-Contains "ts-node implies the npm package cache" $r.out '--build-arg NPM=true'
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','js-bun') + $commonArgs) $stubPath
+Assert-Contains "js-bun aliases bun (BUN=true)" $r.out '--build-arg BUN=true'
+Assert-Contains "js-bun canonical image name" $r.out '-t code-it-alpine-bun:latest'
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','ts-bun,bun') + $commonArgs) $stubPath
+Assert-Contains "ts-bun aliases bun and dedupes with bun" $r.out '-t code-it-alpine-bun:latest'
+
+# The old -packages spelling is gone as a parameter: it is now passed to the agent,
+# so it no longer selects a package cache
+$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','bun','-packages','npm') + $commonArgs) $stubPath
+Assert-Contains "removed -packages is forwarded to the agent" $r.out '-packages npm'
+Assert-Contains "removed -packages no longer selects NPM" $r.out '--build-arg NPM=false'
+
 $r = Invoke-Scenario $codeIt (@('-tech','node,bun','-image','code-it-alpine-dotnet') + $commonArgs) $stubPath
 Assert-Contains "warns when the image tech slug disagrees with -tech" $r.out "looks built for tech 'dotnet'"
 
 # Unknown names are hard errors
 $r = Invoke-Scenario $codeIt (@('-buildImage','-tech','cobol') + $commonArgs) $stubPath
 Assert "-tech with an unknown name fails" ($r.code -ne 0)
-$r = Invoke-Scenario $codeIt (@('-buildImage','-packages','pip') + $commonArgs) $stubPath
-Assert "-packages with an unknown name fails" ($r.code -ne 0)
+$r = Invoke-Scenario $codeIt (@('-buildImage','-packageCaches','pip') + $commonArgs) $stubPath
+Assert "-packageCaches with an unknown name fails" ($r.code -ne 0)
 
 $npmCache = Join-Path $tmp 'npm-cache'; $bunCache = Join-Path $tmp 'bun-cache'
 $null = New-Item -ItemType Directory -Force -Path $npmCache, $bunCache
@@ -413,16 +434,16 @@ try {
     Assert-Contains "npm cache mounted read-only" $r.out "-v `"$npmCache`:/home/agent1/.npm-host:ro`""
     $env:NPM_CONFIG_CACHE = $null
     $env:BUN_INSTALL_CACHE_DIR = $bunCache
-    $r = Invoke-Scenario $codeIt (@('-packages','bun') + $commonArgs) $stubPath
+    $r = Invoke-Scenario $codeIt (@('-packageCaches','bun') + $commonArgs) $stubPath
     Assert-Contains "bun cache mounted read-only" $r.out "-v `"$bunCache`:/home/agent1/.bun-host:ro`""
     $env:BUN_INSTALL_CACHE_DIR = $null
     $env:NPM_CONFIG_CACHE = $npmCache
-    # An explicit but empty -packages: ',' (PowerShell cannot easily pass a bare "")
-    $r = Invoke-Scenario $codeIt (@('-tech','node','-packages',',') + $commonArgs) $stubPath
-    Assert "empty -packages: no npm mount" (-not $r.out.Contains('.npm-host'))
+    # An explicit but empty -packageCaches: ',' (PowerShell cannot easily pass a bare "")
+    $r = Invoke-Scenario $codeIt (@('-tech','node','-packageCaches',',') + $commonArgs) $stubPath
+    Assert "empty -packageCaches: no npm mount" (-not $r.out.Contains('.npm-host'))
     $env:NPM_CONFIG_CACHE = $null
     $env:NUGET_PACKAGES = (Resolve-Path "$fakeHome/.nuget/packages").Path
-    $r = Invoke-Scenario $codeIt (@('-tech','dotnet','-packages','npm') + $commonArgs) $stubPath
+    $r = Invoke-Scenario $codeIt (@('-tech','dotnet','-packageCaches','npm') + $commonArgs) $stubPath
     Assert "packages without nuget: no nuget mount" (-not $r.out.Contains('packages-host'))
 } finally {
     foreach ($k in $savedCacheEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $savedCacheEnv[$k]) }

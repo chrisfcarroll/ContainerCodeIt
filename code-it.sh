@@ -63,13 +63,21 @@
 # decide which host package caches are mounted read-only). Passing a list
 # REPLACES the default set, so there are no on/off flags to clash with future
 # tech names:
-#   --tech LIST              Comma-separated tech stacks to build. Default: dotnet,node.
-#                            Known: dotnet, node, bun.
-#   --packages LIST          Comma-separated package repos whose host cache is mounted
-#                            read-only. Default: the package repos implied by --tech
-#                            (dotnet->nuget, node->npm). Known: nuget, npm, bun.
-#                            --packages is taken exactly as given, so --tech node,bun
-#                            --packages npm can pair npm with Bun instead of Bun's cache.
+#   --tech LIST              Comma-separated tech stacks to build. 
+#                            Default: dotnet,node.
+#                            Known: dotnet, node (aliases js-node, ts-node), bun
+#                            (aliases js-bun, ts-bun).
+#   --package-caches LIST    Comma-separated package repos whose host cache is mounted
+#                            read-only. 
+#                            Known: nuget, npm, bun.
+#                            Default: the package repos implied by --tech
+#                            (dotnet->nuget, node->npm).
+#                            If the given package manager has a well-known global 
+#                            cache directory; and if that directory exists on the host 
+#                            when the script runs; then that directory will be mounted 
+#                            read-only in the virtual machine at the package manager's 
+#                            default location on Alpine Linux.
+#
 #   --dry-run                Print the run command without executing it.
 #   --help                   Show this help message.
 #
@@ -106,7 +114,7 @@
 #   - Alternatively, use ANTHROPIC_API_KEY (claude) or a provider API key env var (opencode)
 #     to avoid volume mounts for credentials
 #   - Host package caches are mounted read-only (never written) for the package
-#     repos in --packages when a cache is found, so downloads are reused:
+#     repos in --package-caches when a cache is found, so downloads are reused:
 #       nuget: ~/.nuget/packages-host (a fallbackPackageFolder). Looked up, in order,
 #              from the NUGET_PACKAGES env var, the globalPackagesFolder setting in
 #              the user-level NuGet.Config, and the default ~/.nuget/packages
@@ -187,7 +195,7 @@ agent_args=()
 # Tech stack (see --help). Empty means "use the defaults": dotnet,node and the
 # package repos they imply (dotnet->nuget, node->npm).
 tech_list=""
-packages_list=""
+package_caches_list=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -245,8 +253,8 @@ while [[ $# -gt 0 ]]; do
             tech_list="$2"
             shift 2
             ;;
-        --packages)
-            packages_list="$2"
+        --package-caches)
+            package_caches_list="$2"
             shift 2
             ;;
         --prompt)
@@ -289,9 +297,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Resolve --tech / --packages into a set of known tech names (space-separated in
-# $enabled_tech) and known package repo names (in $enabled_packages).
-# --tech replaces the default {dotnet,node}; --packages replaces the set implied
+# Resolve --tech / --package-caches into a set of known tech names (space-separated
+# in $enabled_tech) and known package repo names (in $enabled_packages).
+# --tech replaces the default {dotnet,node}; --package-caches replaces the set implied
 # by --tech (dotnet->nuget, node->npm). An unknown name is a hard error.
 enabled_tech=""
 enabled_packages=""
@@ -299,21 +307,32 @@ enabled_packages=""
 # comma_list_add LIST ITEM: append ITEM to the space-separated LIST if absent
 comma_list_add() { case " $1 " in *" $2 "*) printf '%s' "$1" ;; *) printf '%s' "${1:+$1 }$2" ;; esac; }
 
+# tech_alias NAME: canonical tech name for NAME, or NAME itself. js-/ts- spellings
+# are aliases for the one runtime tech (Node.js or Bun runs both).
+tech_alias() {
+    case "$1" in
+        js-node|ts-node) printf 'node' ;;
+        js-bun|ts-bun)   printf 'bun' ;;
+        *)               printf '%s' "$1" ;;
+    esac
+}
+
 if [[ -n "$tech_list" ]]; then
     IFS=',' read -r -a requested_tech <<< "$tech_list"
 else
     requested_tech=(dotnet node)
 fi
 for t in ${requested_tech[@]+"${requested_tech[@]}"}; do
+    t=$(tech_alias "$t")
     case "$t" in
         dotnet|node|bun) enabled_tech=$(comma_list_add "$enabled_tech" "$t") ;;
         "") ;;
-        *) echo "Warning: Unknown tech stack '$t'. Known: dotnet, node, bun." >&2; exit 1 ;;
+        *) echo "Warning: Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun)." >&2; exit 1 ;;
     esac
 done
 
-if [[ -n "$packages_list" ]]; then
-    IFS=',' read -r -a requested_packages <<< "$packages_list"
+if [[ -n "$package_caches_list" ]]; then
+    IFS=',' read -r -a requested_packages <<< "$package_caches_list"
 else
     requested_packages=()
     case " $enabled_tech " in *" dotnet "*) requested_packages+=(nuget) ;; esac

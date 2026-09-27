@@ -93,15 +93,19 @@
 
 .PARAMETER tech
     Comma-separated tech stacks to build into the image, passed to docker build as
-    the DOTNET/NODE/BUN build args. Known: dotnet, node, bun. Default: "dotnet,node".
-    The list replaces the default set, so there is no per-tech on/off parameter to
-    clash with future tech names, e.g. -tech "node,bun".
+    the DOTNET/NODE/BUN build args. Known: dotnet, node (aliases js-node, ts-node),
+    bun (aliases js-bun, ts-bun). 
+    Default: "dotnet,node".
 
-.PARAMETER packages
-    Comma-separated package repos whose host cache is mounted read-only. Known:
-    nuget, npm, bun. Default: the repos implied by -tech (dotnet->nuget, node->npm).
-    The list is taken exactly as given, so -tech "node,bun" -packages npm pairs npm
-    with Bun instead of Bun's cache. Pass a comma, -packages ",", to select none.
+.PARAMETER packageCaches
+    Comma-separated package repos whose host cache is mounted read-only. 
+    Known: nuget, npm, bun. 
+    Default: the repos implied by -tech (dotnet->nuget, node->npm), so not specifying 
+    this parameter is the simplest choice.
+    If the given package manager has a well-known global cache directory; and if that
+    directory exists on the host when the script runs; then that directory will be 
+    mounted read-only in the virtual machine at the package manager's default location 
+    on Alpine Linux.
 
 .PARAMETER dryRun
     Print the run command without executing it.
@@ -188,7 +192,7 @@ param (
     [string[]]$portsMap     = @(),
     [string]$agentName      = "Agent1",
     [string]$tech           = "",
-    [string]$packages       = "",
+    [string]$packageCaches  = "",
     [string]$prompt         = "",
     [switch]$headless       = $false,
     [Alias('h')]
@@ -225,31 +229,34 @@ $promptSet = [bool]$prompt
 # -rebuildImage implies -buildImage
 if ($rebuildImage) { $buildImage = $true }
 
-# Resolve -tech / -packages. A list replaces the default set rather than toggling
-# it, so there are no per-tech on/off parameters to clash with future tech names.
-# -tech defaults to dotnet,node; -packages defaults to the repos implied by -tech
-# (dotnet->nuget, node->npm).
+# Resolve -tech / -packageCaches. A list replaces the default set rather than
+# toggling it, so there are no per-tech on/off parameters to clash with future tech
+# names. -tech defaults to dotnet,node; -packageCaches defaults to the repos implied
+# by -tech (dotnet->nuget, node->npm).
 $knownTech     = @('dotnet', 'node', 'bun')
 $knownPackages = @('nuget', 'npm', 'bun')
+# js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both)
+$techAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun' }
 function Split-List([string]$list) {
     if (-not $list) { return @() }
     return @($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 $enabledTech = if ($tech) { Split-List $tech } else { @('dotnet', 'node') }
+$enabledTech = @($enabledTech | ForEach-Object { if ($techAliases.ContainsKey($_)) { $techAliases[$_] } else { $_ } } | Select-Object -Unique)
 foreach ($t in $enabledTech) {
     if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $knownTech) {
-        Write-Warning "Unknown tech stack '$t'. Known: $($knownTech -join ', ')."
+        Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun)."
         Write-Warning "A comma-separated list is expected, e.g. -tech 'node,bun'."
         exit 1
     }
 }
-$enabledPackages = if ($packages) { Split-List $packages } else {
+$enabledPackages = if ($packageCaches) { Split-List $packageCaches } else {
     @(@('nuget') * ($enabledTech -contains 'dotnet') + @('npm') * ($enabledTech -contains 'node'))
 }
 foreach ($p in $enabledPackages) {
     if ($p -notmatch '^[a-z][a-z0-9-]*$' -or $p -notin $knownPackages) {
         Write-Warning "Unknown package repo '$p'. Known: $($knownPackages -join ', ')."
-        Write-Warning "A comma-separated list is expected, e.g. -packages nuget,npm."
+        Write-Warning "A comma-separated list is expected, e.g. -packageCaches nuget,npm."
         exit 1
     }
 }
