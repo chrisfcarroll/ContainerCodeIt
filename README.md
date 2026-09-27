@@ -46,21 +46,21 @@ In principal either powershell or bash scripts should work on any O/S.
 |---|---|---|---|
 | `--claude`, `-c` | `-claude`, `-c` | off | Run Claude Code |
 | `--opencode`, `-o` | `-opencode`, `-o` | on (default) | Run OpenCode |
-| `--prompt`, or a bare argument | `-prompt`, or a bare argument | none | Opening prompt for the agent |
+| `--prompt`, `-p`, or a bare argument | `-prompt`, or a bare argument | none | Opening prompt for the agent |
 | `--headless` | `-headless` | off | Run the agent one-shot in the foreground instead of in tmux: no TTY, and the container exits with the agent's exit code |
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
-| `--work-dir` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
-| `--save-dir` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
-| `--image` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--tool-chains` (e.g. `code-it-alpine-node-bun`) |
-| `--build-image` | `-buildImage` | off | Build the image before running |
-| `--rebuild-image` | `-rebuildImage` | off | Build the image, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
+| `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
+| `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
+| `--image`, `-i` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--tool-chains` (e.g. `code-it-alpine-node-bun`) |
+| `--build-image`, `-b` | `-buildImage` | off | Build the image before running |
+| `--rebuild-image`, `-B` | `-rebuildImage` | off | Build the image, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
-| `--runtime` | `-runtime` | auto-detect | `docker` or `container` |
-| `--ports` | `-portsMap` | `0:3000` `0:3001` (docker); `3000:3000` `3001:3001` (container) | Port mappings (max 2); host port 0 auto-assigns |
+| `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
+| `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--tool-chains LIST` | `-toolChains LIST` | `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`) |
+| `--tool-chains LIST`, `-t` | `-toolChains LIST` | `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `tool-chains` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
-| `--dry-run` | `-dryRun` | off | Print the run command without executing |
+| `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
 ## Tech stacks
 
@@ -131,7 +131,7 @@ Anything you want the coding agent itself to see can be passed through the launc
 In PowerShell a bare argument is now the prompt, so `-WorkDirToMount` is no longer bound
 positionally: pass it by name, `.\Code-It.ps1 -WorkDirToMount ~/my-repos`. And a short
 agent flag that PowerShell reads as one of the script's own parameters (`-p` matches both
-`-portsMap` and `-prompt`) is rejected before the script runs: spell it in full, `--print`,
+`-port` and `-prompt`) is rejected before the script runs: spell it in full, `--print`,
 or pass it as `-agentArgs '-p','...'`. `code-it.sh` has no such problem: use `--`.
 
 The launcher translates the prompt into each agent's own command line
@@ -179,7 +179,7 @@ Something like this:
 # docker build . -t code-it-alpine-dotnet-node:latest
 
 docker run -it --rm \
-    -p 3000:3000 -p 3001:3001 \
+    -p 0:3000 \
     -e CODE_AGENT=opencode \
     -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
     -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \

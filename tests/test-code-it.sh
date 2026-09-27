@@ -67,6 +67,13 @@ case "$1" in
 esac
 EOF
 chmod +x "$stub_container/container"
+# Port probe used when resolving --port 0 for the Apple container runtime:
+# report every port free, so the first candidate (3000) is chosen deterministically.
+cat > "$stub_container/nc" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$stub_container/nc"
 
 stub_darwin="$tmp/stub-darwin"
 mkdir -p "$stub_darwin"
@@ -109,7 +116,7 @@ assert_contains "--help shows usage" "$out" "Usage:"
 assert_contains "--help documents -c" "$out" "--claude, -c"
 assert_contains "--help documents -o" "$out" "--opencode, -o"
 assert_contains "--help documents --rebuild-image" "$out" "--rebuild-image"
-assert_contains "--help documents --prompt" "$out" "--prompt TEXT"
+assert_contains "--help documents --prompt" "$out" "--prompt, -p TEXT"
 assert_contains "--help documents --headless" "$out" "--headless"
 assert_contains "--help documents the -- separator" "$out" "-- AGENT-ARGS..."
 
@@ -127,7 +134,7 @@ assert_contains "claude dir mount" "$out" "/.claude:/home/agent1/.claude"
 assert_contains "claude.json mount" "$out" "/.claude.json:/home/agent1/.claude.json"
 assert_contains "opencode config mount" "$out" "/.config/opencode:/home/agent1/.config/opencode"
 assert_contains "opencode mount" "$out" "/.local/share/opencode:/home/agent1/.local/share/opencode"
-assert_contains "docker default auto-assign ports" "$out" "-p 0:3000 -p 0:3001"
+assert_contains "docker default auto-assign port" "$out" "-p 0:3000"
 
 # ---------------------------------------------------------------------------
 echo "4. Save dir structure is created for first run"
@@ -169,7 +176,7 @@ echo "7. Runtime detection"
 out=$(PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert_contains "macOS prefers apple container" "$out" "Using container runtime: container"
 assert_contains "container run command" "$out" "container run -it"
-assert_contains "container default fixed ports" "$out" "-p 3000:3000 -p 3001:3001"
+assert_contains "container default resolves port 0 to a free port" "$out" "-p 3000:3000"
 # On non-macOS with both available, prefer docker
 out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert_contains "non-macOS prefers docker" "$out" "Using container runtime: docker"
@@ -247,11 +254,10 @@ assert "--build-image leaves dates unchanged" "$?"
 
 # ---------------------------------------------------------------------------
 echo "11. Custom options"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --ports "8000:3000" "8001:3001" "${common_args[@]}")
-assert_contains "custom ports" "$out" "-p 8000:3000 -p 8001:3001"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --ports "8000:3000" -o "${common_args[@]}")
-assert_contains "flag after --ports values is not eaten as a port" "$out" 'CODE_AGENT="opencode"'
-assert_contains "single --ports value padded with default" "$out" "-p 8000:3000 -p 0:3001"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --port 8000 "${common_args[@]}")
+assert_contains "custom --port maps the host port to container 3000" "$out" "-p 8000:3000"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --port 8000 -o "${common_args[@]}")
+assert_contains "flag after --port value is not eaten" "$out" 'CODE_AGENT="opencode"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent-name "MyAgent" "${common_args[@]}")
 assert_contains "agent name lowercased in mounts" "$out" "/home/myagent/.claude"
 assert_contains "agent name in git author" "$out" 'GIT_AUTHOR_NAME="MyAgent for'
@@ -259,6 +265,26 @@ assert_contains "agent name in git committer" "$out" 'GIT_COMMITTER_NAME="MyAgen
 assert_contains "git committer email passed" "$out" 'GIT_COMMITTER_EMAIL='
 out=$(GIT_AUTHOR_NAME="Agent1 for Some One" PATH="$stub_docker:$PATH" "$code_it" --agent-name "MyAgent" "${common_args[@]}")
 assert_contains "run inside an agent container does not repeat the agent prefix" "$out" 'GIT_AUTHOR_NAME="MyAgent for Some One"'
+
+# ---------------------------------------------------------------------------
+echo "11b. Short-form aliases"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -p "explain this" "${common_args[@]}")
+assert_contains "-p is --prompt" "$out" '--prompt explain\ this'
+out=$(PATH="$stub_docker:$PATH" "$code_it" -t node,bun -b "${common_args[@]}")
+assert_contains "-t is --tool-chains" "$out" "code-it-alpine-node-bun:latest"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -b "${common_args[@]}")
+assert_contains "-b is --build-image" "$out" "STUB-DOCKER-BUILD"
+out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" -r container -i code-it-alpine-dotnet-node -w "$script_dir" -s "$save" -d)
+assert_contains "-r is --runtime" "$out" "Using container runtime: container"
+assert_contains "-i is --image" "$out" "code-it-alpine-dotnet-node:latest"
+case "$out" in
+    *STUB-DOCKER-RUN*) assert "-d is --dry-run (no run)" 1 ;;
+    *)                 assert "-d is --dry-run (no run)" 0 ;;
+esac
+alias_dfdir="$tmp/alias-dfdir"; mkdir -p "$alias_dfdir"
+cp "$script_dir/Dockerfile" "$alias_dfdir/Dockerfile"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -B --dockerfile-dir "$alias_dfdir" -w "$script_dir" -s "$save" -d)
+assert_contains "-B is --rebuild-image" "$out" "STUB-DOCKER-BUILD"
 
 # ---------------------------------------------------------------------------
 echo "12. NuGet package cache: detection and read-only mount"

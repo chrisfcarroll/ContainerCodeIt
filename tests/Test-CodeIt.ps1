@@ -157,7 +157,7 @@ Assert-Contains "claude dir mount" $r.out '/.claude:/home/agent1/.claude'
 Assert-Contains "claude.json mount" $r.out '/.claude.json:/home/agent1/.claude.json'
 Assert-Contains "opencode config mount" $r.out '/.config/opencode:/home/agent1/.config/opencode'
 Assert-Contains "opencode mount" $r.out '/.local/share/opencode:/home/agent1/.local/share/opencode'
-Assert-Contains "default auto-assign ports" $r.out '-p 0:3000 -p 0:3001'
+Assert-Contains "default auto-assign port" $r.out '-p 0:3000'
 
 # ---------------------------------------------------------------------------
 "3. Save dir structure is created for first run"
@@ -203,11 +203,11 @@ Assert-Contains "suggests an install link" $r.out 'docs.docker.com'
 
 # ---------------------------------------------------------------------------
 "7. Runtime selection"
-$r = Invoke-Scenario $codeIt (@('-runtime', 'container') + $commonArgs) "$stubContainer$sep$stubPath"
+$r = Invoke-Scenario $codeIt (@('-runtime', 'container', '-port', '3000') + $commonArgs) "$stubContainer$sep$stubPath"
 Assert "-runtime container exit code 0" ($r.code -eq 0)
 Assert-Contains "-runtime container forces apple container" $r.out 'Using container runtime: container'
 Assert-Contains "container run command" $r.out 'container run -it'
-Assert-Contains "container default fixed ports" $r.out '-p 3000:3000 -p 3001:3001'
+Assert-Contains "container maps the single requested port" $r.out '-p 3000:3000'
 Assert-Contains "container dry-run shows memory limit" $r.out '--memory 3g'
 if (-not $onWindows) {
     $r = Invoke-Scenario $codeIt @('-runtime', 'container', '-WorkDirToMount', $scriptDir, '-saveDir', $save) "$stubContainer$sep$stubPath"
@@ -275,10 +275,10 @@ Assert "-buildImage leaves dates unchanged" ($df.Contains('# last changed 2000-0
 
 # ---------------------------------------------------------------------------
 "10. Custom options"
-$r = Invoke-ScenarioCommand "& '$codeIt' -portsMap '8000:3000','8001:3001' -dryRun -WorkDirToMount '$scriptDir' -saveDir '$save'" $stubPath
-Assert-Contains "custom ports" $r.out '-p 8000:3000 -p 8001:3001'
-$r = Invoke-ScenarioCommand "& '$codeIt' -portsMap '8000:3000' -dryRun -WorkDirToMount '$scriptDir' -saveDir '$save'" $stubPath
-Assert-Contains "single port padded with the second default" $r.out '-p 8000:3000 -p 0:3001'
+$r = Invoke-Scenario $codeIt (@('-port', '8000') + $commonArgs) $stubPath
+Assert-Contains "custom -port maps the host port to container 3000" $r.out '-p 8000:3000'
+$r = Invoke-Scenario $codeIt (@('-port', '0') + $commonArgs) $stubPath
+Assert-Contains "-port 0 lets docker auto-assign" $r.out '-p 0:3000'
 $r = Invoke-Scenario $codeIt (@('-agentName', 'MyAgent') + $commonArgs) $stubPath
 Assert-Contains "agent name lowercased in mounts" $r.out '/home/myagent/.claude'
 Assert-Contains "agent name in git author" $r.out 'GIT_AUTHOR_NAME="MyAgent for'

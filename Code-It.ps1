@@ -62,11 +62,12 @@
     Container runtime to use: "docker" or "container".
     Default: auto-detected as described above.
 
-.PARAMETER portsMap
-    Array of port mappings in "host:container" format. Default: @("0:3000","0:3001")
-    for docker (0 auto-assigns a free host port, so multiple containers can run at
-    once without port collisions), @("3000:3000","3001:3001") for the Apple container
-    runtime. Maximum of 2 port mappings supported; additional mappings are ignored.
+.PARAMETER port
+    Host port to map to the container's port 3000 (so it takes a single "host" value,
+    not a "host:container" pair). Default: 0. With docker, 0 lets the runtime auto-assign
+    a free host port, so multiple containers can run at once without port collisions.
+    The Apple container CLI cannot, so on macOS 0 is resolved to a free port, starting
+    at 3000, then a random high port if 3000-3010 are all taken.
 
 .PARAMETER prompt
     Opens the agent with this text as its first prompt. A leading bare argument means the
@@ -82,7 +83,7 @@
     e.g. `.\Code-It.ps1 -c --continue --model opus`. PowerShell has no usable `--`
     end-of-parameters token for scripts, so unlike code-it.sh no separator is needed -
     and none works. A short agent flag that PowerShell reads as one of this script's own
-    parameters (`-p` matches both -portsMap and -prompt) is rejected before the script
+    parameters (`-p` matches both -port and -prompt) is rejected before the script
     runs: spell it in full, `--print`, or pass it as `-agentArgs '-p','...'`.
     See https://code.claude.com/docs/en/cli-reference and https://opencode.ai/docs/cli/
 
@@ -123,8 +124,8 @@
     Builds the image from the Dockerfile next to this script, then runs it.
 
 .EXAMPLE
-    .\Code-It.ps1 -portsMap @("8000:3000", "8001:3001")
-    Runs the container with custom port mappings.
+    .\Code-It.ps1 -port 8000
+    Maps host port 8000 to the container's port 3000.
 
 .EXAMPLE
     .\Code-It.ps1 -c "explain this repo"
@@ -189,10 +190,10 @@ param (
     [string]$dockerfileDir  = $PSScriptRoot,
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$runtime        = "",
-    [string[]]$portsMap     = @(),
+    [int]$port              = 0,
     [string]$agentName      = "Agent1",
     [Alias('tech')]
-    [string[]]$toolChains   = @(),
+    [string]$toolChains     = "",
     [string]$packageCaches  = "",
     [string]$prompt         = "",
     [switch]$headless       = $false,
@@ -234,27 +235,27 @@ if ($rebuildImage) { $buildImage = $true }
 # toggling it, so there are no per-tech on/off parameters to clash with future tech
 # names. -toolChains defaults to dotnet,node; -packageCaches defaults to the repos
 # implied by -toolChains (dotnet->nuget, node->npm).
-$knownTech     = @('dotnet', 'node', 'bun')
-$knownPackages = @('nuget', 'npm', 'bun')
+$knownToolChains      = @('dotnet', 'node', 'bun')
+$knownPackages        = @('nuget', 'npm', 'bun')
 # js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both)
-$techAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun' }
+$toolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun' }
 function Split-List([string]$list) {
     if (-not $list) { return @() }
     return @($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
-$enabledTech = if ($toolChains) { $toolChains } else { @('dotnet', 'node') }
-$enabledTech = @($enabledTech | ForEach-Object { if ($techAliases.ContainsKey($_)) { $techAliases[$_] } else { $_ } } | Select-Object -Unique)
-foreach ($t in $enabledTech) {
-    if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $knownTech) {
+$enabledToolChains = if ($toolChains) { Split-List $toolChains } else { @('dotnet', 'node') }
+$enabledToolChains = @($enabledToolChains | ForEach-Object { if ($toolChainAliases.ContainsKey($_)) { $toolChainAliases[$_] } else { $_ } } | Select-Object -Unique)
+foreach ($t in $enabledToolChains) {
+    if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $knownToolChains) {
         Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun)."
         Write-Warning "A comma-separated list is expected, e.g. -toolChains 'node,bun'."
         exit 1
     }
 }
-$enabledPackages = if ($packageCaches) { Split-List $packageCaches } else {
-    @(@('nuget') * ($enabledTech -contains 'dotnet') + @('npm') * ($enabledTech -contains 'node'))
+$enabledPackageCaches = if ($packageCaches) { Split-List $packageCaches } else {
+    @(@('nuget') * ($enabledToolChains -contains 'dotnet') + @('npm') * ($enabledToolChains -contains 'node'))
 }
-foreach ($p in $enabledPackages) {
+foreach ($p in $enabledPackageCaches) {
     if ($p -notmatch '^[a-z][a-z0-9-]*$' -or $p -notin $knownPackages) {
         Write-Warning "Unknown package repo '$p'. Known: $($knownPackages -join ', ')."
         Write-Warning "A comma-separated list is expected, e.g. -packageCaches nuget,npm."
@@ -263,24 +264,24 @@ foreach ($p in $enabledPackages) {
 }
 # Default image name from the tech list, e.g. code-it-alpine-dotnet or
 # code-it-alpine-node-bun. An explicit -image overrides it.
-if (-not $image) { $image = "code-it-alpine-$($enabledTech -join '-')" }
+if (-not $image) { $image = "code-it-alpine-$($enabledToolChains -join '-')" }
 
 # Warn if the resolved tech does not match the tech slug of a default image name,
 # since the image was likely built for a different stack.
 if ($image -like 'code-it-alpine-*') {
-    $imageTech = ($image.Substring('code-it-alpine-'.Length)) -replace '-', ','
-    if ($imageTech -ne ($enabledTech -join ',')) {
-        Write-Warning "Image '$image' looks built for tech '$imageTech' but -toolChains is '$($enabledTech -join ',')'."
+    $imageToolChains = ($image.Substring('code-it-alpine-'.Length)) -replace '-', ','
+    if ($imageToolChains -ne ($enabledToolChains -join ',')) {
+        Write-Warning "Image '$image' looks built for tech '$imageToolChains' but -toolChains is '$($enabledToolChains -join ',')'."
         Write-Warning "Pass the same -toolChains used to build the image, or set -image explicitly."
     }
 }
 
 # Build args are strings, spelled the way the Dockerfile matches them (lowercase)
 function Bool-Arg([bool]$on) { if ($on) { 'true' } else { 'false' } }
-$techBuildArgs = @(
-    '--build-arg', "DOTNET=$(Bool-Arg ($enabledTech -contains 'dotnet'))", '--build-arg', "NODE=$(Bool-Arg ($enabledTech -contains 'node'))",
-    '--build-arg', "BUN=$(Bool-Arg ($enabledTech -contains 'bun'))", '--build-arg', "NUGET=$(Bool-Arg ($enabledPackages -contains 'nuget'))",
-    '--build-arg', "NPM=$(Bool-Arg ($enabledPackages -contains 'npm'))"
+$toolChainBuildArgs = @(
+    '--build-arg', "DOTNET=$(Bool-Arg ($enabledToolChains -contains 'dotnet'))", '--build-arg', "NODE=$(Bool-Arg ($enabledToolChains -contains 'node'))",
+    '--build-arg', "BUN=$(Bool-Arg ($enabledToolChains -contains 'bun'))", '--build-arg', "NUGET=$(Bool-Arg ($enabledPackageCaches -contains 'nuget'))",
+    '--build-arg', "NPM=$(Bool-Arg ($enabledPackageCaches -contains 'npm'))"
 )
 
 # $IsMacOS/$IsLinux are not defined in Windows PowerShell 5.1, so treat unset as false
@@ -343,10 +344,26 @@ if (-not (Get-Command git -EA Silent)) {
     exit 1
 }
 
-# Default ports per runtime: docker supports host port 0 = auto-assign a free port
-if ($portsMap.Count -eq 0) {
-    $portsMap = if ($runtime -eq "docker") { @("0:3000", "0:3001") } else { @("3000:3000", "3001:3001") }
+# Port mapping. The container listens on 3000; -port is the host port mapped to it.
+# The default, 0, means docker auto-assigns a free host port. The Apple container CLI
+# (macOS only) cannot, so resolve 0 to a free port, starting at 3000, then a random
+# high port if 3000-3010 are all taken.
+$containerPort = 3000
+function Test-PortInUse([int]$p) {
+    try {
+        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $p)
+        $listener.Start(); $listener.Stop(); return $false
+    } catch { return $true }
 }
+if ($port -eq 0 -and $runtime -eq "container") {
+    $resolved = $null
+    foreach ($candidate in 3000..3010) {
+        if (-not (Test-PortInUse $candidate)) { $resolved = $candidate; break }
+    }
+    if (-not $resolved) { $resolved = (Get-Random -Minimum 30000 -Maximum 40000) }
+    $port = $resolved
+}
+$portMapping = "${port}:${containerPort}"
 
 # Ensure required paths exist
 if (-not $WorkDirToMount -or -not (Test-Path -Path $WorkDirToMount -PathType Container -EA Silent)) {
@@ -445,7 +462,7 @@ $containerHome = "/home/$agentNameLower"
 
 # NuGet
 # https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders
-if ($enabledPackages -contains 'nuget') {
+if ($enabledPackageCaches -contains 'nuget') {
     $nugetPackages = ""
     if ($env:NUGET_PACKAGES -and (Test-Path -Path $env:NUGET_PACKAGES -PathType Container)) {
         $nugetPackages = $env:NUGET_PACKAGES
@@ -480,7 +497,7 @@ if ($enabledPackages -contains 'nuget') {
 }
 
 # npm: NPM_CONFIG_CACHE, then the platform default (~/.npm, or %LocalAppData%\npm-cache)
-if ($enabledPackages -contains 'npm') {
+if ($enabledPackageCaches -contains 'npm') {
     $npmCache = @($env:NPM_CONFIG_CACHE, "$env:LOCALAPPDATA/npm-cache", "$HOME/.npm") |
         Where-Object { $_ -and (Test-Path -Path $_ -PathType Container) } | Select-Object -First 1
     if ($npmCache) {
@@ -491,7 +508,7 @@ if ($enabledPackages -contains 'npm') {
 }
 
 # Bun: BUN_INSTALL_CACHE_DIR, then the default ~/.bun/install/cache
-if ($enabledPackages -contains 'bun') {
+if ($enabledPackageCaches -contains 'bun') {
     $bunCache = @($env:BUN_INSTALL_CACHE_DIR, "$HOME/.bun/install/cache") |
         Where-Object { $_ -and (Test-Path -Path $_ -PathType Container) } | Select-Object -First 1
     if ($bunCache) {
@@ -512,23 +529,12 @@ if ($buildImage) {
         [IO.File]::WriteAllText($dockerfile, $dockerfileText)
         "    Updated '# last changed' dates in $dockerfileDir/Dockerfile to $today"
     }
-    "    Building with tech $($enabledTech -join ','); package repos $($enabledPackages -join ',')"
-    & $runtime build $techBuildArgs -t "$image`:latest" $dockerfileDir
+    "    Building with tech $($enabledToolChains -join ','); package repos $($enabledPackageCaches -join ',')"
+    & $runtime build $toolChainBuildArgs -t "$image`:latest" $dockerfileDir
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "$runtime build failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
     }
-}
-
-# Handle port mappings
-if ($portsMap.Count -gt 2) {
-    Write-Warning "This script only handles two port mappings. Extra mappings will be ignored."
-}
-# Pad to 2 port mappings (docker: 0 auto-assigns a free host port;
-# the Apple container runtime needs fixed ports)
-if ($portsMap.Count -lt 2) {
-    $pad = if ($runtime -eq "docker") { @("0:3000", "0:3001") } else { @("3000:3000", "3001:3001") }
-    while ($portsMap.Count -lt 2) { $portsMap += $pad[$portsMap.Count] }
 }
 
 # Translate the prompt, and any pass-through arguments, into the chosen agent's own
@@ -566,7 +572,7 @@ $agentCmdPrint = ($agentCmd | ForEach-Object {
 if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
 
 @"
-    $runtime run $ttyArgs --rm -p $($portsMap[0]) -p $($portsMap[1]) $containerArgs `
+    $runtime run $ttyArgs --rm -p $portMapping $containerArgs `
                 -e CODE_AGENT=`"$codeAgent`"$headlessEnvPrint `
                 -e GIT_AUTHOR_NAME=`"$gitAuthorName`" `
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
@@ -584,7 +590,7 @@ if ($dryRun) {
     exit 0
 }
 
-& $runtime run $ttyArgs --rm -p $($portsMap[0]) -p $($portsMap[1]) `
+& $runtime run $ttyArgs --rm -p $portMapping `
             $containerArgs `
             $headlessEnv `
             -e CODE_AGENT="$codeAgent" `

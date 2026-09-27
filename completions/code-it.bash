@@ -9,9 +9,9 @@
 #     https://code.claude.com/docs/en/cli-reference
 #     https://opencode.ai/docs/cli/
 
-_code_it_opts='--opencode -o --claude -c --prompt --headless --work-dir --save-dir
-    --image --build-image --rebuild-image --dockerfile-dir --runtime --ports
-    --agent-name --tool-chains --package-caches --dry-run --help -h --'
+_code_it_opts='--opencode -o --claude -c --prompt -p --headless --work-dir -w --save-dir -s
+    --image -i --build-image -b --rebuild-image -B --dockerfile-dir --runtime -r --port
+    --agent-name --tool-chains -t --package-caches --dry-run -d --help -h --'
 
 # The flags people reach for most, not the full list; add your own favourites here.
 _code_it_claude_opts='--print -p --continue -c --resume -r --fork-session --model
@@ -71,19 +71,19 @@ _code_it() {
     fi
 
     case "$prev" in
-        --work-dir|--save-dir|--dockerfile-dir)
+        --work-dir|-w|--save-dir|-s|--dockerfile-dir)
             COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
-        --runtime)
+        --runtime|-r)
             COMPREPLY=( $(compgen -W "docker container" -- "$cur") ); return ;;
-        --image)
+        --image|-i)
             COMPREPLY=( $(compgen -W "code-it-alpine-dotnet-node $(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
         --agent-name)
             COMPREPLY=( $(compgen -W "Agent1" -- "$cur") ); return ;;
-        --tool-chains)
+        --tool-chains|-t)
             COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun" -- "$cur") ); return ;;
         --package-caches)
             COMPREPLY=( $(compgen -W "nuget npm bun" -- "$cur") ); return ;;
-        --prompt|--ports)
+        --prompt|-p|--port)
             # free text: leave it to the user
             return ;;
     esac

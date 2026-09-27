@@ -22,7 +22,7 @@
 # Options:
 #   --opencode, -o           Run OpenCode in the container (default).
 #   --claude, -c             Run Claude Code in the container.
-#   --prompt TEXT            Open the agent with TEXT as its first prompt. A single bare
+#   --prompt, -p TEXT        Open the agent with TEXT as its first prompt. A single bare
 #                            argument means the same thing, so these are equivalent:
 #                              ./code-it.sh -c --prompt "explain this repo"
 #                              ./code-it.sh -c "explain this repo"
@@ -33,28 +33,28 @@
 #                            e.g. -- --model opus --continue. See
 #                              https://code.claude.com/docs/en/cli-reference
 #                              https://opencode.ai/docs/cli/
-#   --work-dir DIR           Host directory path to mount as /work in the container.
+#   --work-dir, -w DIR       Host directory path to mount as /work in the container.
 #                            Defaults to "."
-#   --save-dir DIR           Host directory for storing agent configuration and state volumes.
+#   --save-dir, -s DIR       Host directory for storing agent configuration and state volumes.
 #                            Created if missing. Defaults to ~/.config/code-it
-#   --image NAME             Image name to run. Default: "code-it-alpine-<tech>", a
+#   --image, -i NAME         Image name to run. Default: "code-it-alpine-<tech>", a
 #                            slug of the resolved --tool-chains list, e.g. code-it-alpine-dotnet,
 #                            code-it-alpine-node-bun. Set it explicitly when running an
 #                            image built with different tech, or give the same --tool-chains.
-#   --build-image            If specified, builds the image from the Dockerfile before running.
-#   --rebuild-image          Like --build-image, but first updates the "# last changed"
+#   --build-image, -b        If specified, builds the image from the Dockerfile before running.
+#   --rebuild-image, -B      Like --build-image, but first updates the "# last changed"
 #                            cache-bust dates in the Dockerfile to today, forcing the
 #                            agent install layers to rerun so the agents are updated.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile. Used with --build-image.
 #                            Defaults to this script's own directory.
-#   --runtime NAME           Container runtime to use: "docker" or "container".
+#   --runtime, -r NAME       Container runtime to use: "docker" or "container".
 #                            Default: auto-detected as described above.
-#   --ports PORT1 PORT2      Port mappings in "host:container" format. Default: "0:3000" "0:3001"
-#                            for docker (0 auto-assigns a free host port), "3000:3000" "3001:3001"
-#                            for the Apple container runtime.
-#                            Maximum of 2 port mappings supported; additional mappings are ignored.
-#                            --ports consumes every following non-option argument, so give a
-#                            bare PROMPT before it, or use --prompt.
+#   --port PORT              Host port to map to the container's port 3000 (so it takes a
+#                            single "host" value, not a "host:container" pair). Default: 0.
+#                            With docker, 0 lets the runtime auto-assign a free host port.
+#                            The Apple container CLI cannot, so on macOS 0 is resolved by
+#                            this script to a free port, starting at 3000, then a random
+#                            high port if 3000-3010 are all taken.
 #   --agent-name NAME        Name of the agent running in the container. Used for Git author
 #                            attribution and home directory naming. Must match the USER set in
 #                            the Dockerfile. Default: "Agent1"
@@ -63,7 +63,7 @@
 # decide which host package caches are mounted read-only). Passing a list
 # REPLACES the default set, so there are no on/off flags to clash with future
 # tech names:
-#   --tool-chains LIST       Comma-separated tech stacks to build. 
+#   --tool-chains, -t LIST   Comma-separated tech stacks to build. 
 #                            Default: dotnet,node.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun).
@@ -78,8 +78,8 @@
 #                            read-only in the virtual machine at the package manager's 
 #                            default location on Alpine Linux.
 #
-#   --dry-run                Print the run command without executing it.
-#   --help                   Show this help message.
+#   --dry-run, -d            Print the run command without executing it.
+#   --help, -h               Show this help message.
 #
 # Examples:
 #   ./code-it.sh [-o]
@@ -91,8 +91,8 @@
 #   ./code-it.sh --build-image
 #       Builds the image from the Dockerfile next to this script, then runs it.
 #
-#   ./code-it.sh --ports "8000:3000" "8001:3001"
-#       Runs the container with custom port mappings.
+#   ./code-it.sh --port 8000
+#       Maps host port 8000 to the container's port 3000.
 #
 #   ./code-it.sh -c "explain this repo"
 #       Opens Claude Code with that opening prompt, and stays interactive.
@@ -183,7 +183,7 @@ build_image=false
 rebuild_image=false
 dockerfile_dir="$script_dir"
 runtime=""
-ports=()
+port=0
 agent_name="Agent1"
 dry_run=false
 container_args=""
@@ -194,8 +194,8 @@ agent_args=()
 
 # Tech stack (see --help). Empty means "use the defaults": dotnet,node and the
 # package repos they imply (dotnet->nuget, node->npm).
-tool_chains_list=""
-package_caches_list=""
+tool_chains=""
+package_caches=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -208,23 +208,23 @@ while [[ $# -gt 0 ]]; do
             code_agent="opencode"
             shift
             ;;
-        --work-dir)
+        --work-dir|-w)
             work_dir_to_mount="$2"
             shift 2
             ;;
-        --save-dir)
+        --save-dir|-s)
             save_dir="$2"
             shift 2
             ;;
-        --image)
+        --image|-i)
             image="$2"
             shift 2
             ;;
-        --build-image)
+        --build-image|-b)
             build_image=true
             shift
             ;;
-        --rebuild-image)
+        --rebuild-image|-B)
             build_image=true
             rebuild_image=true
             shift
@@ -233,31 +233,27 @@ while [[ $# -gt 0 ]]; do
             dockerfile_dir="$2"
             shift 2
             ;;
-        --runtime)
+        --runtime|-r)
             runtime="$2"
             shift 2
             ;;
-        --ports)
-            ports=()
-            shift
-            while [[ $# -gt 0 && ! "$1" =~ ^- ]]; do
-                ports+=("$1")
-                shift
-            done
+        --port)
+            port="$2"
+            shift 2
             ;;
         --agent-name)
             agent_name="$2"
             shift 2
             ;;
-        --tool-chains|--tech)
-            tool_chains_list="$2"
+        --tool-chains|--tech|-t)
+            tool_chains="$2"
             shift 2
             ;;
         --package-caches)
-            package_caches_list="$2"
+            package_caches="$2"
             shift 2
             ;;
-        --prompt)
+        --prompt|-p)
             prompt="$2"
             prompt_set=true
             shift 2
@@ -271,7 +267,7 @@ while [[ $# -gt 0 ]]; do
             agent_args=("$@")
             break
             ;;
-        --dry-run)
+        --dry-run|-d)
             dry_run=true
             shift
             ;;
@@ -298,18 +294,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Resolve --tool-chains / --package-caches into a set of known tech names (space-separated
-# in $enabled_tech) and known package repo names (in $enabled_packages).
+# in $enabled_tool_chains) and known package repo names (in $enabled_package_caches).
 # --tool-chains replaces the default {dotnet,node}; --package-caches replaces the set implied
 # by --tool-chains (dotnet->nuget, node->npm). An unknown name is a hard error.
-enabled_tech=""
-enabled_packages=""
+enabled_tool_chains=""
+enabled_package_caches=""
 
 # comma_list_add LIST ITEM: append ITEM to the space-separated LIST if absent
 comma_list_add() { case " $1 " in *" $2 "*) printf '%s' "$1" ;; *) printf '%s' "${1:+$1 }$2" ;; esac; }
 
-# tech_alias NAME: canonical tech name for NAME, or NAME itself. js-/ts- spellings
+# tool_chain_alias NAME: canonical tech name for NAME, or NAME itself. js-/ts- spellings
 # are aliases for the one runtime tech (Node.js or Bun runs both).
-tech_alias() {
+tool_chain_alias() {
     case "$1" in
         js-node|ts-node) printf 'node' ;;
         js-bun|ts-bun)   printf 'bun' ;;
@@ -317,53 +313,53 @@ tech_alias() {
     esac
 }
 
-if [[ -n "$tool_chains_list" ]]; then
-    IFS=',' read -r -a requested_tech <<< "$tool_chains_list"
+if [[ -n "$tool_chains" ]]; then
+    IFS=',' read -r -a requested_tool_chains <<< "$tool_chains"
 else
-    requested_tech=(dotnet node)
+    requested_tool_chains=(dotnet node)
 fi
-for t in ${requested_tech[@]+"${requested_tech[@]}"}; do
-    t=$(tech_alias "$t")
+for t in ${requested_tool_chains[@]+"${requested_tool_chains[@]}"}; do
+    t=$(tool_chain_alias "$t")
     case "$t" in
-        dotnet|node|bun) enabled_tech=$(comma_list_add "$enabled_tech" "$t") ;;
+        dotnet|node|bun) enabled_tool_chains=$(comma_list_add "$enabled_tool_chains" "$t") ;;
         "") ;;
         *) echo "Warning: Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun)." >&2; exit 1 ;;
     esac
 done
 
-if [[ -n "$package_caches_list" ]]; then
-    IFS=',' read -r -a requested_packages <<< "$package_caches_list"
+if [[ -n "$package_caches" ]]; then
+    IFS=',' read -r -a requested_package_caches <<< "$package_caches"
 else
-    requested_packages=()
-    case " $enabled_tech " in *" dotnet "*) requested_packages+=(nuget) ;; esac
-    case " $enabled_tech " in *" node "*)   requested_packages+=(npm)   ;; esac
+    requested_package_caches=()
+    case " $enabled_tool_chains " in *" dotnet "*) requested_package_caches+=(nuget) ;; esac
+    case " $enabled_tool_chains " in *" node "*)   requested_package_caches+=(npm)   ;; esac
 fi
-for p in ${requested_packages[@]+"${requested_packages[@]}"}; do
+for p in ${requested_package_caches[@]+"${requested_package_caches[@]}"}; do
     case "$p" in
-        nuget|npm|bun) enabled_packages=$(comma_list_add "$enabled_packages" "$p") ;;
+        nuget|npm|bun) enabled_package_caches=$(comma_list_add "$enabled_package_caches" "$p") ;;
         "") ;;
         *) echo "Warning: Unknown package repo '$p'. Known: nuget, npm, bun." >&2; exit 1 ;;
     esac
 done
 
-tech_has()      { case " $enabled_tech "     in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
-package_has()   { case " $enabled_packages " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+tool_chain_has()      { case " $enabled_tool_chains "     in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+package_cache_has()   { case " $enabled_package_caches " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # Default image name from the tech list, e.g. code-it-alpine-dotnet or
 # code-it-alpine-node-bun. --image overrides it.
 if [[ -z "$image" ]]; then
-    image="code-it-alpine-$(printf '%s' "$enabled_tech" | tr ' ' '-')"
+    image="code-it-alpine-$(printf '%s' "$enabled_tool_chains" | tr ' ' '-')"
 fi
 
 # Build args for the tech stack, passed straight through by --build-image.
-tech_on() { if tech_has "$1"; then echo true; else echo false; fi; }
-pkg_on()  { if package_has "$1"; then echo true; else echo false; fi; }
-tech_build_args=(
-    --build-arg "DOTNET=$(tech_on dotnet)"
-    --build-arg "NODE=$(tech_on node)"
-    --build-arg "BUN=$(tech_on bun)"
-    --build-arg "NUGET=$(pkg_on nuget)"
-    --build-arg "NPM=$(pkg_on npm)"
+tool_chain_on() { if tool_chain_has "$1"; then echo true; else echo false; fi; }
+package_cache_on()  { if package_cache_has "$1"; then echo true; else echo false; fi; }
+tool_chain_build_args=(
+    --build-arg "DOTNET=$(tool_chain_on dotnet)"
+    --build-arg "NODE=$(tool_chain_on node)"
+    --build-arg "BUN=$(tool_chain_on bun)"
+    --build-arg "NUGET=$(package_cache_on nuget)"
+    --build-arg "NPM=$(package_cache_on npm)"
 )
 
 # Warn if the resolved tech does not match the tech slug of a default image name,
@@ -371,8 +367,8 @@ tech_build_args=(
 if [[ "$image" == code-it-alpine-* ]]; then
     image_tech="${image#code-it-alpine-}"
     image_tech=${image_tech//-/,}
-    if [[ "$image_tech" != "$(printf '%s' "$enabled_tech" | tr ' ' ',')" ]]; then
-        echo "Warning: image '$image' looks built for tech '$image_tech' but --tool-chains is '$(printf '%s' "$enabled_tech" | tr ' ' ',')'." >&2
+    if [[ "$image_tech" != "$(printf '%s' "$enabled_tool_chains" | tr ' ' ',')" ]]; then
+        echo "Warning: image '$image' looks built for tech '$image_tech' but --tool-chains is '$(printf '%s' "$enabled_tool_chains" | tr ' ' ',')'." >&2
         echo "    Pass the same --tool-chains used to build the image, or set --image explicitly." >&2
     fi
 fi
@@ -440,14 +436,33 @@ if ! command -v git &>/dev/null; then
     exit 1
 fi
 
-# Default ports per runtime: docker supports host port 0 = auto-assign a free port
-if [[ ${#ports[@]} -eq 0 ]]; then
-    if [[ "$runtime" == "docker" ]]; then
-        ports=("0:3000" "0:3001")
-    else
-        ports=("3000:3000" "3001:3001")
+# Port mapping. The container listens on 3000; --port is the host port to map to it.
+# The default, 0, means "no host port chosen here": docker auto-assigns a free port,
+# while the Apple container CLI (macOS only) cannot, so resolve 0 to a free port,
+# starting at 3000, or a random high port if none of those are free.
+container_port=3000
+
+# port_in_use PORT: true if something is listening on the loopback port. Needs nc;
+# if it is not available we cannot tell, so report the port as free.
+port_in_use() {
+    command -v nc &>/dev/null || return 1
+    nc -z 127.0.0.1 "$1" &>/dev/null
+}
+
+if [[ "$port" == "0" && "$runtime" == "container" ]]; then
+    resolved_port=""
+    for candidate in 3000 3001 3002 3003 3004 3005 3006 3007 3008 3009 3010; do
+        if ! port_in_use "$candidate"; then
+            resolved_port="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$resolved_port" ]]; then
+        resolved_port=$(( (RANDOM % 10000) + 30000 ))
     fi
+    port="$resolved_port"
 fi
+port_mapping="$port:$container_port"
 
 # Ensure required paths exist
 if [[ ! -d "$work_dir_to_mount" ]]; then
@@ -548,7 +563,7 @@ container_home="/home/$agent_name_lower"
 # NuGet. Precedence per https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders :
 # the NUGET_PACKAGES environment variable, then the globalPackagesFolder setting in
 # the user-level NuGet.Config, then the default ~/.nuget/packages.
-if package_has nuget; then
+if package_cache_has nuget; then
     nuget_packages=""
     if [[ -n "${NUGET_PACKAGES:-}" && -d "$NUGET_PACKAGES" ]]; then
         nuget_packages="$NUGET_PACKAGES"
@@ -578,7 +593,7 @@ if package_has nuget; then
 fi
 
 # npm: NPM_CONFIG_CACHE, then the platform default (~/.npm, or %LocalAppData%\npm-cache)
-if package_has npm; then
+if package_cache_has npm; then
     npm_cache=""
     for candidate in "${NPM_CONFIG_CACHE:-}" "${LOCALAPPDATA:-}/npm-cache" "$HOME/.npm"; do
         if [[ -n "$candidate" && -d "$candidate" ]]; then
@@ -594,7 +609,7 @@ if package_has npm; then
 fi
 
 # Bun: BUN_INSTALL_CACHE_DIR, then the default ~/.bun/install/cache
-if package_has bun; then
+if package_cache_has bun; then
     bun_cache=""
     for candidate in "${BUN_INSTALL_CACHE_DIR:-}" "$HOME/.bun/install/cache"; do
         if [[ -n "$candidate" && -d "$candidate" ]]; then
@@ -620,25 +635,9 @@ if [[ "$build_image" == true ]]; then
             && mv "$dockerfile_dir/Dockerfile.tmp" "$dockerfile_dir/Dockerfile"
         echo "    Updated '# last changed' dates in $dockerfile_dir/Dockerfile to $today"
     fi
-    echo "    Building with tech ${enabled_tech// /,}; package repos ${enabled_packages// /,}"
-    "$runtime" build "${tech_build_args[@]}" -t "${image}:latest" "$dockerfile_dir"
+    echo "    Building with tech ${enabled_tool_chains// /,}; package repos ${enabled_package_caches// /,}"
+    "$runtime" build "${tool_chain_build_args[@]}" -t "${image}:latest" "$dockerfile_dir"
 fi
-
-# Handle port mappings
-if [[ ${#ports[@]} -gt 2 ]]; then
-    echo "Warning: This script only handles two port mappings. Extra mappings will be ignored." >&2
-fi
-
-# Ensure at least 2 port mappings (docker: 0 auto-assigns a free host port;
-# the Apple container runtime needs fixed ports)
-if [[ "$runtime" == "docker" ]]; then
-    pad_ports=("0:3000" "0:3001")
-else
-    pad_ports=("3000:3000" "3001:3001")
-fi
-while [[ ${#ports[@]} -lt 2 ]]; do
-    ports+=("${pad_ports[${#ports[@]}]}")
-done
 
 # Translate the prompt, and any -- pass-through arguments, into the chosen agent's own
 # command line, which the container entrypoint hands to the agent. See
@@ -689,7 +688,7 @@ done
 
 # Print the command
 cat <<EOF
-    $runtime run ${tty_args[*]} --rm -p ${ports[0]} -p ${ports[1]} \\
+    $runtime run ${tty_args[*]} --rm -p $port_mapping \\
                 $container_args \\
                 -e CODE_AGENT="$code_agent" \\$headless_env_print
                 -e GIT_AUTHOR_NAME="$git_author_name" \\
@@ -708,7 +707,7 @@ if [[ "$dry_run" == true ]]; then
     exit 0
 fi
 
-"$runtime" run "${tty_args[@]}" --rm -p "${ports[0]}" -p "${ports[1]}" \
+"$runtime" run "${tty_args[@]}" --rm -p "$port_mapping" \
             $container_args \
             ${headless_env[@]+"${headless_env[@]}"} \
             -e CODE_AGENT="$code_agent" \
