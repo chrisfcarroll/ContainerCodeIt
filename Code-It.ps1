@@ -288,6 +288,48 @@ if ($null -eq $runtime) { exit 1 }
 "    Using container runtime: $runtime"
 "    Using code agent: $codeAgent"
 
+# List existing images in a runtime-appropriate way. Done up front so the default
+# selection below can use them, and a broken daemon is reported before first-run.
+if ($runtime -eq "docker") {
+    $validImages = (docker images --format "{{.Repository}}:{{.Tag}}")
+} else {
+    $validImages = (container image ls)
+}
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Could not list $runtime images. Is the $runtime daemon or service running?"
+    exit 1
+}
+
+# Default selection, when neither -toolChains nor -image was given: with no save dir
+# yet, or no code-it image at all, there is no setup, so run first-run; otherwise use
+# an existing code-it image, most recent preferred. See
+# Specs/10-default-first-run-or-existing-image.md.
+if (-not $PSBoundParameters.ContainsKey('toolChains') -and -not $PSBoundParameters.ContainsKey('image')) {
+    $firstRun = if ($env:CODE_IT_FIRST_RUN) { $env:CODE_IT_FIRST_RUN } else { Join-Path $PSScriptRoot 'Code-It-FirstRun.ps1' }
+    $defaultImage = ""
+    if (Test-Path -Path $saveDir -PathType Container) {
+        $defaultImage = Get-CodeItDefaultImage $runtime (Join-Path $saveDir 'image-history')
+    }
+    $defaultChains = if ($defaultImage) { Get-CodeItImageToolChains $runtime $defaultImage } else { "" }
+    if (-not $defaultChains) {
+        "    No code-it image or setup found; running Code-It-FirstRun.ps1."
+        if ($dryRun) {
+            "    (dry run: would run $firstRun)"
+            exit 0
+        }
+        & $firstRun -saveDir $saveDir -workDir $WorkDirToMount -runtime $runtime
+        exit $LASTEXITCODE
+    }
+    $resolvedDefaultChains = Resolve-CodeItToolChains $defaultChains
+    if ($null -eq $resolvedDefaultChains) { exit 1 }
+    $enabledToolChains = $resolvedDefaultChains
+    if (-not $PSBoundParameters.ContainsKey('packageCaches')) {
+        $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolChains
+    }
+    $image = $defaultImage
+    "    Using existing image: $image"
+}
+
 # Give the Apple container runtime enough memory for the agent to work with
 $containerArgs = if ($runtime -eq "container") { @('--memory', '3g') } else { @() }
 
@@ -358,38 +400,8 @@ if (Test-Path -Path $defaultConfigDir -PathType Container) {
 $saveDir = (Resolve-Path $saveDir).Path
 $historyFile = Join-Path $saveDir 'image-history'
 
-# With no explicit -toolChains or -image, default to the remembered image that covers
-# at least 70% of the weighted recent usage (see Specs/09-image-memory.md).
-if (-not $PSBoundParameters.ContainsKey('toolChains') -and -not $PSBoundParameters.ContainsKey('image')) {
-    $memoryImage = Get-CodeItHistoryImage $runtime $historyFile
-    if ($memoryImage) {
-        $memoryChains = Get-CodeItImageToolChains $runtime $memoryImage
-        if ($memoryChains) {
-            $resolvedMemoryChains = Resolve-CodeItToolChains $memoryChains
-            if ($null -ne $resolvedMemoryChains) {
-                $enabledToolChains = $resolvedMemoryChains
-                if (-not $PSBoundParameters.ContainsKey('packageCaches')) {
-                    $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolChains
-                }
-                $image = $memoryImage
-                "    Using remembered image: $image"
-            }
-        }
-    }
-}
-
 "    Checking $image ..."
 
-# List existing images in a runtime-appropriate way
-if ($runtime -eq "docker") {
-    $validImages = (docker images --format "{{.Repository}}:{{.Tag}}")
-} else {
-    $validImages = (container image ls)
-}
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Could not list $runtime images. Is the $runtime daemon or service running?"
-    exit 1
-}
 Write-Verbose ([string]::join("`n", @("    $runtime images") + $validImages)).ToString()
 
 # An existing image is only required when we are not about to build one. If the exact

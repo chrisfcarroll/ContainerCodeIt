@@ -92,7 +92,8 @@ function Get-CodeItImageList([string]$runtime) {
         return @(docker images --format '{{.Repository}}:{{.Tag}}' 2>$null)
     }
     # Apple container's ls is newest first; NAME and TAG are the first two columns.
-    return @(container image ls 2>$null | Select-Object -Skip 1 | ForEach-Object {
+    # Skip a header row if there is one.
+    return @(container image ls 2>$null | Where-Object { $_ -and $_ -notmatch '^\s*NAME\b' } | ForEach-Object {
         $f = $_ -split '\s+'
         if ($f.Count -ge 2) { "$($f[0]):$($f[1])" }
     })
@@ -113,18 +114,6 @@ function Find-CodeItSupersetImage([string]$runtime, [string[]]$requested) {
     return ""
 }
 
-# Test-CodeItImageExists RUNTIME IMAGE: true if the runtime has the image.
-function Test-CodeItImageExists([string]$runtime, [string]$image) {
-    try {
-        if ($runtime -eq 'docker') {
-            & docker image inspect $image *> $null
-            return ($LASTEXITCODE -eq 0)
-        }
-        & container image inspect $image *> $null
-        return ($LASTEXITCODE -eq 0)
-    } catch { return $false }
-}
-
 # Add-CodeItHistory FILE IMAGE: append "yyyyMMdd IMAGE", keeping the newest 15 lines.
 function Add-CodeItHistory([string]$file, [string]$image) {
     if (-not $image) { return }
@@ -137,43 +126,26 @@ function Add-CodeItHistory([string]$file, [string]$image) {
     [IO.File]::WriteAllLines($file, $lines, [System.Text.UTF8Encoding]::new($false))
 }
 
-# Get-CodeItHistoryImage RUNTIME FILE: the most-recently remembered image that still
-# exists and whose tool chains cover >=70% of weighted usage, or "". Weights run from
-# 1 (oldest remembered) to 15 (most recent).
-function Get-CodeItHistoryImage([string]$runtime, [string]$file) {
-    if (-not (Test-Path -Path $file)) { return "" }
-    $lines = @(Get-Content -Path $file | Where-Object { $_ })
-    $n = $lines.Count
-    if ($n -eq 0) { return "" }
-    $images = @()
-    $chains = @()
-    foreach ($l in $lines) {
-        $img = ($l -split '\s+', 2)[1]
-        $images += $img
-        $chains += (Get-CodeItImageToolChains $runtime $img)
+# Get-CodeItDefaultImage RUNTIME FILE: the default existing code-it image: the most
+# recently used remembered one that still exists, else the most recently built.
+# "" if there is no code-it image at all.
+function Get-CodeItDefaultImage([string]$runtime, [string]$file) {
+    $existing = @()
+    foreach ($l in (Get-CodeItImageList $runtime)) {
+        if (-not $l) { continue }
+        $repo = ($l -split ':')[0]
+        if ($repo -notlike 'code-it-*') { continue }
+        if ($existing -notcontains $repo) { $existing += $repo }
     }
-    $total = 0
-    for ($i = 0; $i -lt $n; $i++) { $total += 15 - $n + 1 + $i }
-    if ($total -le 0) { return "" }
-    $weights = @{}
-    foreach ($c in $script:CodeItKnownToolChains) { $weights[$c] = 0 }
-    for ($i = 0; $i -lt $n; $i++) {
-        $w = 15 - $n + 1 + $i
-        $set = @($chains[$i] -split ',')
-        foreach ($c in $script:CodeItKnownToolChains) {
-            if ($set -contains $c) { $weights[$c] += $w }
+    if ($existing.Count -eq 0) { return "" }
+
+    if (Test-Path -Path $file) {
+        $hist = @(Get-Content -Path $file | Where-Object { $_ } | ForEach-Object { ($_ -split '\s+', 2)[1] })
+        for ($i = $hist.Count - 1; $i -ge 0; $i--) {
+            if ($existing -contains $hist[$i]) { return $hist[$i] }
         }
     }
-    for ($j = $n - 1; $j -ge 0; $j--) {
-        $cov = 0
-        foreach ($c in @($chains[$j] -split ',')) {
-            if ($weights.ContainsKey($c)) { $cov += $weights[$c] }
-        }
-        if ($cov * 10 -ge $total * 7) {
-            if (Test-CodeItImageExists $runtime $images[$j]) { return $images[$j] }
-        }
-    }
-    return ""
+    return $existing[0]
 }
 
 # Get-CodeItToolChainCommands NAME: the host commands that reveal NAME is installed.

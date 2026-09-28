@@ -120,6 +120,8 @@ if ($onWindows) {
 }
 
 $save = Join-Path $tmp 'save'
+# Pre-create the save dir: code-it now runs first-run when the save dir is missing.
+$null = New-Item -ItemType Directory -Force -Path $save
 $sep = [System.IO.Path]::PathSeparator
 $origPath = $env:PATH
 
@@ -888,7 +890,14 @@ esac
 }
 $histPath = "$histDocker$sep$stubPath"
 
-# no -toolChains: the remembered image covering >=70% is used
+$stubFirstRun = Join-Path $tmp 'stub-first-run.ps1'
+Set-Content -Path $stubFirstRun -Value @'
+param([string]$saveDir, [string]$workDir, [string]$runtime)
+"STUB-FIRST-RUN $saveDir $workDir $runtime"
+exit 0
+'@
+
+# save dir exists with history: the most recently used existing code-it image
 $hsel = Join-Path $tmp 'histselect'; $null = New-Item -ItemType Directory -Force -Path $hsel
 @(
     '20260101 code-it-alpine-dotnet-node'
@@ -898,24 +907,55 @@ $hsel = Join-Path $tmp 'histselect'; $null = New-Item -ItemType Directory -Force
     '20260105 code-it-alpine-python'
 ) | Set-Content -Path (Join-Path $hsel 'image-history')
 $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
-Assert "history selection exit code 0" ($r.code -eq 0)
-Assert-Contains "uses the remembered image" $r.out 'Using remembered image: code-it-alpine-python'
-Assert-Contains "runs the remembered image" $r.out 'code-it-alpine-python:latest'
+Assert "default selection exit code 0" ($r.code -eq 0)
+Assert-Contains "uses the most recently used remembered image" $r.out 'Using existing image: code-it-alpine-python'
+Assert-Contains "runs that image" $r.out 'code-it-alpine-python:latest'
 
-# explicit -toolChains bypasses the memory
+# explicit -toolChains bypasses the default selection
 $r = Invoke-Scenario $codeIt @('-dryRun', '-toolChains', 'dotnet', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
-Assert "explicit -toolChains bypasses memory" (-not $r.out.Contains('Using remembered image'))
+Assert "explicit -toolChains bypasses the default" (-not $r.out.Contains('Using existing image'))
 Assert-Contains "explicit -toolChains is honoured" $r.out 'code-it-alpine-dotnet:latest'
 
-# explicit -image bypasses the memory
+# explicit -image bypasses the default selection
 $r = Invoke-Scenario $codeIt @('-dryRun', '-image', 'code-it-alpine-dotnet-node', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
-Assert "explicit -image bypasses memory" (-not $r.out.Contains('Using remembered image'))
+Assert "explicit -image bypasses the default" (-not $r.out.Contains('Using existing image'))
 
-# no history: the built-in default is unchanged
+# save dir exists but no history: the most recently built existing code-it image
 $hnone = Join-Path $tmp 'histnone'; $null = New-Item -ItemType Directory -Force -Path $hnone
 $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hnone) $histPath
-Assert-Contains "no history: default image is used" $r.out 'code-it-alpine-dotnet-node:latest'
-Assert "no history: nothing remembered" (-not $r.out.Contains('Using remembered image'))
+Assert-Contains "no history: uses the most recently built existing image" $r.out 'Using existing image: code-it-alpine-dotnet'
+Assert-Contains "no history: runs that image" $r.out 'code-it-alpine-dotnet:latest'
+
+# save dir missing: run first-run
+$env:CODE_IT_FIRST_RUN = $stubFirstRun
+$ns = Join-Path $tmp 'nosave-first-run'
+try { $r = Invoke-Scenario $codeIt @('-WorkDirToMount', $scriptDir, '-saveDir', $ns) $histPath }
+finally { $env:CODE_IT_FIRST_RUN = $null }
+Assert "missing save dir exits 0 via first-run" ($r.code -eq 0)
+Assert-Contains "missing save dir runs first-run" $r.out 'STUB-FIRST-RUN'
+Assert-Contains "first-run is given the save dir" $r.out $ns
+
+# save dir exists but no code-it image: run first-run
+$emptyDocker = Join-Path $tmp 'empty-docker'
+$null = New-Item -ItemType Directory -Force -Path $emptyDocker
+if ($onWindows) {
+    Set-Content -Path (Join-Path $emptyDocker 'docker.cmd') -Value "@exit /b 0`r`n"
+} else {
+    Set-Content -Path (Join-Path $emptyDocker 'docker') -Value "#!/bin/sh`nexit 0`n"
+    chmod +x (Join-Path $emptyDocker 'docker')
+}
+$env:CODE_IT_FIRST_RUN = $stubFirstRun
+try { $r = Invoke-Scenario $codeIt @('-WorkDirToMount', $scriptDir, '-saveDir', $hsel) "$emptyDocker$sep$origPath" }
+finally { $env:CODE_IT_FIRST_RUN = $null }
+Assert-Contains "no code-it image runs first-run" $r.out 'STUB-FIRST-RUN'
+
+# -dryRun with a missing save dir: report, do not run first-run
+$env:CODE_IT_FIRST_RUN = $stubFirstRun
+$ns2 = Join-Path $tmp 'nosave-first-run2'
+try { $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $ns2) $histPath }
+finally { $env:CODE_IT_FIRST_RUN = $null }
+Assert-Contains "dry-run says it would run first-run" $r.out 'would run'
+Assert "-dry-run does not run first-run" (-not $r.out.Contains('STUB-FIRST-RUN'))
 
 # every non-dry invocation is recorded, keeping only the newest 15
 $hrec = Join-Path $tmp 'histrecord'; $null = New-Item -ItemType Directory -Force -Path $hrec

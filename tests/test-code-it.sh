@@ -98,6 +98,8 @@ for cmd in bash sh sed grep tr uname realpath dirname mkdir cat git touch echo; 
 done
 
 save="$tmp/save"
+# Pre-create the save dir: code-it now runs first-run when the save dir is missing.
+mkdir -p "$save"
 common_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
 
 # ---------------------------------------------------------------------------
@@ -939,36 +941,62 @@ esac
 EOF
 chmod +x "$histbin/docker"
 
-# (a) no --tool-chains: the remembered image covering >=70% is used
+stub_first_run="$tmp/stub-first-run.sh"
+cat > "$stub_first_run" <<'EOF'
+#!/bin/sh
+echo "STUB-FIRST-RUN $*"
+exit 0
+EOF
+chmod +x "$stub_first_run"
+
+# (a) save dir exists with history: the most recently used existing code-it image
 hsel="$tmp/histselect"; mkdir -p "$hsel"
 printf '20260101 code-it-alpine-dotnet-node\n20260102 code-it-alpine-python\n20260103 code-it-alpine-python\n20260104 code-it-alpine-python\n20260105 code-it-alpine-python\n' > "$hsel/image-history"
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" 2>&1)
-assert "history selection exit code" "$?"
-assert_contains "uses the remembered image" "$out" "Using remembered image: code-it-alpine-python"
-assert_contains "runs the remembered image" "$out" "code-it-alpine-python:latest"
+assert "default selection exit code" "$?"
+assert_contains "uses the most recently used remembered image" "$out" "Using existing image: code-it-alpine-python"
+assert_contains "runs that image" "$out" "code-it-alpine-python:latest"
 
-# (b) explicit --tool-chains bypasses the memory
+# (b) explicit --tool-chains bypasses the default selection
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" --tool-chains dotnet 2>&1)
 case "$out" in
-    *"Using remembered image"*) assert "explicit --tool-chains bypasses memory" 1 ;;
-    *)                          assert "explicit --tool-chains bypasses memory" 0 ;;
+    *"Using existing image"*) assert "explicit --tool-chains bypasses the default" 1 ;;
+    *)                        assert "explicit --tool-chains bypasses the default" 0 ;;
 esac
 assert_contains "explicit --tool-chains is honoured" "$out" "code-it-alpine-dotnet:latest"
 
-# (c) explicit --image bypasses the memory
+# (c) explicit --image bypasses the default selection
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" --image code-it-alpine-dotnet-node 2>&1)
 case "$out" in
-    *"Using remembered image"*) assert "explicit --image bypasses memory" 1 ;;
-    *)                          assert "explicit --image bypasses memory" 0 ;;
+    *"Using existing image"*) assert "explicit --image bypasses the default" 1 ;;
+    *)                        assert "explicit --image bypasses the default" 0 ;;
 esac
 
-# (d) no history: the built-in default is unchanged
+# (d) save dir exists but no history: the most recently built existing code-it image
 hnone="$tmp/histnone"; mkdir -p "$hnone"
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hnone" 2>&1)
-assert_contains "no history: default image is used" "$out" "code-it-alpine-dotnet-node:latest"
+assert_contains "no history: uses the most recently built existing image" "$out" "Using existing image: code-it-alpine-dotnet"
+assert_contains "no history: runs that image" "$out" "code-it-alpine-dotnet:latest"
+
+# (g) save dir missing: run first-run
+ns="$tmp/nosave-first-run"
+out=$(CODE_IT_FIRST_RUN="$stub_first_run" PATH="$histbin:$PATH" "$code_it" --work-dir "$script_dir" --save-dir "$ns" 2>&1)
+assert "missing save dir exits 0 via first-run" "$?"
+assert_contains "missing save dir runs first-run" "$out" "STUB-FIRST-RUN"
+assert_contains "first-run is given --save-dir" "$out" "--save-dir"
+
+# (h) save dir exists but no code-it image: run first-run
+emptybin="$tmp/emptybin"; mkdir -p "$emptybin"
+printf '#!/bin/sh\nexit 0\n' > "$emptybin/docker"; chmod +x "$emptybin/docker"
+out=$(CODE_IT_FIRST_RUN="$stub_first_run" PATH="$emptybin:$PATH" "$code_it" --work-dir "$script_dir" --save-dir "$hsel" 2>&1)
+assert_contains "no code-it image runs first-run" "$out" "STUB-FIRST-RUN"
+
+# (i) --dry-run with a missing save dir: report, do not run first-run
+out=$(CODE_IT_FIRST_RUN="$stub_first_run" PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$tmp/nosave-first-run2" 2>&1)
+assert_contains "dry-run says it would run first-run" "$out" "would run"
 case "$out" in
-    *"Using remembered image"*) assert "no history: nothing remembered" 1 ;;
-    *)                          assert "no history: nothing remembered" 0 ;;
+    *STUB-FIRST-RUN*) assert "dry-run does not run first-run" 1 ;;
+    *)                assert "dry-run does not run first-run" 0 ;;
 esac
 
 # (e) every non-dry-run invocation is recorded, keeping only the newest 15

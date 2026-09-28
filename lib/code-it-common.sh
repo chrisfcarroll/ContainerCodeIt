@@ -137,7 +137,8 @@ ci_image_list() {
         docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true
     else
         # Apple container's ls is newest first; NAME and TAG are the first two columns.
-        container image ls 2>/dev/null | tail -n +2 | awk 'NF { print $1":"$2 }' || true
+        # Skip a header row if there is one.
+        container image ls 2>/dev/null | awk 'NF >= 2 && tolower($1) != "name" { print $1":"$2 }' || true
     fi
 }
 
@@ -159,16 +160,6 @@ ci_find_superset_image() {
     return 1
 }
 
-# ci_image_exists RUNTIME IMAGE: true if the runtime has the image.
-ci_image_exists() {
-    local runtime="$1" image="$2"
-    case "$runtime" in
-        docker)    docker image inspect "$image" >/dev/null 2>&1 ;;
-        container) container image inspect "$image" >/dev/null 2>&1 ;;
-        *)         return 1 ;;
-    esac
-}
-
 # ci_history_record FILE IMAGE: append "yyyymmdd IMAGE", keeping the newest 15 lines.
 ci_history_record() {
     local file="$1" image="$2"
@@ -180,63 +171,41 @@ ci_history_record() {
     fi
 }
 
-# ci_history_choose_image RUNTIME FILE: echo the most-recently remembered image that
-# still exists and whose tool chains cover >=70% of weighted usage, or nothing.
-# Weights run from 1 (oldest remembered) to 15 (most recent).
-ci_history_choose_image() {
-    local runtime="$1" file="$2" l image i j c w cov
-    [[ -f "$file" ]] || return 1
-    local -a lines=() chains=()
-    while IFS= read -r l; do
-        [[ -n "$l" ]] && lines+=("$l")
-    done < "$file"
-    local n=${#lines[@]}
-    (( n > 0 )) || return 1
-    for ((i=0; i<n; i++)); do
-        image="${lines[i]#* }"
-        chains+=("$(ci_image_tool_chains "$runtime" "$image")")
-    done
-    local total=0
-    for ((i=0; i<n; i++)); do
-        total=$(( total + 15 - n + 1 + i ))
-    done
-    (( total > 0 )) || return 1
-    local dotnet_w=0 node_w=0 bun_w=0 python_w=0
-    for ((i=0; i<n; i++)); do
-        w=$(( 15 - n + 1 + i ))
-        for c in $CI_KNOWN_TOOL_CHAINS; do
-            if ci_has "${chains[i]//,/ }" "$c"; then
-                case "$c" in
-                    dotnet) dotnet_w=$((dotnet_w + w)) ;;
-                    node)   node_w=$((node_w + w)) ;;
-                    bun)    bun_w=$((bun_w + w)) ;;
-                    python) python_w=$((python_w + w)) ;;
-                esac
-            fi
+# ci_choose_default_image RUNTIME HISTORY_FILE: echo the repo name of the default
+# existing code-it image: the most recently used remembered one that still exists,
+# else the most recently built. Nothing if there is no code-it image at all.
+ci_choose_default_image() {
+    local runtime="$1" file="$2" line image e i seen
+    local -a existing=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        image="${line%%:*}"
+        case "$image" in code-it-*) ;; *) continue ;; esac
+        seen=false
+        for e in ${existing[@]+"${existing[@]}"}; do
+            [[ "$e" == "$image" ]] && { seen=true; break; }
         done
-    done
-    # Newest first: the first image whose chains cover >=70% of the weight wins.
-    for ((j=n-1; j>=0; j--)); do
-        cov=0
-        for c in $CI_KNOWN_TOOL_CHAINS; do
-            if ci_has "${chains[j]//,/ }" "$c"; then
-                case "$c" in
-                    dotnet) cov=$((cov + dotnet_w)) ;;
-                    node)   cov=$((cov + node_w)) ;;
-                    bun)    cov=$((cov + bun_w)) ;;
-                    python) cov=$((cov + python_w)) ;;
-                esac
-            fi
+        [[ "$seen" == false ]] && existing+=("$image")
+    done < <(ci_image_list "$runtime")
+    (( ${#existing[@]} > 0 )) || return 1
+
+    if [[ -f "$file" ]]; then
+        local -a hist=()
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && hist+=("${line#* }")
+        done < "$file"
+        for ((i=${#hist[@]}-1; i>=0; i--)); do
+            image="${hist[i]}"
+            for e in "${existing[@]}"; do
+                if [[ "$e" == "$image" ]]; then
+                    printf '%s' "$image"
+                    return 0
+                fi
+            done
         done
-        if (( cov * 10 >= total * 7 )); then
-            image="${lines[j]#* }"
-            if ci_image_exists "$runtime" "$image"; then
-                printf '%s' "$image"
-                return 0
-            fi
-        fi
-    done
-    return 1
+    fi
+    printf '%s' "${existing[0]}"
+    return 0
 }
 
 # ci_agent_config AGENTS_DIR NAME KEY: the (unquoted) value of KEY in an agent's

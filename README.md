@@ -46,6 +46,9 @@ include (pre-selecting what it found), shows the resulting `code-it-build` comma
 runs it, offers to copy your existing agent logins into the save dir, and prints the
 `code-it` command to start.
 
+You rarely need to call it yourself: `code-it` runs it for you when the save dir does
+not exist yet, or when there is no `code-it-*` image to run.
+
 ```bash
 ./code-it-first-run.sh
 ./code-it-first-run.sh --yes --dry-run   # no questions, and change nothing
@@ -81,7 +84,7 @@ agent in the container; the command says so before it copies.
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--tool-chains LIST`, `-t` | `-toolChains LIST` | remembered image, else `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
+| `--tool-chains LIST`, `-t` | `-toolChains LIST` | existing code-it image, else first-run | Comma-separated tech stacks: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `tool-chains` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
@@ -125,8 +128,8 @@ launchers expose them as two comma-separated lists, passed to `docker build` as
 `--build-arg`s:
 
 - `--tool-chains` / `-toolChains` (alias `--stack` / `-stack`) — tech stacks to build:
-  `dotnet`, `node`, `bun`, `python`. Default: the remembered image if there is one
-  (see below), else `dotnet,node`.
+  `dotnet`, `node`, `bun`, `python`. Default: an existing code-it image, else the
+  first-run setup (see below).
   `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
   `bun`; `uv` is an alias for `python`. Aliases resolve to the canonical name, so
   `--tool-chains ts-node` is `--tool-chains node` and produces the same image name.
@@ -139,15 +142,25 @@ A list *replaces* the default set rather than toggling it, so there is no per-te
 on/off flag to clash with future tech names as the list grows. Each tech left out skips
 its layers entirely.
 
-### Default tool chains from recent images
+### Default: an existing image, or first-run
 
-`code-it` remembers the images you run in `image-history` in the save dir: the most
-recent 15 invocations, one `yyyymmdd image-name` per line. When you run `code-it`
-without `--tool-chains` and without `--image`, it picks the most recent remembered
-image whose tool chains cover at least 70% of your weighted recent usage, weighting
-the most recent invocation 15 and the oldest 1. That way the default follows what you
-actually use. Explicit `--tool-chains` or `--image` always wins, and a dry run is not
-recorded.
+Run `code-it` with no `--tool-chains` and no `--image` and it picks the default for
+you:
+
+1. If the save dir does not exist yet, it runs `code-it-first-run` (there is no setup
+   to run).
+2. Otherwise it uses an existing `code-it-*` image, preferring the most recently used
+   one (recorded in `image-history`) that still exists, then the most recently built.
+   The image's tool chains come from its label or name, so the run and its caches
+   agree.
+3. If there is no `code-it-*` image at all, it runs `code-it-first-run`.
+
+So the default is first-run until an image exists, and thereafter the most recent
+code-it image. Explicit `--tool-chains` or `--image` always wins.
+
+`code-it` also records the image used at the end of every non-dry run in
+`image-history` in the save dir: the most recent 15 invocations, one
+`yyyymmdd image-name` per line, dropping the oldest on the 16th.
 
 ```bash
 # Match the original image: .NET + Node.js (nuget + npm implied)

@@ -207,6 +207,7 @@ list_agents=false
 tool_chains=""
 tool_chains_explicit=false
 package_caches=""
+package_caches_explicit=false
 
 agents_dir="$script_dir/agents"
 
@@ -274,6 +275,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --package-caches)
             package_caches="$2"
+            package_caches_explicit=true
             shift 2
             ;;
         --prompt|-p)
@@ -365,6 +367,52 @@ fi
 echo "    Using container runtime: $runtime"
 echo "    Using code agent: $code_agent"
 
+# List existing images in a runtime-appropriate way. Done up front so the default
+# selection below can use them, and a broken daemon is reported before first-run.
+if [[ "$runtime" == "docker" ]]; then
+    valid_images=$(docker images --format "{{.Repository}}:{{.Tag}}") || images_rc=$?
+else
+    valid_images=$(container image ls) || images_rc=$?
+fi
+if [[ "${images_rc:-0}" != 0 ]]; then
+    echo "Warning: Could not list $runtime images. Is the $runtime daemon or service running?" >&2
+    exit 1
+fi
+
+# Default selection, when neither --tool-chains nor --image was given: with no save
+# dir yet, or no code-it image at all, there is no setup, so run first-run; otherwise
+# use an existing code-it image, most recent preferred. See
+# Specs/10-default-first-run-or-existing-image.md.
+first_run="${CODE_IT_FIRST_RUN:-$script_dir/code-it-first-run.sh}"
+run_first_run() {
+    echo "    No code-it image or setup found; running code-it-first-run."
+    if [[ "$dry_run" == true ]]; then
+        echo "    (dry run: would run $first_run)"
+        exit 0
+    fi
+    "$first_run" --save-dir "$save_dir" --work-dir "$work_dir_to_mount" --runtime "$runtime"
+    exit $?
+}
+
+if [[ "$tool_chains_explicit" == false && "$image_explicit" == false ]]; then
+    default_image=""
+    if [[ -d "$save_dir" ]]; then
+        default_image=$(ci_choose_default_image "$runtime" "$save_dir/image-history") || default_image=""
+    fi
+    default_chains=""
+    [[ -n "$default_image" ]] && default_chains=$(ci_image_tool_chains "$runtime" "$default_image")
+    if [[ -z "$default_chains" ]]; then
+        run_first_run
+    else
+        enabled_tool_chains=$(ci_resolve_tool_chains "$default_chains") || exit 1
+        if [[ "$package_caches_explicit" == false ]]; then
+            enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_tool_chains") || exit 1
+        fi
+        image="$default_image"
+        echo "    Using existing image: $image"
+    fi
+fi
+
 # Ensure required commands
 if ! command -v git &>/dev/null; then
     echo "Warning: Git command not found. Please install Git and ensure it is in your PATH." >&2
@@ -442,35 +490,7 @@ fi
 save_dir=$(abs_dir "$save_dir")
 history_file="$save_dir/image-history"
 
-# With no explicit --tool-chains or --image, default to the remembered image that
-# covers at least 70% of the weighted recent usage (see Specs/09-image-memory.md).
-if [[ "$tool_chains_explicit" == false && "$image_explicit" == false ]]; then
-    memory_image=$(ci_history_choose_image "$runtime" "$history_file") || memory_image=""
-    if [[ -n "$memory_image" ]]; then
-        memory_chains=$(ci_image_tool_chains "$runtime" "$memory_image")
-        if [[ -n "$memory_chains" ]]; then
-            enabled_tool_chains=$(ci_resolve_tool_chains "$memory_chains") || exit 1
-            if [[ -z "$package_caches" ]]; then
-                enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_tool_chains") || exit 1
-            fi
-            image="$memory_image"
-            echo "    Using remembered image: $image"
-        fi
-    fi
-fi
-
 echo "    Checking $image ..."
-
-# List existing images in a runtime-appropriate way
-if [[ "$runtime" == "docker" ]]; then
-    valid_images=$(docker images --format "{{.Repository}}:{{.Tag}}") || images_rc=$?
-else
-    valid_images=$(container image ls) || images_rc=$?
-fi
-if [[ "${images_rc:-0}" != 0 ]]; then
-    echo "Warning: Could not list $runtime images. Is the $runtime daemon or service running?" >&2
-    exit 1
-fi
 
 # An existing image is only required when we are not about to build one. If the exact
 # image is missing and the user did not name one, use the most-recently built existing
