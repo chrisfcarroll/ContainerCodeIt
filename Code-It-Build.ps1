@@ -152,6 +152,9 @@ $block += "RUN printf '%s\n' $($entries -join ' ') > /etc/code-it-agents`n"
 
 $base = ([IO.File]::ReadAllText("$dockerfileDir/Dockerfile")) -replace "`r`n", "`n"
 $assembled = if ($base.Contains($marker)) { $base.Replace($marker, $block.TrimEnd("`n")) } else { $base }
+# Keep the buildable Dockerfile small (Apple's builder fails above ~16 KB), without
+# touching heredoc bodies such as go.sh.
+$assembled = Remove-CodeItDockerfileComments $assembled
 
 $buildContext = Join-Path ([IO.Path]::GetTempPath()) ("code-it-build-" + [Guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Force -Path $buildContext

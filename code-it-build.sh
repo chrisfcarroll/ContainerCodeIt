@@ -208,6 +208,11 @@ else
     cp "$dockerfile_dir/Dockerfile" "$build_context/Dockerfile"
 fi
 
+# Keep the buildable Dockerfile small (Apple's builder fails above ~16 KB), without
+# touching heredoc bodies such as go.sh.
+ci_strip_dockerfile_comments < "$build_context/Dockerfile" > "$build_context/Dockerfile.stripped" \
+    && mv "$build_context/Dockerfile.stripped" "$build_context/Dockerfile"
+
 # Build args for the toolchains and package caches, spelled the way the
 # Dockerfile's ARGs match them (uppercase).
 build_args=()

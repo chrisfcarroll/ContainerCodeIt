@@ -440,6 +440,18 @@ PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-bun:latest" \
 [[ "$?" != "0" ]]; assert "explicit --image is used as-is and errors if missing" "$?"
 
 # ---------------------------------------------------------------------------
+echo "10h. Dockerfile comment stripping keeps the buildable Dockerfile small"
+. "$script_dir/lib/code-it-common.sh"
+stripped_df="$tmp/stripped.Dockerfile"
+ci_strip_dockerfile_comments < "$script_dir/Dockerfile" > "$stripped_df"
+stripped_size=$(wc -c < "$stripped_df")
+[[ "$stripped_size" -lt 16384 ]]; assert "stripped Dockerfile is under Apple's 16KB limit ($stripped_size bytes)" "$?"
+grep -q "# Arguments given to the container" "$stripped_df"
+assert "stripping preserves heredoc bodies" "$?"
+grep -q "apk add --no-cache git" "$stripped_df"
+assert "stripping keeps RUN lines" "$?"
+
+# ---------------------------------------------------------------------------
 echo "11. Custom options"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --port 8000 "${common_args[@]}")
 assert_contains "custom --port maps the host port to container 3000" "$out" "-p 8000:3000"

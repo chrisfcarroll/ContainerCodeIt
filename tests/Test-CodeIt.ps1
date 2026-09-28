@@ -460,6 +460,22 @@ try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet', '-image', 'code-it
 finally { $env:STUB_IMAGES = $null }
 Assert "explicit -image is used as-is and errors if missing" ($r.code -ne 0)
 
+"9h. Dockerfile comment stripping keeps the buildable Dockerfile small"
+$stripTest = @"
+. '$scriptDir/lib/CodeItCommon.ps1'
+`$text = [IO.File]::ReadAllText('$scriptDir/Dockerfile')
+`$out = Remove-CodeItDockerfileComments `$text
+"STRIPLEN:" + `$out.Length
+"HEREDOC:" + ([regex]::Matches(`$out, 'Arguments given to the container').Count)
+"RUNLINE:" + ([regex]::Matches(`$out, 'apk add --no-cache git').Count)
+"@
+$r = Invoke-ScenarioCommand $stripTest $stubPath
+Assert "stripping script ran" ($r.code -eq 0 -or $null -eq $r.code)
+if ($r.out -match 'STRIPLEN:(\d+)') { $stripLen = [int]$Matches[1] } else { $stripLen = 999999 }
+Assert "stripped Dockerfile is under Apple's 16KB limit ($stripLen bytes)" ($stripLen -lt 16384)
+Assert-Contains "stripping preserves heredoc bodies" $r.out 'HEREDOC:1'
+Assert-Contains "stripping keeps RUN lines" $r.out 'RUNLINE:1'
+
 # ---------------------------------------------------------------------------
 "10. Custom options"
 $r = Invoke-Scenario $codeIt (@('-port', '8000') + $commonArgs) $stubPath

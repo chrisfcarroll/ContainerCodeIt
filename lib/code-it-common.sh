@@ -327,6 +327,30 @@ ci_resolve_agents() {
     printf '%s' "$out"
 }
 
+# ci_strip_dockerfile_comments: read a Dockerfile on stdin, write it on stdout with
+# Dockerfile-level comment and blank lines removed. Heredoc bodies (RUN cat <<'EOF'
+# ... EOF) are preserved verbatim. Apple's container builder sends the Dockerfile in
+# a gRPC header and fails above ~16 KB (apple/container#735), so a buildable
+# Dockerfile is kept small.
+ci_strip_dockerfile_comments() {
+    local line heredoc=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ -n "$heredoc" ]]; then
+            printf '%s\n' "$line"
+            [[ "$line" == "$heredoc" ]] && heredoc=""
+            continue
+        fi
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+        if [[ "$line" =~ \<\<-?([A-Za-z_][A-Za-z0-9_]*) ]]; then
+            heredoc="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ \<\<-?[\"\']([A-Za-z_][A-Za-z0-9_]*)[\"\'] ]]; then
+            heredoc="${BASH_REMATCH[1]}"
+        fi
+        printf '%s\n' "$line"
+    done
+}
+
 # ci_toolchain_commands NAME: the host commands that reveal NAME is installed,
 # one per line. A command in any line means "detected".
 ci_toolchain_commands() {

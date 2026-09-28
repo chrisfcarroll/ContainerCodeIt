@@ -165,6 +165,26 @@ function Get-CodeItHistoryImage([string]$runtime, [string]$file) {
     return ""
 }
 
+# Remove-CodeItDockerfileComments TEXT: drop Dockerfile-level comment and blank lines,
+# preserving heredoc bodies (RUN cat <<'EOF' ... EOF). Apple's container builder sends
+# the Dockerfile in a gRPC header and fails above ~16 KB (apple/container#735), so a
+# buildable Dockerfile is kept small.
+function Remove-CodeItDockerfileComments([string]$text) {
+    $out = New-Object System.Collections.Generic.List[string]
+    $heredoc = ""
+    foreach ($line in ($text -split "`n")) {
+        if ($heredoc) {
+            $out.Add($line)
+            if ($line -eq $heredoc) { $heredoc = "" }
+            continue
+        }
+        if ($line -match '^\s*#' -or $line -match '^\s*$') { continue }
+        if ($line -match '<<-?[''"]?([A-Za-z_][A-Za-z0-9_]*)') { $heredoc = $Matches[1] }
+        $out.Add($line)
+    }
+    return ($out -join "`n")
+}
+
 # Add-CodeItHistory FILE IMAGE: append "yyyyMMdd IMAGE", keeping the newest 15 lines.
 function Add-CodeItHistory([string]$file, [string]$image) {
     if (-not $image) { return }
