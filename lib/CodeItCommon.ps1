@@ -58,6 +58,41 @@ function CodeIt-ImageName([string[]]$toolChains) {
     return "code-it-alpine-$($toolChains -join '-')"
 }
 
+# Get-CodeItToolChainCommands NAME: the host commands that reveal NAME is installed.
+function Get-CodeItToolChainCommands([string]$name) {
+    switch ($name) {
+        'dotnet' { return @('dotnet --version') }
+        'node'   { return @('node --version', 'volta --version') }
+        'bun'    { return @('bun --version') }
+        'python' { return @('python3 --version', 'uv --version') }
+        default  { return @() }
+    }
+}
+
+function Test-CodeItToolChainDetected([string]$name) {
+    foreach ($c in (Get-CodeItToolChainCommands $name)) {
+        $exe = ($c -split '\s+')[0]
+        if (Get-Command $exe -EA Silent) { return $true }
+    }
+    return $false
+}
+
+# Test-CodeItAgentDetected DIR NAME: true if the agent's host command is on PATH, or
+# any of its host state paths (HOME/<state path>) exists.
+function Test-CodeItAgentDetected([string]$dir, [string]$name) {
+    $cmd = Get-CodeItAgentConfig $dir $name 'AGENT_COMMAND'
+    if ($cmd -and (Get-Command $cmd -EA Silent)) { return $true }
+    $paths = @()
+    foreach ($k in @('AGENT_STATE_DIRS', 'AGENT_STATE_FILES')) {
+        $v = Get-CodeItAgentConfig $dir $name $k
+        if ($v) { $paths += ($v -split ':') }
+    }
+    foreach ($p in $paths) {
+        if ($p -and (Test-Path -Path (Join-Path $HOME $p))) { return $true }
+    }
+    return $false
+}
+
 # Get-CodeItAgentConfig DIR NAME KEY: the (unquoted) value of KEY in an agent's
 # config, or $null. Keys are uppercase and appear once per line.
 function Get-CodeItAgentConfig([string]$dir, [string]$name, [string]$key) {

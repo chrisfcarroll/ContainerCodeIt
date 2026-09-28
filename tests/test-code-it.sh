@@ -102,16 +102,17 @@ common_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
 
 # ---------------------------------------------------------------------------
 echo "1. Syntax checks (bash -n)"
-for f in code-it.sh code-it-build.sh code-it-add-agent.sh code-it-add-tool-chain.sh \
-         lib/code-it-common.sh claude-it.sh opencode-it.sh tests/test-code-it.sh \
-         completions/code-it.bash completions/code-it-build.bash \
-         completions/code-it-add-agent.bash completions/code-it-add-tool-chain.bash; do
+for f in code-it.sh code-it-build.sh code-it-first-run.sh code-it-add-agent.sh \
+         code-it-add-tool-chain.sh lib/code-it-common.sh claude-it.sh opencode-it.sh \
+         tests/test-code-it.sh completions/code-it.bash completions/code-it-build.bash \
+         completions/code-it-add-agent.bash completions/code-it-add-tool-chain.bash \
+         completions/code-it-first-run.bash; do
     bash -n "$script_dir/$f"
     assert "bash -n $f" "$?"
 done
 if command -v zsh &>/dev/null; then
     for f in completions/_code-it completions/_code-it-build completions/_code-it-add-agent \
-             completions/_code-it-add-tool-chain; do
+             completions/_code-it-add-tool-chain completions/_code-it-first-run; do
         zsh -n "$script_dir/$f"
         assert "zsh -n $f" "$?"
     done
@@ -789,6 +790,75 @@ assert_contains "add-tool-chain prints the branch" "$out" "Branch: add-tool-chai
 repo_e="$tmp/addtc-b"; mkrepo "$repo_e"
 STUB_CODE_IT_EXIT=4 PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_e" --code-it "$stub_ci" >/dev/null 2>&1
 [[ "$?" == "4" ]]; assert "add-tool-chain propagates a gate refusal" "$?"
+
+# ---------------------------------------------------------------------------
+echo "18. code-it-first-run"
+first_run="$script_dir/code-it-first-run.sh"
+stub_first_build="$tmp/stub-first-build.sh"
+cat > "$stub_first_build" <<EOF
+#!/bin/sh
+echo "STUB-FIRST-BUILD \$*"
+touch "$tmp/first-build-ran"
+exit 0
+EOF
+chmod +x "$stub_first_build"
+
+# (a) detection with a stubbed PATH/HOME: docker and node present, no bun
+firstbin="$tmp/firstbin"; mkdir -p "$firstbin"
+for cmd in bash sh sed grep tr uname dirname mkdir cat git touch echo printf pwd basename find cp ls test; do
+    src=$(command -v "$cmd" 2>/dev/null) && ln -s "$src" "$firstbin/$cmd"
+done
+cp "$stub_docker/docker" "$firstbin/docker"; chmod +x "$firstbin/docker"
+printf '#!/bin/sh\necho v20.0.0\n' > "$firstbin/node"; chmod +x "$firstbin/node"
+firsthome="$tmp/firsthome"; mkdir -p "$firsthome"
+
+out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
+        --code-it-build "$stub_first_build" 2>&1)
+assert "first-run detection exit code" "$?"
+assert_contains "first-run uses the detected runtime" "$out" "Using container runtime: docker"
+assert_contains "first-run numbers the tool chains" "$out" "1) dotnet"
+assert_contains "first-run marks node detected" "$out" "2) node *"
+assert_contains "first-run marks python undetected" "$out" "4) python"
+assert_contains "first-run defaults to the detected tool chains" "$out" "--tool-chains node"
+case "$out" in
+    *"2) node *"*) assert "first-run detection is not fooled by bun" 0 ;;
+    *)             assert "first-run detection is not fooled by bun" 1 ;;
+esac
+
+# (b) answer parsing: pick tool chain 4 (python) and agent 2 (claude)
+out=$(printf '4\n2\n\n' | HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
+        --code-it-build "$stub_first_build" 2>&1)
+assert_contains "first-run parses tool chain numbers" "$out" "--tool-chains python"
+assert_contains "first-run parses agent numbers" "$out" "--agent claude"
+
+# (c) --dry-run builds nothing
+[[ ! -e "$tmp/first-build-ran" ]]; assert "first-run --dry-run ran no build" "$?"
+rm -f "$tmp/first-build-ran"
+
+# (d) copy carries state over but never overwrites
+fh="$tmp/firstcopy-home"; fs="$tmp/firstcopy-save"
+mkdir -p "$fh/.config/opencode" "$fs/.config/opencode"
+echo ORIGINAL > "$fh/.config/opencode/config.json"
+echo NEW > "$fh/.config/opencode/new.json"
+echo KEEP > "$fs/.config/opencode/config.json"
+out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --tool-chains node --agents opencode \
+        --save-dir "$fs" --code-it-build "$stub_first_build" 2>&1)
+assert "first-run copy exit code" "$?"
+assert_contains "first-run invoked the build" "$out" "STUB-FIRST-BUILD"
+[[ "$(cat "$fs/.config/opencode/config.json")" == "KEEP" ]]; assert "first-run never overwrites existing state" "$?"
+[[ "$(cat "$fs/.config/opencode/new.json")" == "NEW" ]]; assert "first-run copies missing state" "$?"
+assert_contains "first-run warns that credentials are copied" "$out" "credentials"
+assert_contains "first-run prints the start command" "$out" "code-it.sh --agent opencode"
+
+# (e) --dry-run makes no changes and copies nothing
+rm -f "$tmp/first-build-ran"
+fd="$tmp/firstdry"; mkdir -p "$fd"
+out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --dry-run --tool-chains node --agents opencode \
+        --save-dir "$fd/save" --code-it-build "$stub_first_build" 2>&1)
+[[ ! -e "$fd/save" ]]; assert "first-run --dry-run creates no save dir" "$?"
+assert_contains "first-run --dry-run says it will not build" "$out" "dry run: not building"
+assert_contains "first-run --dry-run says what it would copy" "$out" "would copy"
+[[ ! -e "$tmp/first-build-ran" ]]; assert "first-run --dry-run ran no build" "$?"
 
 # ---------------------------------------------------------------------------
 echo

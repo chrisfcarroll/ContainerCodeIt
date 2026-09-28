@@ -38,6 +38,27 @@ In principal either powershell or bash scripts should work on any O/S.
 .\Code-It.ps1 -o [[-WorkDirToMount] <string>]
 ```
 
+## First run
+
+`code-it-first-run` does the whole setup interactively: it checks the container runtime
+and git, detects which tool chains and agents you have on the host, asks which to
+include (pre-selecting what it found), shows the resulting `code-it-build` command and
+runs it, offers to copy your existing agent logins into the save dir, and prints the
+`code-it` command to start.
+
+```bash
+./code-it-first-run.sh
+./code-it-first-run.sh --yes --dry-run   # no questions, and change nothing
+```
+
+```powershell
+.\Code-It-FirstRun.ps1
+```
+
+State is **copied**, never moved or symlinked, and existing files are never
+overwritten. Copying carries your credentials, which will then be readable by the
+agent in the container; the command says so before it copies.
+
 ## Code-It options
 
 `code-it.sh` and `Code-It.ps1` accept the same logical parameters:
@@ -224,6 +245,7 @@ source /path/to/ContainerCodeIt/completions/code-it.bash
 source /path/to/ContainerCodeIt/completions/code-it-build.bash
 source /path/to/ContainerCodeIt/completions/code-it-add-agent.bash
 source /path/to/ContainerCodeIt/completions/code-it-add-tool-chain.bash
+source /path/to/ContainerCodeIt/completions/code-it-first-run.bash
 ```
 
 ```zsh

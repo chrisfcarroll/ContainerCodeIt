@@ -148,6 +148,48 @@ ci_resolve_agents() {
     printf '%s' "$out"
 }
 
+# ci_tool_chain_commands NAME: the host commands that reveal NAME is installed,
+# one per line. A command in any line means "detected".
+ci_tool_chain_commands() {
+    case "$1" in
+        dotnet) printf '%s\n' 'dotnet --version' ;;
+        node)   printf '%s\n' 'node --version' 'volta --version' ;;
+        bun)    printf '%s\n' 'bun --version' ;;
+        python) printf '%s\n' 'python3 --version' 'uv --version' ;;
+    esac
+}
+
+# ci_tool_chain_detected NAME: true if any of the tool chain's host commands works.
+ci_tool_chain_detected() {
+    local cmd
+    while IFS= read -r cmd; do
+        [[ -n "$cmd" ]] || continue
+        # shellcheck disable=SC2086
+        if $cmd >/dev/null 2>&1; then
+            return 0
+        fi
+    done < <(ci_tool_chain_commands "$1")
+    return 1
+}
+
+# ci_agent_detected AGENTS_DIR NAME: true if the agent's host command is on PATH, or
+# any of its host state paths (HOME/<state path>) exists.
+ci_agent_detected() {
+    local agents_dir="$1" name="$2" cmd p
+    cmd=$(ci_agent_config "$agents_dir" "$name" AGENT_COMMAND)
+    if [[ -n "$cmd" ]] && command -v "$cmd" >/dev/null 2>&1; then
+        return 0
+    fi
+    local dirs files
+    dirs=$(ci_agent_config "$agents_dir" "$name" AGENT_STATE_DIRS)
+    files=$(ci_agent_config "$agents_dir" "$name" AGENT_STATE_FILES)
+    local IFS=':'
+    for p in $dirs $files; do
+        [[ -n "$p" && -e "$HOME/$p" ]] && return 0
+    done
+    return 1
+}
+
 # ci_add_via_code_it NAME BRANCH REPO CODE_IT DRY_RUN PROMPT: the plumbing shared by
 # code-it-add-agent and code-it-add-tool-chain. With DRY_RUN=true it prints the prompt
 # and command and returns 0. Otherwise it refuses a dirty repo or an existing branch,

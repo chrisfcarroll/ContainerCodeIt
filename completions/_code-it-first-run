@@ -1,0 +1,22 @@
+#compdef code-it-first-run.sh
+# Zsh completion for code-it-first-run.sh.
+#
+# Install by putting this directory on your fpath before compinit.
+
+_code_it_first_run() {
+    local prev
+    prev=${words[CURRENT-1]}
+
+    case $prev in
+        (--save-dir|-s|--work-dir|-w|--dockerfile-dir|--code-it-build) _files -/; return ;;
+        (--runtime|-r)     compadd -- docker container; return ;;
+        (--tool-chains|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv; return ;;
+        (--agents|-a)      compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
+    esac
+
+    compadd -- --save-dir -s --work-dir -w --tool-chains -t --agents -a \
+        --image -i --dockerfile-dir --runtime -r --code-it-build --yes -y \
+        --dry-run -d --help -h
+}
+
+_code_it_first_run "$@"

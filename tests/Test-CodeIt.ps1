@@ -150,7 +150,7 @@ $commonArgs = @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $save)
 
 # ---------------------------------------------------------------------------
 "1. Parse checks"
-foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
+foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
     $parseErrors = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptDir $f), [ref]$null, [ref]$parseErrors)
     Assert "parses: $f" ($parseErrors.Count -eq 0)
@@ -721,6 +721,51 @@ $env:STUB_CODE_IT_EXIT = '4'
 try { $r = Invoke-Scenario $addTc @('java', '-repo', $repoE, '-codeIt', $stubCi) $stubPath }
 finally { $env:STUB_CODE_IT_EXIT = $null }
 Assert "add-tool-chain propagates a gate refusal" ($r.code -eq 4)
+
+# ---------------------------------------------------------------------------
+"12d. Code-It-FirstRun.ps1"
+$firstRun = Join-Path $scriptDir 'Code-It-FirstRun.ps1'
+$stubFirst = Join-Path $tmp 'stub-first-build.ps1'
+Set-Content -Path $stubFirst -Value @'
+param([string]$toolChains, [string]$agent, [string]$runtime, [string]$image, [string]$dockerfileDir)
+Set-Content -Path (Join-Path $PSScriptRoot 'first-build-ran') -Value 'ran'
+"STUB-FIRST-BUILD $toolChains $agent"
+'@
+
+$fh = Join-Path $tmp 'firstcopy-home'
+$null = New-Item -ItemType Directory -Force -Path "$fh/.config/opencode"
+Set-Content -Path "$fh/.config/opencode/config.json" -Value 'ORIGINAL'
+$savedHome = $env:HOME; $savedUserProfile = $env:USERPROFILE
+
+# --dryRun builds nothing and copies nothing
+$fd = Join-Path $tmp 'firstdry-ps'
+$env:HOME = $fh; $env:USERPROFILE = $fh
+try {
+    $r = Invoke-Scenario $firstRun @('-yes', '-dryRun', '-toolChains', 'node', '-agents', 'opencode',
+        '-saveDir', (Join-Path $fd 'save'), '-codeItBuild', $stubFirst) $stubPath
+} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
+Assert "first-run -dryRun exit code 0" ($r.code -eq 0)
+Assert "first-run -dryRun creates no save dir" (-not (Test-Path -Path (Join-Path $fd 'save')))
+Assert-Contains "first-run -dryRun says it will not build" $r.out 'dry run: not building'
+Assert-Contains "first-run -dryRun says what it would copy" $r.out 'would copy'
+Assert "first-run -dryRun ran no build" (-not (Test-Path -Path (Join-Path $tmp 'first-build-ran')))
+
+# --yes copies state over but never overwrites
+$fs = Join-Path $tmp 'firstcopy-save'
+$null = New-Item -ItemType Directory -Force -Path "$fs/.config/opencode"
+Set-Content -Path "$fs/.config/opencode/config.json" -Value 'KEEP'
+Set-Content -Path "$fh/.config/opencode/new.json" -Value 'NEW'
+$env:HOME = $fh; $env:USERPROFILE = $fh
+try {
+    $r = Invoke-Scenario $firstRun @('-yes', '-toolChains', 'node', '-agents', 'opencode',
+        '-saveDir', $fs, '-codeItBuild', $stubFirst) $stubPath
+} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
+Assert "first-run copy exit code 0" ($r.code -eq 0)
+Assert-Contains "first-run invoked the build" $r.out 'STUB-FIRST-BUILD'
+Assert "first-run never overwrites existing state" ((Get-Content "$fs/.config/opencode/config.json" -Raw).Trim() -eq 'KEEP')
+Assert "first-run copies missing state" ((Get-Content "$fs/.config/opencode/new.json" -Raw).Trim() -eq 'NEW')
+Assert-Contains "first-run warns that credentials are copied" $r.out 'credentials'
+Assert-Contains "first-run prints the start command" $r.out 'Code-It.ps1 -agent opencode'
 
 # ---------------------------------------------------------------------------
 "13. PowerShell tab completion"
