@@ -949,27 +949,27 @@ exit 0
 EOF
 chmod +x "$stub_first_run"
 
-# (a) save dir exists with history: the most recently used existing code-it image
+# (a) save dir exists with history: the 70% weighted rule (Spec 09) chooses
 hsel="$tmp/histselect"; mkdir -p "$hsel"
 printf '20260101 code-it-alpine-dotnet-node\n20260102 code-it-alpine-python\n20260103 code-it-alpine-python\n20260104 code-it-alpine-python\n20260105 code-it-alpine-python\n' > "$hsel/image-history"
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" 2>&1)
 assert "default selection exit code" "$?"
-assert_contains "uses the most recently used remembered image" "$out" "Using existing image: code-it-alpine-python"
+assert_contains "uses the remembered image (70% rule)" "$out" "Using remembered image: code-it-alpine-python"
 assert_contains "runs that image" "$out" "code-it-alpine-python:latest"
 
 # (b) explicit --tool-chains bypasses the default selection
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" --tool-chains dotnet 2>&1)
 case "$out" in
-    *"Using existing image"*) assert "explicit --tool-chains bypasses the default" 1 ;;
-    *)                        assert "explicit --tool-chains bypasses the default" 0 ;;
+    *"Using remembered image"*|*"Using existing image"*) assert "explicit --tool-chains bypasses the default" 1 ;;
+    *)                                                   assert "explicit --tool-chains bypasses the default" 0 ;;
 esac
 assert_contains "explicit --tool-chains is honoured" "$out" "code-it-alpine-dotnet:latest"
 
 # (c) explicit --image bypasses the default selection
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" --image code-it-alpine-dotnet-node 2>&1)
 case "$out" in
-    *"Using existing image"*) assert "explicit --image bypasses the default" 1 ;;
-    *)                        assert "explicit --image bypasses the default" 0 ;;
+    *"Using remembered image"*|*"Using existing image"*) assert "explicit --image bypasses the default" 1 ;;
+    *)                                                   assert "explicit --image bypasses the default" 0 ;;
 esac
 
 # (d) save dir exists but no history: the most recently built existing code-it image
@@ -977,6 +977,14 @@ hnone="$tmp/histnone"; mkdir -p "$hnone"
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hnone" 2>&1)
 assert_contains "no history: uses the most recently built existing image" "$out" "Using existing image: code-it-alpine-dotnet"
 assert_contains "no history: runs that image" "$out" "code-it-alpine-dotnet:latest"
+
+# (j) history exists but no remembered image covers 70%: fall back to the most recent
+# existing code-it image
+hfall="$tmp/histfallback"; mkdir -p "$hfall"
+printf '20260101 code-it-alpine-dotnet\n20260102 code-it-alpine-node\n20260103 code-it-alpine-bun\n20260104 code-it-alpine-python\n20260105 code-it-alpine-dotnet\n' > "$hfall/image-history"
+out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hfall" 2>&1)
+assert_contains "no 70% cover: falls back to an existing image" "$out" "Using existing image: code-it-alpine-dotnet"
+assert_contains "no 70% cover: runs that image" "$out" "code-it-alpine-dotnet:latest"
 
 # (g) save dir missing: run first-run
 ns="$tmp/nosave-first-run"
@@ -987,7 +995,8 @@ assert_contains "first-run is given --save-dir" "$out" "--save-dir"
 
 # (h) save dir exists but no code-it image: run first-run
 emptybin="$tmp/emptybin"; mkdir -p "$emptybin"
-printf '#!/bin/sh\nexit 0\n' > "$emptybin/docker"; chmod +x "$emptybin/docker"
+# docker images succeeds with no output, but image inspect fails (no such image)
+printf '#!/bin/sh\ncase "$1" in image) exit 1;; esac\nexit 0\n' > "$emptybin/docker"; chmod +x "$emptybin/docker"
 out=$(CODE_IT_FIRST_RUN="$stub_first_run" PATH="$emptybin:$PATH" "$code_it" --work-dir "$script_dir" --save-dir "$hsel" 2>&1)
 assert_contains "no code-it image runs first-run" "$out" "STUB-FIRST-RUN"
 

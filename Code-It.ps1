@@ -301,14 +301,25 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Default selection, when neither -toolChains nor -image was given: with no save dir
-# yet, or no code-it image at all, there is no setup, so run first-run; otherwise use
-# an existing code-it image, most recent preferred. See
-# Specs/10-default-first-run-or-existing-image.md.
+# yet, or no code-it image at all, there is no setup, so run first-run. With a save dir
+# and history, the 70% weighted rule of Spec 09 applies; without history (or if it
+# selects nothing), the most recent existing code-it image. See Spec 10, which amends
+# Spec 09's final paragraph.
 if (-not $PSBoundParameters.ContainsKey('toolChains') -and -not $PSBoundParameters.ContainsKey('image')) {
     $firstRun = if ($env:CODE_IT_FIRST_RUN) { $env:CODE_IT_FIRST_RUN } else { Join-Path $PSScriptRoot 'Code-It-FirstRun.ps1' }
+    $defaultHistory = Join-Path $saveDir 'image-history'
     $defaultImage = ""
-    if (Test-Path -Path $saveDir -PathType Container) {
-        $defaultImage = Get-CodeItDefaultImage $runtime (Join-Path $saveDir 'image-history')
+    $defaultLabel = "existing image"
+    if (-not (Test-Path -Path $saveDir -PathType Container)) {
+        $defaultImage = ""
+    } else {
+        if (Test-Path -Path $defaultHistory -PathType Leaf) {
+            $defaultImage = Get-CodeItHistoryImage $runtime $defaultHistory
+            if ($defaultImage) { $defaultLabel = "remembered image" }
+        }
+        if (-not $defaultImage) {
+            $defaultImage = Get-CodeItDefaultImage $runtime $defaultHistory
+        }
     }
     $defaultChains = if ($defaultImage) { Get-CodeItImageToolChains $runtime $defaultImage } else { "" }
     if (-not $defaultChains) {
@@ -327,7 +338,7 @@ if (-not $PSBoundParameters.ContainsKey('toolChains') -and -not $PSBoundParamete
         $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolChains
     }
     $image = $defaultImage
-    "    Using existing image: $image"
+    "    Using $defaultLabel`: $image"
 }
 
 # Give the Apple container runtime enough memory for the agent to work with

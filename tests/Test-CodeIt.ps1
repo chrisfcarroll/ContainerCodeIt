@@ -897,7 +897,7 @@ param([string]$saveDir, [string]$workDir, [string]$runtime)
 exit 0
 '@
 
-# save dir exists with history: the most recently used existing code-it image
+# save dir exists with history: the 70% weighted rule (Spec 09) chooses
 $hsel = Join-Path $tmp 'histselect'; $null = New-Item -ItemType Directory -Force -Path $hsel
 @(
     '20260101 code-it-alpine-dotnet-node'
@@ -908,23 +908,36 @@ $hsel = Join-Path $tmp 'histselect'; $null = New-Item -ItemType Directory -Force
 ) | Set-Content -Path (Join-Path $hsel 'image-history')
 $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
 Assert "default selection exit code 0" ($r.code -eq 0)
-Assert-Contains "uses the most recently used remembered image" $r.out 'Using existing image: code-it-alpine-python'
+Assert-Contains "uses the remembered image (70% rule)" $r.out 'Using remembered image: code-it-alpine-python'
 Assert-Contains "runs that image" $r.out 'code-it-alpine-python:latest'
 
 # explicit -toolChains bypasses the default selection
 $r = Invoke-Scenario $codeIt @('-dryRun', '-toolChains', 'dotnet', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
-Assert "explicit -toolChains bypasses the default" (-not $r.out.Contains('Using existing image'))
+Assert "explicit -toolChains bypasses the default" (-not ($r.out.Contains('Using remembered image') -or $r.out.Contains('Using existing image')))
 Assert-Contains "explicit -toolChains is honoured" $r.out 'code-it-alpine-dotnet:latest'
 
 # explicit -image bypasses the default selection
 $r = Invoke-Scenario $codeIt @('-dryRun', '-image', 'code-it-alpine-dotnet-node', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
-Assert "explicit -image bypasses the default" (-not $r.out.Contains('Using existing image'))
+Assert "explicit -image bypasses the default" (-not ($r.out.Contains('Using remembered image') -or $r.out.Contains('Using existing image')))
 
 # save dir exists but no history: the most recently built existing code-it image
 $hnone = Join-Path $tmp 'histnone'; $null = New-Item -ItemType Directory -Force -Path $hnone
 $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hnone) $histPath
 Assert-Contains "no history: uses the most recently built existing image" $r.out 'Using existing image: code-it-alpine-dotnet'
 Assert-Contains "no history: runs that image" $r.out 'code-it-alpine-dotnet:latest'
+
+# history exists but no remembered image covers 70%: fall back to an existing image
+$hfall = Join-Path $tmp 'histfallback'; $null = New-Item -ItemType Directory -Force -Path $hfall
+@(
+    '20260101 code-it-alpine-dotnet'
+    '20260102 code-it-alpine-node'
+    '20260103 code-it-alpine-bun'
+    '20260104 code-it-alpine-python'
+    '20260105 code-it-alpine-dotnet'
+) | Set-Content -Path (Join-Path $hfall 'image-history')
+$r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hfall) $histPath
+Assert-Contains "no 70% cover: falls back to an existing image" $r.out 'Using existing image: code-it-alpine-dotnet'
+Assert-Contains "no 70% cover: runs that image" $r.out 'code-it-alpine-dotnet:latest'
 
 # save dir missing: run first-run
 $env:CODE_IT_FIRST_RUN = $stubFirstRun
@@ -939,9 +952,20 @@ Assert-Contains "first-run is given the save dir" $r.out $ns
 $emptyDocker = Join-Path $tmp 'empty-docker'
 $null = New-Item -ItemType Directory -Force -Path $emptyDocker
 if ($onWindows) {
-    Set-Content -Path (Join-Path $emptyDocker 'docker.cmd') -Value "@exit /b 0`r`n"
+    Set-Content -Path (Join-Path $emptyDocker 'docker.cmd') -Value @'
+@echo off
+if "%~1"=="image" exit /b 1
+exit /b 0
+'@
 } else {
-    Set-Content -Path (Join-Path $emptyDocker 'docker') -Value "#!/bin/sh`nexit 0`n"
+    # docker images succeeds with no output, but image inspect fails (no such image)
+    Set-Content -Path (Join-Path $emptyDocker 'docker') -Value @'
+#!/bin/sh
+case "$1" in
+    image) exit 1 ;;
+esac
+exit 0
+'@
     chmod +x (Join-Path $emptyDocker 'docker')
 }
 $env:CODE_IT_FIRST_RUN = $stubFirstRun

@@ -380,9 +380,10 @@ if [[ "${images_rc:-0}" != 0 ]]; then
 fi
 
 # Default selection, when neither --tool-chains nor --image was given: with no save
-# dir yet, or no code-it image at all, there is no setup, so run first-run; otherwise
-# use an existing code-it image, most recent preferred. See
-# Specs/10-default-first-run-or-existing-image.md.
+# dir yet, or no code-it image at all, there is no setup, so run first-run. With a
+# save dir and history, the 70% weighted rule of Spec 09 applies; without history (or
+# if it selects nothing), the most recent existing code-it image. See Spec 10, which
+# amends Spec 09's final paragraph.
 first_run="${CODE_IT_FIRST_RUN:-$script_dir/code-it-first-run.sh}"
 run_first_run() {
     echo "    No code-it image or setup found; running code-it-first-run."
@@ -396,8 +397,17 @@ run_first_run() {
 
 if [[ "$tool_chains_explicit" == false && "$image_explicit" == false ]]; then
     default_image=""
-    if [[ -d "$save_dir" ]]; then
-        default_image=$(ci_choose_default_image "$runtime" "$save_dir/image-history") || default_image=""
+    default_label="existing image"
+    if [[ ! -d "$save_dir" ]]; then
+        run_first_run
+    fi
+    default_history="$save_dir/image-history"
+    if [[ -f "$default_history" ]]; then
+        default_image=$(ci_history_choose_image "$runtime" "$default_history") || default_image=""
+        [[ -n "$default_image" ]] && default_label="remembered image"
+    fi
+    if [[ -z "$default_image" ]]; then
+        default_image=$(ci_choose_default_image "$runtime" "$default_history") || default_image=""
     fi
     default_chains=""
     [[ -n "$default_image" ]] && default_chains=$(ci_image_tool_chains "$runtime" "$default_image")
@@ -409,7 +419,7 @@ if [[ "$tool_chains_explicit" == false && "$image_explicit" == false ]]; then
             enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_tool_chains") || exit 1
         fi
         image="$default_image"
-        echo "    Using existing image: $image"
+        echo "    Using $default_label: $image"
     fi
 fi
 
