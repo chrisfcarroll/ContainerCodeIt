@@ -150,7 +150,7 @@ $commonArgs = @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $save)
 
 # ---------------------------------------------------------------------------
 "1. Parse checks"
-foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
+foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-Add-Agent.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
     $parseErrors = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptDir $f), [ref]$null, [ref]$parseErrors)
     Assert "parses: $f" ($parseErrors.Count -eq 0)
@@ -621,6 +621,68 @@ $r = Invoke-Scenario (Join-Path $scriptDir 'Claude-It.ps1') (@('explain this rep
 Assert-Contains "Claude-It.ps1 forwards a prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario (Join-Path $scriptDir 'OpenCode-It.ps1') ($commonArgs + @('--model','opus')) $stubPath
 Assert-Contains "OpenCode-It.ps1 forwards agent flags" $r.out 'code-it-alpine-dotnet-node:latest --model opus'
+
+# ---------------------------------------------------------------------------
+"12b. Code-It-Add-Agent.ps1"
+$addAgent = Join-Path $scriptDir 'Code-It-Add-Agent.ps1'
+$stubCi = Join-Path $tmp 'stub-code-it.ps1'
+Set-Content -Path $stubCi -Value @'
+param([switch]$headless, [string]$WorkDirToMount, [string]$prompt)
+"STUB-CODE-IT $headless $WorkDirToMount"
+if ($env:STUB_CODE_IT_EXIT) { exit [int]$env:STUB_CODE_IT_EXIT }
+exit 0
+'@
+function New-GitRepo([string]$dir) {
+    $null = New-Item -ItemType Directory -Force -Path $dir
+    & git -C $dir init -q
+    & git -C $dir config user.email a@b.c
+    & git -C $dir config user.name T
+    Set-Content -Path (Join-Path $dir 'x') -Value 'x'
+    & git -C $dir add -A
+    & git -C $dir commit -qm init
+}
+
+# --dryRun prints the prompt and command, and changes nothing
+$repoA = Join-Path $tmp 'addagent-a'; New-GitRepo $repoA
+$r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoA, '-codeIt', $stubCi, '-dryRun') $stubPath
+Assert "add-agent -dryRun exit code 0" ($r.code -eq 0)
+Assert-Contains "add-agent prompt names the agent" $r.out 'Agent to add: cursor'
+Assert-Contains "add-agent prompt includes the gate" $r.out 'Gate first'
+Assert-Contains "add-agent prompt requires an official install channel" $r.out 'official install channel'
+Assert-Contains "add-agent -dryRun prints the command" $r.out 'stub-code-it.ps1'
+Assert-Contains "add-agent -dryRun prints -headless" $r.out '-headless'
+Assert "add-agent -dryRun creates no branch" (-not (& git -C $repoA branch --list 'add-agent/*'))
+
+# -url is included in the prompt
+$r = Invoke-Scenario $addAgent @('cursor', '-url', 'https://docs.example/cursor', '-repo', $repoA, '-codeIt', $stubCi, '-dryRun') $stubPath
+Assert-Contains "add-agent prompt includes the docs URL" $r.out 'https://docs.example/cursor'
+
+# a dirty repo is refused
+Add-Content -Path (Join-Path $repoA 'x') -Value 'y'
+$r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoA, '-codeIt', $stubCi) $stubPath
+Assert "add-agent refuses a dirty repo" ($r.code -ne 0)
+& git -C $repoA checkout -q -- .
+
+# it creates the branch, runs code-it, and prints the branch and summary
+$r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoA, '-codeIt', $stubCi) $stubPath
+Assert "add-agent run exit code 0" ($r.code -eq 0)
+Assert-Contains "add-agent runs code-it headless" $r.out 'STUB-CODE-IT'
+Assert "add-agent checks out the new branch" ((& git -C $repoA rev-parse --abbrev-ref HEAD) -eq 'add-agent/cursor')
+Assert-Contains "add-agent prints the branch" $r.out 'Branch: add-agent/cursor'
+Assert-Contains "add-agent prints a changes summary" $r.out 'Changes:'
+
+# a non-zero code-it exit (the gate refusal) is propagated
+$repoB = Join-Path $tmp 'addagent-b'; New-GitRepo $repoB
+$env:STUB_CODE_IT_EXIT = '3'
+try { $r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoB, '-codeIt', $stubCi) $stubPath }
+finally { $env:STUB_CODE_IT_EXIT = $null }
+Assert "add-agent propagates a non-zero gate refusal" ($r.code -eq 3)
+
+# an existing branch is refused
+$repoC = Join-Path $tmp 'addagent-c'; New-GitRepo $repoC
+& git -C $repoC branch 'add-agent/cursor'
+$r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoC, '-codeIt', $stubCi) $stubPath
+Assert "add-agent refuses an existing branch" ($r.code -ne 0)
 
 # ---------------------------------------------------------------------------
 "13. PowerShell tab completion"

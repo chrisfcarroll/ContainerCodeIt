@@ -102,13 +102,15 @@ common_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
 
 # ---------------------------------------------------------------------------
 echo "1. Syntax checks (bash -n)"
-for f in code-it.sh code-it-build.sh lib/code-it-common.sh claude-it.sh opencode-it.sh \
-         tests/test-code-it.sh completions/code-it.bash completions/code-it-build.bash; do
+for f in code-it.sh code-it-build.sh code-it-add-agent.sh lib/code-it-common.sh \
+         claude-it.sh opencode-it.sh tests/test-code-it.sh \
+         completions/code-it.bash completions/code-it-build.bash \
+         completions/code-it-add-agent.bash; do
     bash -n "$script_dir/$f"
     assert "bash -n $f" "$?"
 done
 if command -v zsh &>/dev/null; then
-    for f in completions/_code-it completions/_code-it-build; do
+    for f in completions/_code-it completions/_code-it-build completions/_code-it-add-agent; do
         zsh -n "$script_dir/$f"
         assert "zsh -n $f" "$?"
     done
@@ -686,6 +688,69 @@ EOF
 else
     echo "  skip: go.sh tests (no zsh)"
 fi
+
+# ---------------------------------------------------------------------------
+echo "16. code-it-add-agent"
+add_agent="$script_dir/code-it-add-agent.sh"
+stub_ci="$tmp/stub-code-it.sh"
+cat > "$stub_ci" <<'EOF'
+#!/bin/sh
+echo "STUB-CODE-IT $*"
+exit "${STUB_CODE_IT_EXIT:-0}"
+EOF
+chmod +x "$stub_ci"
+
+mkrepo() {
+    local d="$1"
+    mkdir -p "$d"
+    git -C "$d" init -q
+    git -C "$d" config user.email a@b.c
+    git -C "$d" config user.name T
+    echo x > "$d/x"
+    git -C "$d" add -A
+    git -C "$d" commit -qm init
+}
+
+# (a) --dry-run prints the prompt and the command, and changes nothing
+repo_a="$tmp/addagent-a"; mkrepo "$repo_a"
+out=$(PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_a" --code-it "$stub_ci" --dry-run 2>&1)
+assert "add-agent --dry-run exit code" "$?"
+assert_contains "add-agent prompt names the agent" "$out" "Agent to add: cursor"
+assert_contains "add-agent prompt includes the gate" "$out" "Gate first"
+assert_contains "add-agent prompt requires an official install channel" "$out" "official install channel"
+assert_contains "add-agent dry-run prints the command" "$out" "code-it.sh"
+assert_contains "add-agent dry-run prints code-it --headless" "$out" "--headless"
+[[ -z "$(git -C "$repo_a" branch --list 'add-agent/*')" ]]; assert "add-agent --dry-run creates no branch" "$?"
+
+# (b) --url is included in the prompt
+out=$(PATH="$stub_docker:$PATH" "$add_agent" cursor --url "https://docs.example/cursor" --repo "$repo_a" --code-it "$stub_ci" --dry-run 2>&1)
+assert_contains "add-agent prompt includes the docs URL" "$out" "https://docs.example/cursor"
+
+# (c) a dirty repo is refused
+printf 'y\n' >> "$repo_a/x"
+PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_a" --code-it "$stub_ci" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "add-agent refuses a dirty repo" "$?"
+git -C "$repo_a" checkout -q -- .
+
+# (d) it creates the branch, runs code-it, and prints the branch and summary
+out=$(PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_a" --code-it "$stub_ci" 2>&1)
+assert "add-agent run exit code" "$?"
+assert_contains "add-agent runs code-it headless" "$out" "STUB-CODE-IT"
+[[ "$(git -C "$repo_a" rev-parse --abbrev-ref HEAD)" == "add-agent/cursor" ]]
+assert "add-agent checks out the new branch" "$?"
+assert_contains "add-agent prints the branch" "$out" "Branch: add-agent/cursor"
+assert_contains "add-agent prints a changes summary" "$out" "Changes:"
+
+# (e) a non-zero code-it exit (the gate refusal) is propagated
+repo_b="$tmp/addagent-b"; mkrepo "$repo_b"
+STUB_CODE_IT_EXIT=3 PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_b" --code-it "$stub_ci" >/dev/null 2>&1
+[[ "$?" == "3" ]]; assert "add-agent propagates a non-zero gate refusal" "$?"
+
+# (f) an existing branch is refused
+repo_c="$tmp/addagent-c"; mkrepo "$repo_c"
+git -C "$repo_c" branch "add-agent/cursor"
+PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_c" --code-it "$stub_ci" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "add-agent refuses an existing branch" "$?"
 
 # ---------------------------------------------------------------------------
 echo

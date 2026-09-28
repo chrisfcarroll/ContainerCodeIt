@@ -222,6 +222,7 @@ own favourites.
 # bash: in ~/.bashrc
 source /path/to/ContainerCodeIt/completions/code-it.bash
 source /path/to/ContainerCodeIt/completions/code-it-build.bash
+source /path/to/ContainerCodeIt/completions/code-it-add-agent.bash
 ```
 
 ```zsh
@@ -370,6 +371,28 @@ seeded at startup into `~/.bun/install/cache` in the same way.
 ### PyPi, etc.
 
 To do.
+
+## Adding an agent
+
+`code-it-add-agent NAME [--url URL]` runs code-it headless with a built-in prompt that
+adds a new `agents/NAME/` definition. The in-container agent first applies a gate
+(is NAME a well-known, maintained agent with official docs and an official install
+channel?), and if it passes, reads its docs, adds the definition, tests, README row and
+completions, runs the tests, and commits.
+
+The tool refuses to run on a dirty repository, works on a new branch
+`add-agent/NAME` (never committing to your current branch, never pushing), and prints
+the branch and a diff summary when it finishes. A gate refusal leaves the repo
+unchanged and is propagated as the tool's non-zero exit code.
+
+```bash
+./code-it-add-agent.sh cursor --url https://docs.cursor.com/cli
+./code-it-add-agent.sh cursor --dry-run     # show the prompt and command only
+```
+
+```powershell
+.\Code-It-Add-Agent.ps1 cursor -url https://docs.cursor.com/cli
+```
 
 ## Tests
 
