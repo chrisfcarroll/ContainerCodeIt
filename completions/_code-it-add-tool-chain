@@ -1,0 +1,18 @@
+#compdef code-it-add-tool-chain.sh
+# Zsh completion for code-it-add-tool-chain.sh.
+#
+# Install by putting this directory on your fpath before compinit.
+
+_code_it_add_tool_chain() {
+    local prev
+    prev=${words[CURRENT-1]}
+
+    case $prev in
+        (--repo|--code-it) _files -/; return ;;
+        (--url|--branch)   return ;;   # free text
+    esac
+
+    compadd -- --url --repo --code-it --branch --dry-run -d --help -h
+}
+
+_code_it_add_tool_chain "$@"

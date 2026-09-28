@@ -148,6 +148,55 @@ ci_resolve_agents() {
     printf '%s' "$out"
 }
 
+# ci_add_via_code_it NAME BRANCH REPO CODE_IT DRY_RUN PROMPT: the plumbing shared by
+# code-it-add-agent and code-it-add-tool-chain. With DRY_RUN=true it prints the prompt
+# and command and returns 0. Otherwise it refuses a dirty repo or an existing branch,
+# creates BRANCH, runs CODE_IT headless with PROMPT, prints the branch and a diff
+# summary, and returns code-it's exit code.
+ci_add_via_code_it() {
+    local name="$1" branch="$2" repo="$3" code_it="$4" dry_run="$5" prompt="$6"
+    local cmd=("$code_it" --headless --work-dir "$repo" --prompt "$prompt")
+
+    if [[ "$dry_run" == true ]]; then
+        echo "Prompt:"
+        printf '%s\n' "$prompt"
+        echo
+        echo "Command:"
+        printf '%q ' "${cmd[@]}"
+        printf '\n'
+        return 0
+    fi
+
+    # Refuse a dirty tree, so checking out a new branch cannot lose work.
+    if [[ -n "$(git -C "$repo" status --porcelain)" ]]; then
+        echo "Warning: '$repo' has uncommitted changes. Commit or stash them first." >&2
+        return 1
+    fi
+    if git -C "$repo" rev-parse --verify --quiet "$branch" >/dev/null; then
+        echo "Warning: branch '$branch' already exists in '$repo'." >&2
+        return 1
+    fi
+
+    local base_rev rc=0
+    base_rev=$(git -C "$repo" rev-parse HEAD)
+    echo "    Creating branch $branch in $repo"
+    git -C "$repo" checkout -b "$branch" || return 1
+
+    echo "    Running: $code_it --headless --work-dir $repo"
+    "${cmd[@]}" || rc=$?
+
+    echo
+    echo "    Branch: $branch"
+    echo "    Changes:"
+    git -C "$repo" log --oneline "$base_rev..HEAD" 2>/dev/null | sed 's/^/      /' || true
+    git -C "$repo" diff --stat "$base_rev..HEAD" 2>/dev/null | sed 's/^/      /' || true
+
+    if [[ "$rc" != "0" ]]; then
+        echo "Warning: code-it exited $rc (the agent may have refused the gate or failed)." >&2
+    fi
+    return "$rc"
+}
+
 # ci_detect_runtime REQUESTED: echo the runtime to use, warning and returning 1 if
 # none is found. On macOS prefer the Apple container CLI, then docker, then container.
 ci_detect_runtime() {

@@ -102,15 +102,16 @@ common_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
 
 # ---------------------------------------------------------------------------
 echo "1. Syntax checks (bash -n)"
-for f in code-it.sh code-it-build.sh code-it-add-agent.sh lib/code-it-common.sh \
-         claude-it.sh opencode-it.sh tests/test-code-it.sh \
+for f in code-it.sh code-it-build.sh code-it-add-agent.sh code-it-add-tool-chain.sh \
+         lib/code-it-common.sh claude-it.sh opencode-it.sh tests/test-code-it.sh \
          completions/code-it.bash completions/code-it-build.bash \
-         completions/code-it-add-agent.bash; do
+         completions/code-it-add-agent.bash completions/code-it-add-tool-chain.bash; do
     bash -n "$script_dir/$f"
     assert "bash -n $f" "$?"
 done
 if command -v zsh &>/dev/null; then
-    for f in completions/_code-it completions/_code-it-build completions/_code-it-add-agent; do
+    for f in completions/_code-it completions/_code-it-build completions/_code-it-add-agent \
+             completions/_code-it-add-tool-chain; do
         zsh -n "$script_dir/$f"
         assert "zsh -n $f" "$?"
     done
@@ -751,6 +752,43 @@ repo_c="$tmp/addagent-c"; mkrepo "$repo_c"
 git -C "$repo_c" branch "add-agent/cursor"
 PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_c" --code-it "$stub_ci" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "add-agent refuses an existing branch" "$?"
+
+# ---------------------------------------------------------------------------
+echo "17. code-it-add-tool-chain"
+add_tc="$script_dir/code-it-add-tool-chain.sh"
+
+# (a) --dry-run prints the prompt (with the security gate) and the command
+repo_d="$tmp/addtc-a"; mkrepo "$repo_d"
+out=$(PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_d" --code-it "$stub_ci" --dry-run 2>&1)
+assert "add-tool-chain --dry-run exit code" "$?"
+assert_contains "add-tool-chain prompt names the tool chain" "$out" "Tool chain to add: java"
+assert_contains "add-tool-chain prompt includes the gate" "$out" "Gate first"
+assert_contains "add-tool-chain prompt requires a secure install" "$out" "installs securely"
+assert_contains "add-tool-chain prompt requires musl builds" "$out" "musl builds for x86_64 and aarch64"
+assert_contains "add-tool-chain dry-run prints the command" "$out" "--headless"
+[[ -z "$(git -C "$repo_d" branch --list 'add-tool-chain/*')" ]]; assert "add-tool-chain --dry-run creates no branch" "$?"
+
+# (b) --url is included
+out=$(PATH="$stub_docker:$PATH" "$add_tc" java --url "https://openjdk.org/install/" --repo "$repo_d" --code-it "$stub_ci" --dry-run 2>&1)
+assert_contains "add-tool-chain prompt includes the docs URL" "$out" "https://openjdk.org/install/"
+
+# (c) dirty repo refusal
+printf 'y\n' >> "$repo_d/x"
+PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_d" --code-it "$stub_ci" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "add-tool-chain refuses a dirty repo" "$?"
+git -C "$repo_d" checkout -q -- .
+
+# (d) branch creation and summary
+out=$(PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_d" --code-it "$stub_ci" 2>&1)
+assert "add-tool-chain run exit code" "$?"
+[[ "$(git -C "$repo_d" rev-parse --abbrev-ref HEAD)" == "add-tool-chain/java" ]]
+assert "add-tool-chain checks out the new branch" "$?"
+assert_contains "add-tool-chain prints the branch" "$out" "Branch: add-tool-chain/java"
+
+# (e) gate refusal exit code is propagated
+repo_e="$tmp/addtc-b"; mkrepo "$repo_e"
+STUB_CODE_IT_EXIT=4 PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_e" --code-it "$stub_ci" >/dev/null 2>&1
+[[ "$?" == "4" ]]; assert "add-tool-chain propagates a gate refusal" "$?"
 
 # ---------------------------------------------------------------------------
 echo

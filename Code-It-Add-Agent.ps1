@@ -102,45 +102,8 @@ If it passes the gate:
 Do not push. Work only on the current branch.
 '@
 
-$codeItArgs = @('-headless', '-WorkDirToMount', $repo, '-prompt', $prompt)
+. "$PSScriptRoot/lib/CodeItCommon.ps1"
 
-if ($dryRun) {
-    "Prompt:"
-    $prompt
-    ""
-    "Command:"
-    "$codeIt $($codeItArgs -join ' ')"
-    exit 0
-}
-
-# Refuse a dirty tree, so checking out a new branch cannot lose work.
-if ((git -C $repo status --porcelain)) {
-    Write-Warning "'$repo' has uncommitted changes. Commit or stash them first."
-    exit 1
-}
-
-& git -C $repo rev-parse --verify --quiet $branch *> $null
-if ($LASTEXITCODE -eq 0) {
-    Write-Warning "Branch '$branch' already exists in '$repo'."
-    exit 1
-}
-
-$baseRev = (git -C $repo rev-parse HEAD)
-"    Creating branch $branch in $repo"
-& git -C $repo checkout -b $branch
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-"    Running: $codeIt -headless -WorkDirToMount $repo"
-& $codeIt @codeItArgs
-$rc = $LASTEXITCODE
-
-""
-"    Branch: $branch"
-"    Changes:"
-& git -C $repo log --oneline "$baseRev..HEAD" 2>$null | ForEach-Object { "      $_" }
-& git -C $repo diff --stat "$baseRev..HEAD" 2>$null | ForEach-Object { "      $_" }
-
-if ($rc -ne 0) {
-    Write-Warning "code-it exited $rc (the agent may have refused the gate or failed)."
-}
+# Hand off to the plumbing shared with Code-It-Add-Tool-Chain.ps1.
+$rc = Invoke-CodeItAdder -name $Name -branch $branch -repo $repo -codeIt $codeIt -dryRun $dryRun.IsPresent -prompt $prompt
 exit $rc

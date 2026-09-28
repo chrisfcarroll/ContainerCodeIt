@@ -223,6 +223,7 @@ own favourites.
 source /path/to/ContainerCodeIt/completions/code-it.bash
 source /path/to/ContainerCodeIt/completions/code-it-build.bash
 source /path/to/ContainerCodeIt/completions/code-it-add-agent.bash
+source /path/to/ContainerCodeIt/completions/code-it-add-tool-chain.bash
 ```
 
 ```zsh
@@ -392,6 +393,25 @@ unchanged and is propagated as the tool's non-zero exit code.
 
 ```powershell
 .\Code-It-Add-Agent.ps1 cursor -url https://docs.cursor.com/cli
+```
+
+## Adding a tool chain
+
+`code-it-add-tool-chain NAME [--url URL]` is the same idea for languages and runtimes.
+The in-container agent gates on NAME being a well-known language/runtime whose tool
+chain installs securely (Alpine repos or the vendor's HTTPS distribution with checksum
+or signature verification where published, musl builds for x86_64 and aarch64, actively
+maintained), then follows how `bun` was added: an `ARG`-guarded Dockerfile layer, the
+name and aliases in the shared library, completions and README, an optional read-only
+package cache, tests, and a commit.
+
+```bash
+./code-it-add-tool-chain.sh java --url https://openjdk.org/install/
+./code-it-add-tool-chain.sh java --dry-run
+```
+
+```powershell
+.\Code-It-Add-Tool-Chain.ps1 java -url https://openjdk.org/install/
 ```
 
 ## Tests

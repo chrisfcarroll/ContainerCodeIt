@@ -150,7 +150,7 @@ $commonArgs = @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $save)
 
 # ---------------------------------------------------------------------------
 "1. Parse checks"
-foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-Add-Agent.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
+foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
     $parseErrors = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptDir $f), [ref]$null, [ref]$parseErrors)
     Assert "parses: $f" ($parseErrors.Count -eq 0)
@@ -683,6 +683,44 @@ $repoC = Join-Path $tmp 'addagent-c'; New-GitRepo $repoC
 & git -C $repoC branch 'add-agent/cursor'
 $r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoC, '-codeIt', $stubCi) $stubPath
 Assert "add-agent refuses an existing branch" ($r.code -ne 0)
+
+# ---------------------------------------------------------------------------
+"12c. Code-It-Add-Tool-Chain.ps1"
+$addTc = Join-Path $scriptDir 'Code-It-Add-Tool-Chain.ps1'
+
+# -dryRun prints the prompt (with the security gate) and the command
+$repoD = Join-Path $tmp 'addtc-a'; New-GitRepo $repoD
+$r = Invoke-Scenario $addTc @('java', '-repo', $repoD, '-codeIt', $stubCi, '-dryRun') $stubPath
+Assert "add-tool-chain -dryRun exit code 0" ($r.code -eq 0)
+Assert-Contains "add-tool-chain prompt names the tool chain" $r.out 'Tool chain to add: java'
+Assert-Contains "add-tool-chain prompt includes the gate" $r.out 'Gate first'
+Assert-Contains "add-tool-chain prompt requires a secure install" $r.out 'installs securely'
+Assert-Contains "add-tool-chain prompt requires musl builds" $r.out 'musl builds for x86_64 and aarch64'
+Assert-Contains "add-tool-chain -dryRun prints -headless" $r.out '-headless'
+Assert "add-tool-chain -dryRun creates no branch" (-not (& git -C $repoD branch --list 'add-tool-chain/*'))
+
+# -url is included
+$r = Invoke-Scenario $addTc @('java', '-url', 'https://openjdk.org/install/', '-repo', $repoD, '-codeIt', $stubCi, '-dryRun') $stubPath
+Assert-Contains "add-tool-chain prompt includes the docs URL" $r.out 'https://openjdk.org/install/'
+
+# a dirty repo is refused
+Add-Content -Path (Join-Path $repoD 'x') -Value 'y'
+$r = Invoke-Scenario $addTc @('java', '-repo', $repoD, '-codeIt', $stubCi) $stubPath
+Assert "add-tool-chain refuses a dirty repo" ($r.code -ne 0)
+& git -C $repoD checkout -q -- .
+
+# branch creation and summary
+$r = Invoke-Scenario $addTc @('java', '-repo', $repoD, '-codeIt', $stubCi) $stubPath
+Assert "add-tool-chain run exit code 0" ($r.code -eq 0)
+Assert "add-tool-chain checks out the new branch" ((& git -C $repoD rev-parse --abbrev-ref HEAD) -eq 'add-tool-chain/java')
+Assert-Contains "add-tool-chain prints the branch" $r.out 'Branch: add-tool-chain/java'
+
+# a gate refusal exit code is propagated
+$repoE = Join-Path $tmp 'addtc-b'; New-GitRepo $repoE
+$env:STUB_CODE_IT_EXIT = '4'
+try { $r = Invoke-Scenario $addTc @('java', '-repo', $repoE, '-codeIt', $stubCi) $stubPath }
+finally { $env:STUB_CODE_IT_EXIT = $null }
+Assert "add-tool-chain propagates a gate refusal" ($r.code -eq 4)
 
 # ---------------------------------------------------------------------------
 "13. PowerShell tab completion"

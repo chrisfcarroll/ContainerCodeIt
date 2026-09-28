@@ -135,46 +135,6 @@ Do not push. Work only on the current branch.
 EOF
 )
 
-code_it_cmd=("$code_it" --headless --work-dir "$repo" --prompt "$prompt")
-
-if [[ "$dry_run" == true ]]; then
-    echo "Prompt:"
-    printf '%s\n' "$prompt"
-    echo
-    echo "Command:"
-    printf '%q ' "${code_it_cmd[@]}"
-    printf '\n'
-    exit 0
-fi
-
-# Refuse a dirty tree, so checking out a new branch cannot lose work.
-if [[ -n "$(git -C "$repo" status --porcelain)" ]]; then
-    echo "Warning: '$repo' has uncommitted changes. Commit or stash them first." >&2
-    exit 1
-fi
-
-if git -C "$repo" rev-parse --verify --quiet "$branch" >/dev/null; then
-    echo "Warning: branch '$branch' already exists in '$repo'." >&2
-    exit 1
-fi
-
-base_rev=$(git -C "$repo" rev-parse HEAD)
-echo "    Creating branch $branch in $repo"
-git -C "$repo" checkout -b "$branch"
-
-echo "    Running: $code_it --headless --work-dir $repo"
-set +e
-"${code_it_cmd[@]}"
+ci_add_via_code_it "$name" "$branch" "$repo" "$code_it" "$dry_run" "$prompt" && exit 0
 rc=$?
-set -e
-
-echo
-echo "    Branch: $branch"
-echo "    Changes:"
-git -C "$repo" log --oneline "$base_rev..HEAD" 2>/dev/null | sed 's/^/      /' || true
-git -C "$repo" diff --stat "$base_rev..HEAD" 2>/dev/null | sed 's/^/      /' || true
-
-if [[ "$rc" != "0" ]]; then
-    echo "Warning: code-it exited $rc (the agent may have refused the gate or failed)." >&2
-fi
 exit "$rc"

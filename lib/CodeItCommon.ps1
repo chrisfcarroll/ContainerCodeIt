@@ -103,6 +103,58 @@ function Resolve-CodeItAgents([string]$raw, [string]$dir) {
 
 function Bool-Arg([bool]$on) { if ($on) { 'true' } else { 'false' } }
 
+# Invoke-CodeItAdder NAME BRANCH REPO CODEIT DRYRUN PROMPT: the plumbing shared by
+# Code-It-Add-Agent and Code-It-Add-Tool-Chain. Prints its banners to the host and
+# returns the exit code. With DRYRUN it prints the prompt and command and does nothing
+# else. Otherwise it refuses a dirty repo or an existing branch, creates BRANCH, runs
+# CODEIT headless with PROMPT, prints the branch and diff summary, and returns
+# code-it's exit code.
+function Invoke-CodeItAdder([string]$name, [string]$branch, [string]$repo, [string]$codeIt, [bool]$dryRun, [string]$prompt) {
+    $codeItArgs = @('-headless', '-WorkDirToMount', $repo, '-prompt', $prompt)
+
+    if ($dryRun) {
+        Write-Host "Prompt:"
+        Write-Host $prompt
+        Write-Host ""
+        Write-Host "Command:"
+        Write-Host "$codeIt $($codeItArgs -join ' ')"
+        return 0
+    }
+
+    # Refuse a dirty tree, so checking out a new branch cannot lose work.
+    if ((git -C $repo status --porcelain)) {
+        Write-Warning "'$repo' has uncommitted changes. Commit or stash them first."
+        return 1
+    }
+    & git -C $repo rev-parse --verify --quiet $branch *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Warning "Branch '$branch' already exists in '$repo'."
+        return 1
+    }
+
+    $baseRev = (git -C $repo rev-parse HEAD)
+    Write-Host "    Creating branch $branch in $repo"
+    & git -C $repo checkout -b $branch | Out-Host
+    if ($LASTEXITCODE -ne 0) { return [int]$LASTEXITCODE }
+
+    Write-Host "    Running: $codeIt -headless -WorkDirToMount $repo"
+    # Stream the launcher's output straight to the host, so it is not captured as
+    # this function's return value.
+    & $codeIt @codeItArgs | Out-Host
+    $rc = $LASTEXITCODE
+
+    Write-Host ""
+    Write-Host "    Branch: $branch"
+    Write-Host "    Changes:"
+    & git -C $repo log --oneline "$baseRev..HEAD" 2>$null | ForEach-Object { Write-Host "      $_" }
+    & git -C $repo diff --stat "$baseRev..HEAD" 2>$null | ForEach-Object { Write-Host "      $_" }
+
+    if ($rc -ne 0) {
+        Write-Warning "code-it exited $rc (the agent may have refused the gate or failed)."
+    }
+    return [int]$rc
+}
+
 # Detect / validate the container runtime. On macOS prefer the Apple container CLI,
 # then docker, then the container CLI; warn and return $null if none is usable.
 function Detect-CodeItRuntime([string]$runtime) {
