@@ -3,15 +3,15 @@
     defines functions and constants only, and runs nothing on its own.
 
         Split-CodeItList LIST                  comma string -> trimmed array
-        Resolve-CodeItToolChains RAW           -> canonical array, or $null on error
+        Resolve-CodeItToolchain RAW           -> canonical array, or $null on error
         Resolve-CodeItPackageCaches RAW CHAINS -> array, or $null on error
         CodeIt-ImageName CHAINS                -> code-it-alpine-<chains>
         Detect-CodeItRuntime REQUESTED         -> docker|container, or $null on error
         Bool-Arg BOOL                          -> 'true'|'false'
 #>
 
-$script:CodeItDefaultToolChains  = @('dotnet', 'node')
-$script:CodeItKnownToolChains    = @('dotnet', 'node', 'bun', 'python')
+$script:CodeItDefaultToolchain  = @('dotnet', 'node')
+$script:CodeItKnownToolchain    = @('dotnet', 'node', 'bun', 'python')
 $script:CodeItKnownPackageCaches = @('nuget', 'npm', 'bun')
 # js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both);
 # uv is Python's package manager here, so it selects the python tool chain
@@ -25,24 +25,24 @@ function Split-CodeItList([string]$list) {
     return ,@($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
-function Resolve-CodeItToolChains([string]$raw) {
-    $requested = if ($raw) { Split-CodeItList $raw } else { $script:CodeItDefaultToolChains }
+function Resolve-CodeItToolchain([string]$raw) {
+    $requested = if ($raw) { Split-CodeItList $raw } else { $script:CodeItDefaultToolchain }
     $resolved = @($requested | ForEach-Object {
         if ($script:CodeItToolChainAliases.ContainsKey($_)) { $script:CodeItToolChainAliases[$_] } else { $_ }
     } | Where-Object { $_ } | Select-Object -Unique)
     foreach ($t in $resolved) {
-        if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $script:CodeItKnownToolChains) {
+        if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $script:CodeItKnownToolchain) {
             Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv)."
-            Write-Warning "A comma-separated list is expected, e.g. -toolChains 'node,bun'."
+            Write-Warning "A comma-separated list is expected, e.g. -toolchain 'node,bun'."
             return $null
         }
     }
     return ,$resolved
 }
 
-function Resolve-CodeItPackageCaches([string]$raw, [string[]]$toolChains) {
+function Resolve-CodeItPackageCaches([string]$raw, [string[]]$toolchain) {
     $requested = if ($raw) { Split-CodeItList $raw } else {
-        @(@('nuget') * ($toolChains -contains 'dotnet') + @('npm') * ($toolChains -contains 'node'))
+        @(@('nuget') * ($toolchain -contains 'dotnet') + @('npm') * ($toolchain -contains 'node'))
     }
     foreach ($p in $requested) {
         if ($p -notmatch '^[a-z][a-z0-9-]*$' -or $p -notin $script:CodeItKnownPackageCaches) {
@@ -54,13 +54,13 @@ function Resolve-CodeItPackageCaches([string]$raw, [string[]]$toolChains) {
     return ,@($requested)
 }
 
-function CodeIt-ImageName([string[]]$toolChains) {
-    return "code-it-alpine-$($toolChains -join '-')"
+function CodeIt-ImageName([string[]]$toolchain) {
+    return "code-it-alpine-$($toolchain -join '-')"
 }
 
-# Test-CodeItToolChainsInclude IMAGE_CHAINS_COMMA REQUESTED: true if every requested
+# Test-CodeItToolchainInclude IMAGE_CHAINS_COMMA REQUESTED: true if every requested
 # tool chain is present in the image's chain list.
-function Test-CodeItToolChainsInclude([string]$imageChains, [string[]]$requested) {
+function Test-CodeItToolchainInclude([string]$imageChains, [string[]]$requested) {
     $have = @($imageChains -split ',')
     foreach ($r in $requested) {
         if ($have -notcontains $r) { return $false }
@@ -68,9 +68,9 @@ function Test-CodeItToolChainsInclude([string]$imageChains, [string[]]$requested
     return $true
 }
 
-# Get-CodeItImageToolChains RUNTIME IMAGE: the comma-separated tool chains recorded on
+# Get-CodeItImageToolchain RUNTIME IMAGE: the comma-separated toolchains recorded on
 # IMAGE (its code-it.tool-chains label, or the code-it-alpine-<chains> name), or "".
-function Get-CodeItImageToolChains([string]$runtime, [string]$image) {
+function Get-CodeItImageToolchain([string]$runtime, [string]$image) {
     $chains = ""
     if ($runtime -eq 'docker') {
         $chains = (docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' $image 2>$null)
@@ -100,14 +100,14 @@ function Get-CodeItImageList([string]$runtime) {
 }
 
 # Find-CodeItSupersetImage RUNTIME REQUESTED: the repo name of the most-recently built
-# image whose recorded tool chains contain every requested chain, or "".
+# image whose recorded toolchains contain every requested chain, or "".
 function Find-CodeItSupersetImage([string]$runtime, [string[]]$requested) {
     foreach ($image in (Get-CodeItImageList $runtime)) {
         if (-not $image) { continue }
         if ($image -notmatch ':') { $image = "$image`:latest" }
-        $chains = Get-CodeItImageToolChains $runtime $image
+        $chains = Get-CodeItImageToolchain $runtime $image
         if (-not $chains) { continue }
-        if (Test-CodeItToolChainsInclude $chains $requested) {
+        if (Test-CodeItToolchainInclude $chains $requested) {
             return ($image -replace ':.*$', '')
         }
     }
@@ -127,7 +127,7 @@ function Test-CodeItImageExists([string]$runtime, [string]$image) {
 }
 
 # Get-CodeItHistoryImage RUNTIME FILE: the most-recently remembered image that still
-# exists and whose tool chains cover >=70% of weighted usage, or "". Weights run from
+# exists and whose toolchains cover >=70% of weighted usage, or "". Weights run from
 # 1 (oldest remembered) to 15 (most recent). Spec 09.
 function Get-CodeItHistoryImage([string]$runtime, [string]$file) {
     if (-not (Test-Path -Path $file)) { return "" }
@@ -139,17 +139,17 @@ function Get-CodeItHistoryImage([string]$runtime, [string]$file) {
     foreach ($l in $lines) {
         $img = ($l -split '\s+', 2)[1]
         $images += $img
-        $chains += (Get-CodeItImageToolChains $runtime $img)
+        $chains += (Get-CodeItImageToolchain $runtime $img)
     }
     $total = 0
     for ($i = 0; $i -lt $n; $i++) { $total += 15 - $n + 1 + $i }
     if ($total -le 0) { return "" }
     $weights = @{}
-    foreach ($c in $script:CodeItKnownToolChains) { $weights[$c] = 0 }
+    foreach ($c in $script:CodeItKnownToolchain) { $weights[$c] = 0 }
     for ($i = 0; $i -lt $n; $i++) {
         $w = 15 - $n + 1 + $i
         $set = @($chains[$i] -split ',')
-        foreach ($c in $script:CodeItKnownToolChains) {
+        foreach ($c in $script:CodeItKnownToolchain) {
             if ($set -contains $c) { $weights[$c] += $w }
         }
     }
@@ -199,8 +199,8 @@ function Get-CodeItDefaultImage([string]$runtime, [string]$file) {
     return $existing[0]
 }
 
-# Get-CodeItToolChainCommands NAME: the host commands that reveal NAME is installed.
-function Get-CodeItToolChainCommands([string]$name) {
+# Get-CodeItToolchainCommands NAME: the host commands that reveal NAME is installed.
+function Get-CodeItToolchainCommands([string]$name) {
     switch ($name) {
         'dotnet' { return @('dotnet --version') }
         'node'   { return @('node --version', 'volta --version') }
@@ -210,8 +210,8 @@ function Get-CodeItToolChainCommands([string]$name) {
     }
 }
 
-function Test-CodeItToolChainDetected([string]$name) {
-    foreach ($c in (Get-CodeItToolChainCommands $name)) {
+function Test-CodeItToolchainDetected([string]$name) {
+    foreach ($c in (Get-CodeItToolchainCommands $name)) {
         $exe = ($c -split '\s+')[0]
         if (Get-Command $exe -EA Silent) { return $true }
     }

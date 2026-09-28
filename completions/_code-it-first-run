@@ -10,11 +10,11 @@ _code_it_first_run() {
     case $prev in
         (--save-dir|-s|--work-dir|-w|--dockerfile-dir|--code-it-build) _files -/; return ;;
         (--runtime|-r)     compadd -- docker container; return ;;
-        (--tool-chains|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv; return ;;
+        (--toolchain|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv; return ;;
         (--agents|-a)      compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
     esac
 
-    compadd -- --save-dir -s --work-dir -w --tool-chains -t --agents -a \
+    compadd -- --save-dir -s --work-dir -w --toolchain -t --agents -a \
         --image -i --dockerfile-dir --runtime -r --code-it-build --yes -y \
         --dry-run -d --help -h
 }

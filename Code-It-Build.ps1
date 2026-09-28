@@ -1,10 +1,10 @@
 #! /usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Builds the code-it container image, selecting tool chains, caches and agents.
+    Builds the code-it container image, selecting toolchains, caches and agents.
 
 .DESCRIPTION
-    Builds the Alpine image from the Dockerfile with the requested tool chains,
+    Builds the Alpine image from the Dockerfile with the requested toolchains,
     package caches and coding agents, and labels the image with that resolution so
     Code-It.ps1 can check it rather than guess from the image name. Code-It.ps1's
     -buildImage and -rebuildImage flags delegate here.
@@ -13,14 +13,14 @@
     assembles them into the Dockerfile (replacing the "# @@CODE_IT_AGENT_INSTALLS@@"
     marker) and writes /etc/code-it-agents, the name=binary map go.sh reads.
 
-.PARAMETER toolChains
-    Comma-separated tool chains to build. Known: dotnet, node (aliases js-node,
+.PARAMETER toolchain
+    Comma-separated toolchains to build. Known: dotnet, node (aliases js-node,
     ts-node), bun (aliases js-bun, ts-bun), python (alias uv). Default: "dotnet,node".
     Alias: -stack.
 
 .PARAMETER packageCaches
-    Comma-separated package repos to support, independent of -toolChains. Known:
-    nuget, npm, bun. Default: the repos implied by -toolChains (dotnet->nuget,
+    Comma-separated package repos to support, independent of -toolchain. Known:
+    nuget, npm, bun. Default: the repos implied by -toolchain (dotnet->nuget,
     node->npm). An explicit, empty list means no package caches.
 
 .PARAMETER agent
@@ -35,7 +35,7 @@
 
 .PARAMETER image
     Image name to build. Default: "code-it-alpine-<chains>", a slug of the resolved
-    -toolChains list.
+    -toolchain list.
 
 .PARAMETER dockerfileDir
     Directory containing the Dockerfile. Defaults to this script's own directory.
@@ -47,7 +47,7 @@
     Print the build command without executing it.
 
 .EXAMPLE
-    .\Code-It-Build.ps1 -toolChains 'node,bun' -packageCaches npm -agent opencode
+    .\Code-It-Build.ps1 -toolchain 'node,bun' -packageCaches npm -agent opencode
 
 .EXAMPLE
     .\Code-It-Build.ps1 -rebuild
@@ -56,7 +56,7 @@
 [CmdletBinding(PositionalBinding = $false)]
 param (
     [Alias('tech', 'stack')]
-    [string]$toolChains    = "",
+    [string]$toolchain    = "",
     [string]$packageCaches = "",
     [Alias('agents')]
     [string]$agent         = "",
@@ -90,20 +90,20 @@ if ($listAgents) {
     exit 0
 }
 
-# Resolve the requested tool chains, package caches and agents. An explicit, empty
+# Resolve the requested toolchains, package caches and agents. An explicit, empty
 # -packageCaches means "no package caches", not "use the implied ones".
-$enabledToolChains = Resolve-CodeItToolChains $toolChains
-if ($null -eq $enabledToolChains) { exit 1 }
+$enabledToolchain = Resolve-CodeItToolchain $toolchain
+if ($null -eq $enabledToolchain) { exit 1 }
 if ($PSBoundParameters.ContainsKey('packageCaches')) {
-    $enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolChains
+    $enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolchain
 } else {
-    $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolChains
+    $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolchain
 }
 if ($null -eq $enabledPackageCaches) { exit 1 }
 $enabledAgents = Resolve-CodeItAgents $agent $agentsDir
 if ($null -eq $enabledAgents) { exit 1 }
 
-if (-not $image) { $image = CodeIt-ImageName $enabledToolChains }
+if (-not $image) { $image = CodeIt-ImageName $enabledToolchain }
 
 $runtime = Detect-CodeItRuntime $runtime
 if ($null -eq $runtime) { exit 1 }
@@ -158,20 +158,20 @@ $null = New-Item -ItemType Directory -Force -Path $buildContext
 [IO.File]::WriteAllText((Join-Path $buildContext 'Dockerfile'), $assembled, [System.Text.UTF8Encoding]::new($false))
 
 try {
-    # Build args for the tool chains and package caches, spelled the way the
+    # Build args for the toolchains and package caches, spelled the way the
     # Dockerfile's ARGs match them (uppercase), plus labels recording the resolution.
     $buildArgs = @()
     foreach ($tc in @('dotnet', 'node', 'bun', 'python')) {
-        $buildArgs += @('--build-arg', "$($tc.ToUpper())=$(Bool-Arg ($enabledToolChains -contains $tc))")
+        $buildArgs += @('--build-arg', "$($tc.ToUpper())=$(Bool-Arg ($enabledToolchain -contains $tc))")
     }
     foreach ($pc in @('nuget', 'npm')) {
         $buildArgs += @('--build-arg', "$($pc.ToUpper())=$(Bool-Arg ($enabledPackageCaches -contains $pc))")
     }
-    $buildArgs += @('--label', "code-it.tool-chains=$($enabledToolChains -join ',')")
+    $buildArgs += @('--label', "code-it.tool-chains=$($enabledToolchain -join ',')")
     $buildArgs += @('--label', "code-it.package-caches=$($enabledPackageCaches -join ',')")
     $buildArgs += @('--label', "code-it.agents=$($enabledAgents -join ',')")
 
-    "    Building with tech $($enabledToolChains -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ',')"
+    "    Building with tech $($enabledToolchain -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ',')"
     "    $runtime build $($buildArgs -join ' ') -t $image`:latest $buildContext"
 
     if ($dryRun) { exit 0 }

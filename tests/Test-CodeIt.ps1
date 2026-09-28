@@ -307,23 +307,23 @@ Assert-Contains "build dry-run passes DOTNET=true" $r.out '--build-arg DOTNET=tr
 Assert-Contains "build dry-run passes NODE=true" $r.out '--build-arg NODE=true'
 Assert-Contains "build dry-run passes NUGET=true (implied by dotnet)" $r.out '--build-arg NUGET=true'
 Assert-Contains "build dry-run passes NPM=true (implied by node)" $r.out '--build-arg NPM=true'
-Assert-Contains "build dry-run labels the tool chains" $r.out '--label code-it.tool-chains=dotnet,node'
+Assert-Contains "build dry-run labels the toolchains" $r.out '--label code-it.tool-chains=dotnet,node'
 Assert-Contains "build dry-run labels the package caches" $r.out '--label code-it.package-caches=nuget,npm'
 Assert-Contains "build dry-run derives the default image name" $r.out '-t code-it-alpine-dotnet-node:latest'
 Assert "build dry-run does not execute the build" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
 
-# -tech is the kept alias of -toolChains
+# -tech is the kept alias of -toolchain
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath
 Assert-Contains "build -tech alias selects BUN" $r.out '--build-arg BUN=true'
 Assert-Contains "build -tech alias derives the image name" $r.out '-t code-it-alpine-bun:latest'
 
 # -packageCaches replaces the implied set
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolChains', 'bun', '-packageCaches', 'nuget') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'bun', '-packageCaches', 'nuget') $stubPath
 Assert-Contains "build -packageCaches nuget without dotnet" $r.out '--build-arg NUGET=true'
 Assert-Contains "build -packageCaches nuget excludes NPM" $r.out '--build-arg NPM=false'
 
 # Unknown names are hard errors
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolChains', 'cobol') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'cobol') $stubPath
 Assert "Code-It-Build unknown tool chain fails" ($r.code -ne 0)
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-packageCaches', 'pip') $stubPath
 Assert "Code-It-Build unknown package cache fails" ($r.code -ne 0)
@@ -366,7 +366,7 @@ Assert "Code-It-Build unknown agent fails" ($r.code -ne 0)
 $env:STUB_IMAGE_TOOL_CHAINS = 'node,bun'
 try { $r = Invoke-Scenario $codeIt (@('-image', 'code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
-Assert-Contains "warns when the image label disagrees with -toolChains" $r.out "looks built for tech 'node,bun'"
+Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for tech 'node,bun'"
 $r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
 Assert-Contains "the -buildImage shim prints a deprecation note" $r.out 'deprecated'
 
@@ -374,7 +374,7 @@ Assert-Contains "the -buildImage shim prints a deprecation note" $r.out 'depreca
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-stack', 'python') $stubPath
 Assert-Contains "-stack python sets PYTHON=true" $r.out '--build-arg PYTHON=true'
 Assert-Contains "-stack python derives the image name" $r.out '-t code-it-alpine-python:latest'
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolChains', 'uv') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'uv') $stubPath
 Assert-Contains "uv aliases python (PYTHON=true)" $r.out '--build-arg PYTHON=true'
 Assert-Contains "uv canonical image name" $r.out '-t code-it-alpine-python:latest'
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
@@ -385,7 +385,7 @@ $dfText = Get-Content (Join-Path $scriptDir 'Dockerfile') -Raw
 Assert "Dockerfile installs uv for every image" ($dfText.Contains('apk add --no-cache uv'))
 Assert "Dockerfile gates python3 on PYTHON" ($dfText.Contains('if [ "$PYTHON" = true ]'))
 
-"9g. Choosing an existing image that contains the requested tool chains"
+"9g. Choosing an existing image that contains the requested toolchains"
 $superDocker = Join-Path $tmp 'super-docker'
 $null = New-Item -ItemType Directory -Force -Path $superDocker
 if ($onWindows) {
@@ -423,40 +423,40 @@ $superPath = "$superDocker$sep$stubPath"
 
 # The exact image, when it exists, is used unchanged
 $env:STUB_IMAGES = 'code-it-alpine-dotnet-bun:latest code-it-alpine-dotnet:latest'
-try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet') + $commonArgs) $superPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet') + $commonArgs) $superPath }
 finally { $env:STUB_IMAGES = $null }
 Assert-Contains "uses the exact image when it exists" $r.out 'code-it-alpine-dotnet:latest'
 Assert "no substitution when the exact image exists" (-not $r.out.Contains('does not exist; using'))
 
 # The exact image missing: the most-recently listed image containing the chain wins
 $env:STUB_IMAGES = 'code-it-alpine-dotnet-bun:latest code-it-alpine-dotnet-node:latest'
-try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet') + $commonArgs) $superPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet') + $commonArgs) $superPath }
 finally { $env:STUB_IMAGES = $null }
 Assert-Contains "substitutes a superset image" $r.out "does not exist; using 'code-it-alpine-dotnet-bun'"
 Assert-Contains "runs the superset image" $r.out 'code-it-alpine-dotnet-bun:latest'
-Assert-Contains "notes the extra tool chains" $r.out 'also contains bun'
+Assert-Contains "notes the extra toolchains" $r.out 'also contains bun'
 
 # Order decides
 $env:STUB_IMAGES = 'code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest'
-try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet') + $commonArgs) $superPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet') + $commonArgs) $superPath }
 finally { $env:STUB_IMAGES = $null }
 Assert-Contains "picks the most recent qualifying image" $r.out "using 'code-it-alpine-dotnet-node'"
 
 # Every requested chain must be present
 $env:STUB_IMAGES = 'code-it-alpine-dotnet-node:latest'
-try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet,bun') + $commonArgs) $superPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,bun') + $commonArgs) $superPath }
 finally { $env:STUB_IMAGES = $null }
 Assert "requires every requested chain to be present" ($r.code -ne 0)
 
 # No image contains the requested chain
 $env:STUB_IMAGES = 'code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest'
-try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'python') + $commonArgs) $superPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'python') + $commonArgs) $superPath }
 finally { $env:STUB_IMAGES = $null }
 Assert "errors when no image contains the requested chain" ($r.code -ne 0)
 
 # An explicit -image is never substituted
 $env:STUB_IMAGES = 'code-it-alpine-dotnet-bun:latest'
-try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet', '-image', 'code-it-alpine-nope') + $commonArgs) $superPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet', '-image', 'code-it-alpine-nope') + $commonArgs) $superPath }
 finally { $env:STUB_IMAGES = $null }
 Assert "explicit -image is used as-is and errors if missing" ($r.code -ne 0)
 
@@ -550,7 +550,7 @@ try {
 }
 
 # ---------------------------------------------------------------------------
-"11b. Tech stack: -toolChains / -packageCaches build args and read-only caches"
+"11b. Tech stack: -toolchain / -packageCaches build args and read-only caches"
 $r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
 Assert-Contains "default build passes DOTNET=true" $r.out '--build-arg DOTNET=true'
 Assert-Contains "default build passes NODE=true" $r.out '--build-arg NODE=true'
@@ -559,65 +559,65 @@ Assert-Contains "dotnet implies NUGET=true" $r.out '--build-arg NUGET=true'
 Assert-Contains "node implies NPM=true" $r.out '--build-arg NPM=true'
 Assert-Contains "reports the resolved tech" $r.out 'tech dotnet,node; package repos nuget,npm'
 
-# -toolChains replaces the default set
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','node,bun') + $commonArgs) $stubPath
-Assert-Contains "-toolChains node,bun drops DOTNET" $r.out '--build-arg DOTNET=false'
-Assert-Contains "-toolChains node,bun keeps NODE" $r.out '--build-arg NODE=true'
-Assert-Contains "-toolChains node,bun keeps BUN" $r.out '--build-arg BUN=true'
-Assert-Contains "-toolChains node,bun drops NUGET (dotnet gone)" $r.out '--build-arg NUGET=false'
-Assert-Contains "-toolChains node,bun keeps NPM (node present)" $r.out '--build-arg NPM=true'
+# -toolchain replaces the default set
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','node,bun') + $commonArgs) $stubPath
+Assert-Contains "-toolchain node,bun drops DOTNET" $r.out '--build-arg DOTNET=false'
+Assert-Contains "-toolchain node,bun keeps NODE" $r.out '--build-arg NODE=true'
+Assert-Contains "-toolchain node,bun keeps BUN" $r.out '--build-arg BUN=true'
+Assert-Contains "-toolchain node,bun drops NUGET (dotnet gone)" $r.out '--build-arg NUGET=false'
+Assert-Contains "-toolchain node,bun keeps NPM (node present)" $r.out '--build-arg NPM=true'
 
-# -packageCaches replaces the implied set, independently of -toolChains
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','node,bun','-packageCaches','npm') + $commonArgs) $stubPath
+# -packageCaches replaces the implied set, independently of -toolchain
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','node,bun','-packageCaches','npm') + $commonArgs) $stubPath
 Assert-Contains "-packageCaches npm keeps NPM" $r.out '--build-arg NPM=true'
 Assert-Contains "-packageCaches npm excludes NUGET" $r.out '--build-arg NUGET=false'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','node,bun','-packageCaches','bun') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','node,bun','-packageCaches','bun') + $commonArgs) $stubPath
 Assert-Contains "-packageCaches bun selects the BUN package cache" $r.out '--build-arg NPM=false'
 Assert-Contains "-packageCaches bun excludes NUGET" $r.out '--build-arg NUGET=false'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','bun','-packageCaches','nuget') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','bun','-packageCaches','nuget') + $commonArgs) $stubPath
 Assert-Contains "nuget package cache without dotnet" $r.out '--build-arg NUGET=true'
 
-# The default image name follows -toolChains
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','node,bun') + $commonArgs) $stubPath
-Assert-Contains "image name derives from -toolChains" $r.out '-t code-it-alpine-node-bun:latest'
+# The default image name follows -toolchain
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','node,bun') + $commonArgs) $stubPath
+Assert-Contains "image name derives from -toolchain" $r.out '-t code-it-alpine-node-bun:latest'
 
 # The old -tech spelling is kept as a hidden alias
 $r = Invoke-Scenario $codeIt (@('-buildImage','-tech','bun') + $commonArgs) $stubPath
 Assert-Contains "-tech alias selects BUN" $r.out '--build-arg BUN=true'
 
 # Tech aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','js-node') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','js-node') + $commonArgs) $stubPath
 Assert-Contains "js-node aliases node (NODE=true)" $r.out '--build-arg NODE=true'
 Assert-Contains "js-node canonical image name" $r.out '-t code-it-alpine-node:latest'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','ts-node') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','ts-node') + $commonArgs) $stubPath
 Assert-Contains "ts-node aliases node (NODE=true)" $r.out '--build-arg NODE=true'
 Assert-Contains "ts-node canonical image name" $r.out '-t code-it-alpine-node:latest'
 Assert-Contains "ts-node implies the npm package cache" $r.out '--build-arg NPM=true'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','js-bun') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','js-bun') + $commonArgs) $stubPath
 Assert-Contains "js-bun aliases bun (BUN=true)" $r.out '--build-arg BUN=true'
 Assert-Contains "js-bun canonical image name" $r.out '-t code-it-alpine-bun:latest'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','ts-bun,bun') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','ts-bun,bun') + $commonArgs) $stubPath
 Assert-Contains "ts-bun aliases bun and dedupes with bun" $r.out '-t code-it-alpine-bun:latest'
 
 # The old -packages spelling is gone as a parameter: it is now passed to the agent,
 # so it no longer selects a package cache
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','bun','-packages','npm') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','bun','-packages','npm') + $commonArgs) $stubPath
 Assert-Contains "removed -packages is forwarded to the agent" $r.out '-packages npm'
 Assert-Contains "removed -packages no longer selects NPM" $r.out '--build-arg NPM=false'
 
 $env:STUB_IMAGE_TOOL_CHAINS = 'dotnet'
-try { $r = Invoke-Scenario $codeIt (@('-toolChains','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
-Assert-Contains "warns when the image label disagrees with -toolChains" $r.out "looks built for tech 'dotnet'"
+Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for tech 'dotnet'"
 # Without a label (older images), fall back to the name-based guess
 $env:STUB_IMAGE_TOOL_CHAINS = ''
-try { $r = Invoke-Scenario $codeIt (@('-toolChains','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
 Assert-Contains "falls back to the image-name guess without a label" $r.out "looks built for tech 'dotnet,node'"
 
 # Unknown names are hard errors
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','cobol') + $commonArgs) $stubPath
-Assert "-toolChains with an unknown name fails" ($r.code -ne 0)
+$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','cobol') + $commonArgs) $stubPath
+Assert "-toolchain with an unknown name fails" ($r.code -ne 0)
 $r = Invoke-Scenario $codeIt (@('-buildImage','-packageCaches','pip') + $commonArgs) $stubPath
 Assert "-packageCaches with an unknown name fails" ($r.code -ne 0)
 
@@ -637,11 +637,11 @@ try {
     $env:BUN_INSTALL_CACHE_DIR = $null
     $env:NPM_CONFIG_CACHE = $npmCache
     # An explicit but empty -packageCaches: ',' (PowerShell cannot easily pass a bare "")
-    $r = Invoke-Scenario $codeIt (@('-toolChains','node','-packageCaches',',') + $commonArgs) $stubPath
+    $r = Invoke-Scenario $codeIt (@('-toolchain','node','-packageCaches',',') + $commonArgs) $stubPath
     Assert "empty -packageCaches: no npm mount" (-not $r.out.Contains('.npm-host'))
     $env:NPM_CONFIG_CACHE = $null
     $env:NUGET_PACKAGES = (Resolve-Path "$fakeHome/.nuget/packages").Path
-    $r = Invoke-Scenario $codeIt (@('-toolChains','dotnet','-packageCaches','npm') + $commonArgs) $stubPath
+    $r = Invoke-Scenario $codeIt (@('-toolchain','dotnet','-packageCaches','npm') + $commonArgs) $stubPath
     Assert "packages without nuget: no nuget mount" (-not $r.out.Contains('packages-host'))
 } finally {
     foreach ($k in $savedCacheEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $savedCacheEnv[$k]) }
@@ -804,9 +804,9 @@ Assert "add-tool-chain propagates a gate refusal" ($r.code -eq 4)
 $firstRun = Join-Path $scriptDir 'Code-It-FirstRun.ps1'
 $stubFirst = Join-Path $tmp 'stub-first-build.ps1'
 Set-Content -Path $stubFirst -Value @'
-param([string]$toolChains, [string]$agent, [string]$runtime, [string]$image, [string]$dockerfileDir)
+param([string]$toolchain, [string]$agent, [string]$runtime, [string]$image, [string]$dockerfileDir)
 Set-Content -Path (Join-Path $PSScriptRoot 'first-build-ran') -Value 'ran'
-"STUB-FIRST-BUILD $toolChains $agent"
+"STUB-FIRST-BUILD $toolchain $agent"
 '@
 
 $fh = Join-Path $tmp 'firstcopy-home'
@@ -818,7 +818,7 @@ $savedHome = $env:HOME; $savedUserProfile = $env:USERPROFILE
 $fd = Join-Path $tmp 'firstdry-ps'
 $env:HOME = $fh; $env:USERPROFILE = $fh
 try {
-    $r = Invoke-Scenario $firstRun @('-yes', '-dryRun', '-toolChains', 'node', '-agents', 'opencode',
+    $r = Invoke-Scenario $firstRun @('-yes', '-dryRun', '-toolchain', 'node', '-agents', 'opencode',
         '-saveDir', (Join-Path $fd 'save'), '-codeItBuild', $stubFirst) $stubPath
 } finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
 Assert "first-run -dryRun exit code 0" ($r.code -eq 0)
@@ -834,7 +834,7 @@ Set-Content -Path "$fs/.config/opencode/config.json" -Value 'KEEP'
 Set-Content -Path "$fh/.config/opencode/new.json" -Value 'NEW'
 $env:HOME = $fh; $env:USERPROFILE = $fh
 try {
-    $r = Invoke-Scenario $firstRun @('-yes', '-toolChains', 'node', '-agents', 'opencode',
+    $r = Invoke-Scenario $firstRun @('-yes', '-toolchain', 'node', '-agents', 'opencode',
         '-saveDir', $fs, '-codeItBuild', $stubFirst) $stubPath
 } finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
 Assert "first-run copy exit code 0" ($r.code -eq 0)
@@ -845,7 +845,7 @@ Assert-Contains "first-run warns that credentials are copied" $r.out 'credential
 Assert-Contains "first-run prints the start command" $r.out 'Code-It.ps1 -agent opencode'
 
 # ---------------------------------------------------------------------------
-"12e. Image memory and default tool chains"
+"12e. Image memory and default toolchains"
 $histDocker = Join-Path $tmp 'hist-docker'
 $null = New-Item -ItemType Directory -Force -Path $histDocker
 if ($onWindows) {
@@ -911,10 +911,10 @@ Assert "default selection exit code 0" ($r.code -eq 0)
 Assert-Contains "uses the remembered image (70% rule)" $r.out 'Using remembered image: code-it-alpine-python'
 Assert-Contains "runs that image" $r.out 'code-it-alpine-python:latest'
 
-# explicit -toolChains bypasses the default selection
-$r = Invoke-Scenario $codeIt @('-dryRun', '-toolChains', 'dotnet', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
-Assert "explicit -toolChains bypasses the default" (-not ($r.out.Contains('Using remembered image') -or $r.out.Contains('Using existing image')))
-Assert-Contains "explicit -toolChains is honoured" $r.out 'code-it-alpine-dotnet:latest'
+# explicit -toolchain bypasses the default selection
+$r = Invoke-Scenario $codeIt @('-dryRun', '-toolchain', 'dotnet', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
+Assert "explicit -toolchain bypasses the default" (-not ($r.out.Contains('Using remembered image') -or $r.out.Contains('Using existing image')))
+Assert-Contains "explicit -toolchain is honoured" $r.out 'code-it-alpine-dotnet:latest'
 
 # explicit -image bypasses the default selection
 $r = Invoke-Scenario $codeIt @('-dryRun', '-image', 'code-it-alpine-dotnet-node', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
@@ -986,7 +986,7 @@ $hrec = Join-Path $tmp 'histrecord'; $null = New-Item -ItemType Directory -Force
 $recLines = 1..15 | ForEach-Object { ('202601{0:d2} code-it-alpine-dotnet-node' -f $_) }
 $recLines | Set-Content -Path (Join-Path $hrec 'image-history')
 $oldestBefore = (Get-Content (Join-Path $hrec 'image-history'))[0]
-$r = Invoke-Scenario $codeIt @('-WorkDirToMount', $scriptDir, '-saveDir', $hrec, '-toolChains', 'dotnet,node') $histPath
+$r = Invoke-Scenario $codeIt @('-WorkDirToMount', $scriptDir, '-saveDir', $hrec, '-toolchain', 'dotnet,node') $histPath
 Assert "history recording run exit code 0" ($r.code -eq 0)
 $recOut = @(Get-Content (Join-Path $hrec 'image-history'))
 Assert "history keeps only 15 lines" ($recOut.Count -eq 15)
@@ -995,7 +995,7 @@ Assert "history forgets the oldest line" ($recOut[0] -ne $oldestBefore)
 
 # dry-run records nothing
 $hdry = Join-Path $tmp 'histdry'; $null = New-Item -ItemType Directory -Force -Path $hdry
-$r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hdry, '-toolChains', 'dotnet,node') $histPath
+$r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hdry, '-toolchain', 'dotnet,node') $histPath
 Assert "dry-run records no history" (-not (Test-Path -Path (Join-Path $hdry 'image-history')))
 
 # ---------------------------------------------------------------------------

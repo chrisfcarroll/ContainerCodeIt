@@ -4,7 +4,7 @@
     Interactive first-run setup: detect, choose, build, carry over agent logins.
 
 .DESCRIPTION
-    Detects the container runtime, host tool chains and agents, asks what to include,
+    Detects the container runtime, host toolchains and agents, asks what to include,
     runs Code-It-Build.ps1, offers to copy agent state into the save dir, and prints
     the Code-It.ps1 command to start.
 
@@ -14,8 +14,8 @@
 .PARAMETER workDir
     Host directory mounted as /work. Default: .
 
-.PARAMETER toolChains
-    Preselect tool chains (skips the question).
+.PARAMETER toolchain
+    Preselect toolchains (skips the question).
 
 .PARAMETER agents
     Preselect agents (skips the question).
@@ -46,7 +46,7 @@
 param (
     [string]$saveDir       = "$HOME/.config/code-it",
     [string]$workDir       = ".",
-    [string]$toolChains    = "",
+    [string]$toolchain    = "",
     [string]$agents        = "",
     [string]$image         = "",
     [string]$dockerfileDir = $PSScriptRoot,
@@ -75,8 +75,8 @@ if (-not (Get-Command git -EA Silent)) {
     exit 1
 }
 
-# 2. Detect host tool chains and agents.
-$toolChainsAvailable = $script:CodeItKnownToolChains
+# 2. Detect host toolchains and agents.
+$toolchainAvailable = $script:CodeItKnownToolchain
 $agentsAvailable = @()
 foreach ($a in $script:CodeItDefaultAgents) {
     if (Test-CodeItAgentExists $agentsDir $a) { $agentsAvailable += $a }
@@ -85,7 +85,7 @@ foreach ($a in (Get-CodeItListAgents $agentsDir)) {
     if ($agentsAvailable -notcontains $a) { $agentsAvailable += $a }
 }
 
-$detectedToolChains = @($toolChainsAvailable | Where-Object { Test-CodeItToolChainDetected $_ })
+$detectedToolchain = @($toolchainAvailable | Where-Object { Test-CodeItToolchainDetected $_ })
 $detectedAgents     = @($agentsAvailable | Where-Object { Test-CodeItAgentDetected $agentsDir $_ })
 
 # Parse-answer ANSWER ITEMS...: numbers (1-based) or names -> comma list
@@ -108,7 +108,7 @@ function Read-CodeItChoice([string]$label, [string]$default, [string[]]$items) {
     Write-Host "$label (detected marked *):"
     for ($i = 0; $i -lt $items.Count; $i++) {
         $flag = ''
-        if ($detectedToolChains -contains $items[$i] -or $detectedAgents -contains $items[$i]) { $flag = ' *' }
+        if ($detectedToolchain -contains $items[$i] -or $detectedAgents -contains $items[$i]) { $flag = ' *' }
         Write-Host ("  {0}) {1}{2}" -f ($i + 1), $items[$i], $flag)
     }
     $answer = Read-Host "Choose $label [$($default -replace ' ', ',')]"
@@ -119,15 +119,15 @@ function Read-CodeItChoice([string]$label, [string]$default, [string[]]$items) {
 Write-Host "== ContainerCodeIt first run =="
 Write-Host "Using container runtime: $runtime"
 
-if ($toolChains) {
-    $chosenToolChains = Resolve-CodeItToolChains $toolChains
-    if ($null -eq $chosenToolChains) { exit 1 }
+if ($toolchain) {
+    $chosenToolchain = Resolve-CodeItToolchain $toolchain
+    if ($null -eq $chosenToolchain) { exit 1 }
 } else {
-    $defaultTcs = if ($detectedToolChains.Count) { $detectedToolChains -join ' ' } else { $script:CodeItDefaultToolChains -join ' ' }
-    $chosenToolChains = Read-CodeItChoice "Tool chains to build" $defaultTcs $toolChainsAvailable
-    $chosenToolChains = Split-CodeItList ($chosenToolChains -replace ' ', ',')
+    $defaultTcs = if ($detectedToolchain.Count) { $detectedToolchain -join ' ' } else { $script:CodeItDefaultToolchain -join ' ' }
+    $chosenToolchain = Read-CodeItChoice "Toolchains to build" $defaultTcs $toolchainAvailable
+    $chosenToolchain = Split-CodeItList ($chosenToolchain -replace ' ', ',')
 }
-if (-not $chosenToolChains) { Write-Warning "no tool chains selected."; exit 1 }
+if (-not $chosenToolchain) { Write-Warning "no toolchains selected."; exit 1 }
 
 if ($agents) {
     $chosenAgents = Resolve-CodeItAgents $agents $agentsDir
@@ -141,7 +141,7 @@ if (-not $chosenAgents) { Write-Warning "no agents selected."; exit 1 }
 
 # 3/4. Show the build command, confirm, run it.
 $buildParams = @{
-    toolChains = ($chosenToolChains -join ',')
+    toolchain = ($chosenToolchain -join ',')
     agent      = ($chosenAgents -join ',')
     runtime    = $runtime
 }
@@ -150,7 +150,7 @@ if ($dockerfileDir -ne $PSScriptRoot) { $buildParams['dockerfileDir'] = $dockerf
 
 Write-Host ""
 Write-Host "Build command:"
-Write-Host "  $codeItBuild -toolChains $($buildParams.toolChains) -agent $($buildParams.agent) -runtime $runtime"
+Write-Host "  $codeItBuild -toolchain $($buildParams.toolchain) -agent $($buildParams.agent) -runtime $runtime"
 
 if (-not $yes) {
     $answer = Read-Host "Build now? [Y/n]"

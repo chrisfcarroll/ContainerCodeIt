@@ -4,8 +4,8 @@
 # functions and constants only, and runs nothing on its own.
 #
 #   ci_comma_list_add LIST ITEM                       append ITEM to a space list
-#   ci_tool_chain_alias NAME                          canonical name for an alias
-#   ci_resolve_tool_chains RAW                        -> space-separated canonical list
+#   ci_toolchain_alias NAME                          canonical name for an alias
+#   ci_resolve_toolchain RAW                        -> space-separated canonical list
 #   ci_resolve_package_caches RAW TOOL_CHAINS         -> space-separated list
 #   ci_default_image_name TOOL_CHAINS                 -> code-it-alpine-<chains>
 #   ci_has LIST ITEM                                  return 0 if ITEM is in LIST
@@ -15,8 +15,8 @@
 # Empty RAW means "use the defaults"; an unknown name prints a warning to stderr
 # and returns 1, so the caller can exit.
 
-CI_DEFAULT_TOOL_CHAINS="dotnet node"
-CI_KNOWN_TOOL_CHAINS="dotnet node bun python"
+CI_DEFAULT_TOOLCHAIN="dotnet node"
+CI_KNOWN_TOOLCHAIN="dotnet node bun python"
 CI_KNOWN_PACKAGE_CACHES="nuget npm bun"
 CI_CONTAINER_PORT=3000
 CI_DEFAULT_AGENTS="opencode claude"
@@ -28,7 +28,7 @@ ci_comma_list_add() {
     esac
 }
 
-ci_tool_chain_alias() {
+ci_toolchain_alias() {
     case "$1" in
         js-node|ts-node) printf 'node' ;;
         js-bun|ts-bun)   printf 'bun' ;;
@@ -48,16 +48,16 @@ ci_join() {
     printf '%s' "$2" | tr ' ' "${1:- }"
 }
 
-ci_resolve_tool_chains() {
+ci_resolve_toolchain() {
     local raw="$1" out="" t
     local -a requested
     if [[ -n "$raw" ]]; then
         IFS=',' read -r -a requested <<< "$raw"
     else
-        read -r -a requested <<< "$CI_DEFAULT_TOOL_CHAINS"
+        read -r -a requested <<< "$CI_DEFAULT_TOOLCHAIN"
     fi
     for t in ${requested[@]+"${requested[@]}"}; do
-        t=$(ci_tool_chain_alias "$t")
+        t=$(ci_toolchain_alias "$t")
         case "$t" in
             "") ;;
             dotnet|node|bun|python) out=$(ci_comma_list_add "$out" "$t") ;;
@@ -71,14 +71,14 @@ ci_resolve_tool_chains() {
 }
 
 ci_resolve_package_caches() {
-    local raw="$1" tool_chains="$2" out="" p
+    local raw="$1" toolchain="$2" out="" p
     local -a requested
     if [[ -n "$raw" ]]; then
         IFS=',' read -r -a requested <<< "$raw"
     else
         requested=()
-        ci_has "$tool_chains" dotnet && requested+=(nuget)
-        ci_has "$tool_chains" node   && requested+=(npm)
+        ci_has "$toolchain" dotnet && requested+=(nuget)
+        ci_has "$toolchain" node   && requested+=(npm)
     fi
     for p in ${requested[@]+"${requested[@]}"}; do
         case "$p" in
@@ -98,9 +98,9 @@ ci_default_image_name() {
     printf 'code-it-alpine-%s' "$(ci_join - "$1")"
 }
 
-# ci_tool_chains_include IMAGE_CHAINS_COMMA REQUESTED_SPACE: true if every requested
+# ci_toolchain_include IMAGE_CHAINS_COMMA REQUESTED_SPACE: true if every requested
 # tool chain is present in the image's comma-separated chain list.
-ci_tool_chains_include() {
+ci_toolchain_include() {
     local image_chains="${1//,/ }" req
     for req in $2; do
         ci_has "$image_chains" "$req" || return 1
@@ -108,10 +108,10 @@ ci_tool_chains_include() {
     return 0
 }
 
-# ci_image_tool_chains RUNTIME IMAGE: echo the comma-separated tool chains recorded on
+# ci_image_toolchain RUNTIME IMAGE: echo the comma-separated toolchains recorded on
 # IMAGE (its code-it.tool-chains label, or the code-it-alpine-<chains> name), or
 # nothing if it cannot be told.
-ci_image_tool_chains() {
+ci_image_toolchain() {
     local runtime="$1" image="$2" chains=""
     case "$runtime" in
         docker)    chains=$(docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image" 2>/dev/null || true) ;;
@@ -143,16 +143,16 @@ ci_image_list() {
 }
 
 # ci_find_superset_image RUNTIME REQUESTED_SPACE: echo the repo name of the
-# most-recently built image whose recorded tool chains contain every requested chain,
+# most-recently built image whose recorded toolchains contain every requested chain,
 # or nothing. Only images whose label (or name) can be read are considered.
 ci_find_superset_image() {
     local runtime="$1" requested="$2" image image_chains
     while IFS= read -r image; do
         [[ -n "$image" ]] || continue
         [[ "$image" == *:* ]] || image="$image:latest"
-        image_chains=$(ci_image_tool_chains "$runtime" "$image")
+        image_chains=$(ci_image_toolchain "$runtime" "$image")
         [[ -n "$image_chains" ]] || continue
-        if ci_tool_chains_include "$image_chains" "$requested"; then
+        if ci_toolchain_include "$image_chains" "$requested"; then
             printf '%s' "${image%%:*}"
             return 0
         fi
@@ -171,7 +171,7 @@ ci_image_exists() {
 }
 
 # ci_history_choose_image RUNTIME FILE: echo the most-recently remembered image that
-# still exists and whose tool chains cover >=70% of weighted usage, or nothing.
+# still exists and whose toolchains cover >=70% of weighted usage, or nothing.
 # Weights run from 1 (oldest remembered) to 15 (most recent). Spec 09.
 ci_history_choose_image() {
     local runtime="$1" file="$2" l image i j c w cov
@@ -184,7 +184,7 @@ ci_history_choose_image() {
     (( n > 0 )) || return 1
     for ((i=0; i<n; i++)); do
         image="${lines[i]#* }"
-        chains+=("$(ci_image_tool_chains "$runtime" "$image")")
+        chains+=("$(ci_image_toolchain "$runtime" "$image")")
     done
     local total=0
     for ((i=0; i<n; i++)); do
@@ -194,7 +194,7 @@ ci_history_choose_image() {
     local dotnet_w=0 node_w=0 bun_w=0 python_w=0
     for ((i=0; i<n; i++)); do
         w=$(( 15 - n + 1 + i ))
-        for c in $CI_KNOWN_TOOL_CHAINS; do
+        for c in $CI_KNOWN_TOOLCHAIN; do
             if ci_has "${chains[i]//,/ }" "$c"; then
                 case "$c" in
                     dotnet) dotnet_w=$((dotnet_w + w)) ;;
@@ -208,7 +208,7 @@ ci_history_choose_image() {
     # Newest first: the first image whose chains cover >=70% of the weight wins.
     for ((j=n-1; j>=0; j--)); do
         cov=0
-        for c in $CI_KNOWN_TOOL_CHAINS; do
+        for c in $CI_KNOWN_TOOLCHAIN; do
             if ci_has "${chains[j]//,/ }" "$c"; then
                 case "$c" in
                     dotnet) cov=$((cov + dotnet_w)) ;;
@@ -327,9 +327,9 @@ ci_resolve_agents() {
     printf '%s' "$out"
 }
 
-# ci_tool_chain_commands NAME: the host commands that reveal NAME is installed,
+# ci_toolchain_commands NAME: the host commands that reveal NAME is installed,
 # one per line. A command in any line means "detected".
-ci_tool_chain_commands() {
+ci_toolchain_commands() {
     case "$1" in
         dotnet) printf '%s\n' 'dotnet --version' ;;
         node)   printf '%s\n' 'node --version' 'volta --version' ;;
@@ -338,8 +338,8 @@ ci_tool_chain_commands() {
     esac
 }
 
-# ci_tool_chain_detected NAME: true if any of the tool chain's host commands works.
-ci_tool_chain_detected() {
+# ci_toolchain_detected NAME: true if any of the tool chain's host commands works.
+ci_toolchain_detected() {
     local cmd
     while IFS= read -r cmd; do
         [[ -n "$cmd" ]] || continue
@@ -347,7 +347,7 @@ ci_tool_chain_detected() {
         if $cmd >/dev/null 2>&1; then
             return 0
         fi
-    done < <(ci_tool_chain_commands "$1")
+    done < <(ci_toolchain_commands "$1")
     return 1
 }
 

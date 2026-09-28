@@ -3,7 +3,7 @@
 # One interactive command that takes a new user from nothing to a built image with
 # their agent logins carried over.
 #
-# It detects the container runtime, the host tool chains and agents, asks what to
+# It detects the container runtime, the host toolchains and agents, asks what to
 # include, runs code-it-build, optionally copies agent state into the save dir, and
 # prints the code-it command to start.
 #
@@ -13,7 +13,7 @@
 # Options:
 #   --save-dir, -s DIR       Where agent state is kept/copied. Default: ~/.config/code-it
 #   --work-dir, -w DIR       Host directory mounted as /work. Default: .
-#   --tool-chains, -t LIST   Preselect tool chains (skips the question).
+#   --toolchain, -t LIST   Preselect toolchains (skips the question).
 #   --agents, -a LIST        Preselect agents (skips the question).
 #   --image, -i NAME         Image name to build.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile.
@@ -31,7 +31,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 save_dir="$HOME/.config/code-it"
 work_dir="."
-tool_chains_arg=""
+toolchain_arg=""
 agents_arg=""
 image=""
 dockerfile_dir="$script_dir"
@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --save-dir|-s)      save_dir="$2"; shift 2 ;;
         --work-dir|-w)      work_dir="$2"; shift 2 ;;
-        --tool-chains|-t)   tool_chains_arg="$2"; shift 2 ;;
+        --toolchain|-t)   toolchain_arg="$2"; shift 2 ;;
         --agents|-a)        agents_arg="$2"; shift 2 ;;
         --image|-i)         image="$2"; shift 2 ;;
         --dockerfile-dir)   dockerfile_dir="$2"; shift 2 ;;
@@ -78,8 +78,8 @@ if ! command -v git &>/dev/null; then
     exit 1
 fi
 
-# 2. Detect host tool chains and agents.
-tool_chains_available=($CI_KNOWN_TOOL_CHAINS)
+# 2. Detect host toolchains and agents.
+toolchain_available=($CI_KNOWN_TOOLCHAIN)
 agents_available=()
 for a in $CI_DEFAULT_AGENTS; do
     ci_agent_exists "$agents_dir" "$a" && agents_available+=("$a")
@@ -88,10 +88,10 @@ while IFS= read -r a; do
     [[ " ${agents_available[*]:-} " == *" $a "* ]] || agents_available+=("$a")
 done < <(ci_list_agents "$agents_dir")
 
-detected_tool_chains=""
-for t in "${tool_chains_available[@]}"; do
-    if ci_tool_chain_detected "$t"; then
-        detected_tool_chains=$(ci_comma_list_add "$detected_tool_chains" "$t")
+detected_toolchain=""
+for t in "${toolchain_available[@]}"; do
+    if ci_toolchain_detected "$t"; then
+        detected_toolchain=$(ci_comma_list_add "$detected_toolchain" "$t")
     fi
 done
 detected_agents=""
@@ -134,7 +134,7 @@ choose() {
     echo "$label (detected marked *):" >&2
     for t in "${items[@]}"; do
         flag=""
-        case " $detected_tool_chains $detected_agents " in *" $t "*) flag=" *" ;; esac
+        case " $detected_toolchain $detected_agents " in *" $t "*) flag=" *" ;; esac
         printf '  %d) %s%s\n' "$i" "$t" "$flag" >&2
         i=$((i+1))
     done
@@ -150,15 +150,15 @@ choose() {
 echo "== ContainerCodeIt first run =="
 echo "Using container runtime: $runtime"
 
-if [[ -n "$tool_chains_arg" ]]; then
-    chosen_tool_chains=$(ci_resolve_tool_chains "$tool_chains_arg") || exit 1
+if [[ -n "$toolchain_arg" ]]; then
+    chosen_toolchain=$(ci_resolve_toolchain "$toolchain_arg") || exit 1
 else
-    default_tcs="$detected_tool_chains"
-    [[ -n "$default_tcs" ]] || default_tcs="$CI_DEFAULT_TOOL_CHAINS"
-    chosen_tool_chains=$(choose "Tool chains to build" "$default_tcs" "${tool_chains_available[@]}")
+    default_tcs="$detected_toolchain"
+    [[ -n "$default_tcs" ]] || default_tcs="$CI_DEFAULT_TOOLCHAIN"
+    chosen_toolchain=$(choose "Toolchains to build" "$default_tcs" "${toolchain_available[@]}")
 fi
-if [[ -z "$chosen_tool_chains" ]]; then
-    echo "Warning: no tool chains selected." >&2
+if [[ -z "$chosen_toolchain" ]]; then
+    echo "Warning: no toolchains selected." >&2
     exit 1
 fi
 
@@ -175,7 +175,7 @@ if [[ -z "$chosen_agents" ]]; then
 fi
 
 # 3/4. Show the code-it-build command, confirm, run it.
-build_cmd=("$code_it_build" --tool-chains "$(ci_join , "$chosen_tool_chains")" --agent "$(ci_join , "$chosen_agents")" --runtime "$runtime")
+build_cmd=("$code_it_build" --toolchain "$(ci_join , "$chosen_toolchain")" --agent "$(ci_join , "$chosen_agents")" --runtime "$runtime")
 [[ -n "$image" ]] && build_cmd+=(--image "$image")
 [[ "$dockerfile_dir" != "$script_dir" ]] && build_cmd+=(--dockerfile-dir "$dockerfile_dir")
 

@@ -41,7 +41,7 @@
 #   --save-dir, -s DIR       Host directory for storing agent configuration and state volumes.
 #                            Created if missing. Defaults to ~/.config/code-it
 #   --image, -i NAME         Image name to run. Default: "code-it-alpine-<tech>", a
-#                            slug of the resolved --tool-chains list, e.g. code-it-alpine-dotnet,
+#                            slug of the resolved --toolchain list, e.g. code-it-alpine-dotnet,
 #                            code-it-alpine-node-bun. When that image does not exist, the
 #                            most-recently built existing image whose code-it.tool-chains
 #                            label contains every requested tool chain is used instead.
@@ -69,14 +69,14 @@
 # decide which host package caches are mounted read-only). Passing a list
 # REPLACES the default set, so there are no on/off flags to clash with future
 # tech names:
-#   --tool-chains, -t LIST   Comma-separated tech stacks to build. --stack is an alias.
+#   --toolchain, -t LIST   Comma-separated toolchains to build. --stack is an alias.
 #                            Default: dotnet,node.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun), python (alias uv).
 #   --package-caches LIST    Comma-separated package repos whose host cache is mounted
 #                            read-only. 
 #                            Known: nuget, npm, bun.
-#                            Default: the package repos implied by --tool-chains
+#                            Default: the package repos implied by --toolchain
 #                            (dotnet->nuget, node->npm).
 #                            If the given package manager has a well-known global 
 #                            cache directory; and if that directory exists on the host 
@@ -204,8 +204,8 @@ list_agents=false
 
 # Tech stack (see --help). Empty means "use the remembered image, else the defaults":
 # dotnet,node and the package repos they imply (dotnet->nuget, node->npm).
-tool_chains=""
-tool_chains_explicit=false
+toolchain=""
+toolchain_explicit=false
 package_caches=""
 package_caches_explicit=false
 
@@ -268,9 +268,9 @@ while [[ $# -gt 0 ]]; do
             agent_name="$2"
             shift 2
             ;;
-        --tool-chains|--tech|--stack|-t)
-            tool_chains="$2"
-            tool_chains_explicit=true
+        --toolchain|--tech|--stack|-t)
+            toolchain="$2"
+            toolchain_explicit=true
             shift 2
             ;;
         --package-caches)
@@ -341,20 +341,20 @@ fi
 # shellcheck disable=SC1090
 . "$agents_dir/$code_agent/config"
 
-# Resolve --tool-chains / --package-caches into a set of known tech names (space-separated
-# in $enabled_tool_chains) and known package repo names (in $enabled_package_caches).
-# --tool-chains replaces the default {dotnet,node}; --package-caches replaces the set implied
-# by --tool-chains (dotnet->nuget, node->npm). An unknown name is a hard error.
-enabled_tool_chains=$(ci_resolve_tool_chains "$tool_chains") || exit 1
-enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_tool_chains") || exit 1
+# Resolve --toolchain / --package-caches into a set of known tech names (space-separated
+# in $enabled_toolchain) and known package repo names (in $enabled_package_caches).
+# --toolchain replaces the default {dotnet,node}; --package-caches replaces the set implied
+# by --toolchain (dotnet->nuget, node->npm). An unknown name is a hard error.
+enabled_toolchain=$(ci_resolve_toolchain "$toolchain") || exit 1
+enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_toolchain") || exit 1
 
-tool_chain_has()    { ci_has "$enabled_tool_chains" "$1"; }
+toolchain_has()    { ci_has "$enabled_toolchain" "$1"; }
 package_cache_has() { ci_has "$enabled_package_caches" "$1"; }
 
 # Default image name from the tool-chain list, e.g. code-it-alpine-dotnet or
 # code-it-alpine-node-bun. --image overrides it.
 if [[ -z "$image" ]]; then
-    image=$(ci_default_image_name "$enabled_tool_chains")
+    image=$(ci_default_image_name "$enabled_toolchain")
 fi
 
 # Detect / validate the container runtime (after parsing, so --runtime is honoured).
@@ -379,7 +379,7 @@ if [[ "${images_rc:-0}" != 0 ]]; then
     exit 1
 fi
 
-# Default selection, when neither --tool-chains nor --image was given: with no save
+# Default selection, when neither --toolchain nor --image was given: with no save
 # dir yet, or no code-it image at all, there is no setup, so run first-run. With a
 # save dir and history, the 70% weighted rule of Spec 09 applies; without history (or
 # if it selects nothing), the most recent existing code-it image. See Spec 10, which
@@ -395,7 +395,7 @@ run_first_run() {
     exit $?
 }
 
-if [[ "$tool_chains_explicit" == false && "$image_explicit" == false ]]; then
+if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then
     default_image=""
     default_label="existing image"
     if [[ ! -d "$save_dir" ]]; then
@@ -410,13 +410,13 @@ if [[ "$tool_chains_explicit" == false && "$image_explicit" == false ]]; then
         default_image=$(ci_choose_default_image "$runtime" "$default_history") || default_image=""
     fi
     default_chains=""
-    [[ -n "$default_image" ]] && default_chains=$(ci_image_tool_chains "$runtime" "$default_image")
+    [[ -n "$default_image" ]] && default_chains=$(ci_image_toolchain "$runtime" "$default_image")
     if [[ -z "$default_chains" ]]; then
         run_first_run
     else
-        enabled_tool_chains=$(ci_resolve_tool_chains "$default_chains") || exit 1
+        enabled_toolchain=$(ci_resolve_toolchain "$default_chains") || exit 1
         if [[ "$package_caches_explicit" == false ]]; then
-            enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_tool_chains") || exit 1
+            enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain") || exit 1
         fi
         image="$default_image"
         echo "    Using $default_label: $image"
@@ -504,7 +504,7 @@ echo "    Checking $image ..."
 
 # An existing image is only required when we are not about to build one. If the exact
 # image is missing and the user did not name one, use the most-recently built existing
-# image whose recorded tool chains contain every requested chain.
+# image whose recorded toolchains contain every requested chain.
 if [[ "$build_image" == false ]]; then
     if ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
         if [[ "$image_explicit" == true ]]; then
@@ -512,9 +512,9 @@ if [[ "$build_image" == false ]]; then
             echo "Build it, or set --image to an image that exists." >&2
             exit 1
         fi
-        superset_image=$(ci_find_superset_image "$runtime" "$enabled_tool_chains") || superset_image=""
+        superset_image=$(ci_find_superset_image "$runtime" "$enabled_toolchain") || superset_image=""
         if [[ -n "$superset_image" ]]; then
-            echo "    '$image' does not exist; using '$superset_image', which contains ${enabled_tool_chains// /,}"
+            echo "    '$image' does not exist; using '$superset_image', which contains ${enabled_toolchain// /,}"
             image="$superset_image"
         else
             echo "Warning: $runtime image '$image' does not exist and --build-image was not specified." >&2
@@ -528,14 +528,14 @@ fi
 # are about to run. Prefer the label code-it-build stamped on the image; fall back to
 # the name-based guess. A superset image is fine: only warn when it does not contain
 # every requested chain.
-image_tool_chains=$(ci_image_tool_chains "$runtime" "$image")
-if [[ -n "$image_tool_chains" ]] && ! ci_tool_chains_include "$image_tool_chains" "$enabled_tool_chains"; then
-    echo "Warning: image '$image' looks built for tech '$image_tool_chains' but --tool-chains is '$(ci_join , "$enabled_tool_chains")'." >&2
-    echo "    Pass the same --tool-chains used to build the image, or set --image explicitly." >&2
-elif [[ -n "$image_tool_chains" && "$image_tool_chains" != "$(ci_join , "$enabled_tool_chains")" ]]; then
+image_toolchain=$(ci_image_toolchain "$runtime" "$image")
+if [[ -n "$image_toolchain" ]] && ! ci_toolchain_include "$image_toolchain" "$enabled_toolchain"; then
+    echo "Warning: image '$image' looks built for tech '$image_toolchain' but --toolchain is '$(ci_join , "$enabled_toolchain")'." >&2
+    echo "    Pass the same --toolchain used to build the image, or set --image explicitly." >&2
+elif [[ -n "$image_toolchain" && "$image_toolchain" != "$(ci_join , "$enabled_toolchain")" ]]; then
     extras=""
-    for c in ${image_tool_chains//,/ }; do
-        ci_has "$enabled_tool_chains" "$c" || extras=$(ci_comma_list_add "$extras" "$c")
+    for c in ${image_toolchain//,/ }; do
+        ci_has "$enabled_toolchain" "$c" || extras=$(ci_comma_list_add "$extras" "$c")
     done
     echo "    Note: image '$image' also contains ${extras// /,}."
 fi
@@ -640,7 +640,7 @@ fi
 if [[ "$build_image" == true ]]; then
     echo "    Note: --build-image is deprecated; use code-it-build.sh. Delegating."
     build_shim_args=(
-        --tool-chains "$(ci_join , "$enabled_tool_chains")"
+        --toolchain "$(ci_join , "$enabled_toolchain")"
         --package-caches "$(ci_join , "$enabled_package_caches")"
         --agent "$code_agent"
         --image "$image"
@@ -742,6 +742,6 @@ run_rc=0
             "${cache_mounts[@]+"${cache_mounts[@]}"}" \
     "${image}:latest" ${agent_cmd[@]+"${agent_cmd[@]}"} || run_rc=$?
 
-# Remember the image used, so later runs can default their tool chains to it.
+# Remember the image used, so later runs can default their toolchains to it.
 ci_history_record "$history_file" "$image"
 exit "$run_rc"

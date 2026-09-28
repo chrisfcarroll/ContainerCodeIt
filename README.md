@@ -41,7 +41,7 @@ In principal either powershell or bash scripts should work on any O/S.
 ## First run
 
 `code-it-first-run` does the whole setup interactively: it checks the container runtime
-and git, detects which tool chains and agents you have on the host, asks which to
+and git, detects which toolchains and agents you have on the host, asks which to
 include (pre-selecting what it found), shows the resulting `code-it-build` command and
 runs it, offers to copy your existing agent logins into the save dir, and prints the
 `code-it` command to start.
@@ -77,23 +77,23 @@ agent in the container; the command says so before it copies.
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
 | `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
-| `--image`, `-i` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--tool-chains` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
+| `--image`, `-i` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
 | `--build-image`, `-b` | `-buildImage` | off | Build the image before running |
 | `--rebuild-image`, `-B` | `-rebuildImage` | off | Build the image, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--tool-chains LIST`, `-t` | `-toolChains LIST` | remembered/existing code-it image, else first-run | Comma-separated tech stacks: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
-| `--package-caches LIST` | `-packageCaches LIST` | implied by `tool-chains` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
+| `--toolchain LIST`, `-t` | `-toolchain LIST` | remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
+| `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
 `--build-image` and `--rebuild-image` are now thin shims: they print a deprecation
-note and delegate to `code-it-build` with the same tool chains, package caches, image,
+note and delegate to `code-it-build` with the same toolchains, package caches, image,
 runtime and Dockerfile directory, then run the container. Prefer calling
 `code-it-build` directly.
 
-When the image derived from `--tool-chains` (e.g. `code-it-alpine-dotnet`) does not
+When the image derived from `--toolchain` (e.g. `code-it-alpine-dotnet`) does not
 exist, `code-it` uses the most-recently built existing image whose
 `code-it.tool-chains` label contains every requested chain (e.g.
 `code-it-alpine-dotnet-bun` for `dotnet`), and says which image it chose. An explicit
@@ -106,8 +106,8 @@ chains and package caches). They accept the same logical parameters:
 
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
-| `--tool-chains LIST`, `-t` | `-toolChains LIST` | `dotnet,node` | Tool chains to build (aliases as above) |
-| `--package-caches LIST` | `-packageCaches LIST` | implied by `tool-chains` | Package repos to support; an explicit empty list means none |
+| `--toolchain LIST`, `-t` | `-toolchain LIST` | `dotnet,node` | Toolchains to build (aliases as above) |
+| `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Package repos to support; an explicit empty list means none |
 | `--agent, -a LIST` | `-agent LIST` | `opencode,claude` | Agents to install |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
 | `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today first |
@@ -127,14 +127,14 @@ The Dockerfile takes build-time switches for the tech stacks to include, and the
 launchers expose them as two comma-separated lists, passed to `docker build` as
 `--build-arg`s:
 
-- `--tool-chains` / `-toolChains` (alias `--stack` / `-stack`) — tech stacks to build:
+- `--toolchain` / `-toolchain` (alias `--stack` / `-stack`) — toolchains to build:
   `dotnet`, `node`, `bun`, `python`. Default: the remembered image, else an existing
   code-it image, else the first-run setup (see below).
   `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
   `bun`; `uv` is an alias for `python`. Aliases resolve to the canonical name, so
-  `--tool-chains ts-node` is `--tool-chains node` and produces the same image name.
+  `--toolchain ts-node` is `--toolchain node` and produces the same image name.
 - `--package-caches` / `-packageCaches` — package repos whose host cache is mounted
-  read-only: `nuget`, `npm`, `bun`. Default: the repos implied by `--tool-chains`
+  read-only: `nuget`, `npm`, `bun`. Default: the repos implied by `--toolchain`
   (`dotnet`->`nuget`, `node`->`npm`). Python has no host cache mount: uv must write its
   own cache, so the container keeps it in the agent's home (`UV_CACHE_DIR`).
 
@@ -148,22 +148,22 @@ its layers entirely.
 the save dir: the most recent 15 invocations, one `yyyymmdd image-name` per line,
 dropping the oldest on the 16th.
 
-Run `code-it` with no `--tool-chains` and no `--image` and it picks the default for
+Run `code-it` with no `--toolchain` and no `--image` and it picks the default for
 you:
 
 1. If the save dir does not exist yet, it runs `code-it-first-run` (there is no setup
    to run).
 2. Otherwise, if `image-history` exists, it uses the 70% weighted rule: the most
-   recent remembered image whose tool chains cover at least 70% of your weighted
+   recent remembered image whose toolchains cover at least 70% of your weighted
    recent usage, weighting the most recent invocation 15 and the oldest 1.
 3. Otherwise (no history, or the weighted rule selected nothing), it uses an existing
    `code-it-*` image: the most recently used remembered one that still exists, else
-   the most recently built. The image's tool chains come from its label or name, so
+   the most recently built. The image's toolchains come from its label or name, so
    the run and its caches agree.
 4. Otherwise there is no `code-it-*` image at all: it runs `code-it-first-run`.
 
 So the default follows what you actually use, falls back to any existing code-it
-image, and only then starts first-run. Explicit `--tool-chains` or `--image` always
+image, and only then starts first-run. Explicit `--toolchain` or `--image` always
 wins.
 
 ```bash
@@ -171,17 +171,17 @@ wins.
 ./code-it.sh --build-image
 
 # A Bun-only sandbox with a read-only host Bun cache
-./code-it.sh --build-image --tool-chains bun --package-caches bun
+./code-it.sh --build-image --toolchain bun --package-caches bun
 
 # Node.js and Bun, but npm only (e.g. you drive Bun through npm)
-./code-it.sh --build-image --tool-chains node,bun --package-caches npm
+./code-it.sh --build-image --toolchain node,bun --package-caches npm
 
-# Python 3 with uv (uv is in every image): --stack is an alias for --tool-chains
+# Python 3 with uv (uv is in every image): --stack is an alias for --toolchain
 ./code-it-build.sh --stack python
 ```
 
 ```powershell
-.\Code-It.ps1 -buildImage -toolChains 'node,bun' -packageCaches npm
+.\Code-It.ps1 -buildImage -toolchain 'node,bun' -packageCaches npm
 ```
 
 Each enabled tech also adds a passwordless `doas` rule, so the agent can install more
@@ -189,7 +189,7 @@ tools itself (`doas dotnet`, `doas node`, `doas npm`, `doas bun`, `doas python3`
 
 ### Python
 
-`--tool-chains python` (or `--stack python`, or the old alias `uv`) adds Python 3 from
+`--toolchain python` (or `--stack python`, or the old alias `uv`) adds Python 3 from
 Alpine's repos. `uv` and `uvx` are installed for every image, including the default.
 The system Python is externally managed, so use `uv venv` / `uv tool` rather than
 `pip install` into it; uv keeps its cache in the agent's home via `UV_CACHE_DIR` and
@@ -415,7 +415,7 @@ If you use NuGet, the launcher scripts mounts your NuGet package cache at `/home
 
 ### npm
 
-`npm` (in `--package-caches`, implied by `--tool-chains node`) mounts your npm cache read-only at
+`npm` (in `--package-caches`, implied by `--toolchain node`) mounts your npm cache read-only at
 `/home/agent1/.npm-host`. The container's `go.sh` seeds its own writable `~/.npm` from
 that mount at startup, so packages already downloaded on the host are reused and the
 host cache is never written to.

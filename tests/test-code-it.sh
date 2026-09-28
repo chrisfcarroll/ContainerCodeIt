@@ -299,7 +299,7 @@ assert_contains "build dry-run passes DOTNET=true" "$out" "--build-arg DOTNET=tr
 assert_contains "build dry-run passes NODE=true" "$out" "--build-arg NODE=true"
 assert_contains "build dry-run passes NUGET=true (implied by dotnet)" "$out" "--build-arg NUGET=true"
 assert_contains "build dry-run passes NPM=true (implied by node)" "$out" "--build-arg NPM=true"
-assert_contains "build dry-run labels the tool chains" "$out" "--label code-it.tool-chains=dotnet,node"
+assert_contains "build dry-run labels the toolchains" "$out" "--label code-it.tool-chains=dotnet,node"
 assert_contains "build dry-run labels the package caches" "$out" "--label code-it.package-caches=nuget,npm"
 assert_contains "build dry-run derives the default image name" "$out" "-t code-it-alpine-dotnet-node:latest"
 case "$out" in
@@ -307,18 +307,18 @@ case "$out" in
     *)                   assert "code-it-build --dry-run does not execute the build" 0 ;;
 esac
 
-# --tech is the kept alias of --tool-chains
+# --tech is the kept alias of --toolchain
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tech bun 2>&1)
 assert_contains "build --tech alias selects BUN" "$out" "--build-arg BUN=true"
 assert_contains "build --tech alias derives the image name" "$out" "-t code-it-alpine-bun:latest"
 
 # --package-caches replaces the implied set
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tool-chains bun --package-caches nuget 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain bun --package-caches nuget 2>&1)
 assert_contains "build --package-caches nuget without dotnet" "$out" "--build-arg NUGET=true"
 assert_contains "build --package-caches nuget excludes NPM" "$out" "--build-arg NPM=false"
 
 # Unknown names are hard errors
-PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tool-chains cobol >/dev/null 2>&1
+PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain cobol >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build unknown tool chain fails" "$?"
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --package-caches pip >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build unknown package cache fails" "$?"
@@ -360,7 +360,7 @@ PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" -
 
 echo "10d. code-it reads the image label"
 out=$(STUB_IMAGE_TOOL_CHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
-assert_contains "warns when the image label disagrees with --tool-chains" "$out" "looks built for tech 'node,bun'"
+assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for tech 'node,bun'"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image "${common_args[@]}")
 assert_contains "the --build-image shim prints a deprecation note" "$out" "deprecated"
 
@@ -368,7 +368,7 @@ echo "10e. Python tool chain (python / uv / --stack)"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --stack python 2>&1)
 assert_contains "--stack python sets PYTHON=true" "$out" "--build-arg PYTHON=true"
 assert_contains "--stack python derives the image name" "$out" "-t code-it-alpine-python:latest"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tool-chains uv 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain uv 2>&1)
 assert_contains "uv aliases python (PYTHON=true)" "$out" "--build-arg PYTHON=true"
 assert_contains "uv canonical image name" "$out" "-t code-it-alpine-python:latest"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
@@ -383,7 +383,7 @@ grep -q 'if \[ "\$PYTHON" = true \]' "$script_dir/Dockerfile"
 assert "Dockerfile gates python3 on PYTHON" "$?"
 
 # ---------------------------------------------------------------------------
-echo "10g. Choosing an existing image that contains the requested tool chains"
+echo "10g. Choosing an existing image that contains the requested toolchains"
 superbin="$tmp/superbin"; mkdir -p "$superbin"
 cat > "$superbin/docker" <<'EOF'
 #!/bin/sh
@@ -405,7 +405,7 @@ super_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
 
 # The exact image, when it exists, is used unchanged
 out=$(STUB_IMAGES="code-it-alpine-dotnet-bun:latest code-it-alpine-dotnet:latest" PATH="$superbin:$PATH" \
-        "$code_it" --tool-chains dotnet "${super_args[@]}")
+        "$code_it" --toolchain dotnet "${super_args[@]}")
 assert_contains "uses the exact image when it exists" "$out" "code-it-alpine-dotnet:latest"
 case "$out" in
     *"does not exist; using"*) assert "no substitution when the exact image exists" 1 ;;
@@ -414,29 +414,29 @@ esac
 
 # The exact image missing: the most-recently listed image containing the chain wins
 out=$(STUB_IMAGES="code-it-alpine-dotnet-bun:latest code-it-alpine-dotnet-node:latest" PATH="$superbin:$PATH" \
-        "$code_it" --tool-chains dotnet "${super_args[@]}")
+        "$code_it" --toolchain dotnet "${super_args[@]}")
 assert_contains "substitutes a superset image" "$out" "does not exist; using 'code-it-alpine-dotnet-bun'"
 assert_contains "runs the superset image" "$out" "code-it-alpine-dotnet-bun:latest"
-assert_contains "notes the extra tool chains" "$out" "also contains bun"
+assert_contains "notes the extra toolchains" "$out" "also contains bun"
 
 # Order decides: whichever qualifying image is listed first (most recently built)
 out=$(STUB_IMAGES="code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest" PATH="$superbin:$PATH" \
-        "$code_it" --tool-chains dotnet "${super_args[@]}")
+        "$code_it" --toolchain dotnet "${super_args[@]}")
 assert_contains "picks the most recent qualifying image" "$out" "using 'code-it-alpine-dotnet-node'"
 
 # Every requested chain must be present: dotnet-node does not contain bun
 PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest" \
-    "$code_it" --tool-chains dotnet,bun "${super_args[@]}" >/dev/null 2>&1
+    "$code_it" --toolchain dotnet,bun "${super_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "requires every requested chain to be present" "$?"
 
 # No image contains the requested chain: still an error
 PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest" \
-    "$code_it" --tool-chains python "${super_args[@]}" >/dev/null 2>&1
+    "$code_it" --toolchain python "${super_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "errors when no image contains the requested chain" "$?"
 
 # An explicit --image is never substituted, and errors if missing
 PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-bun:latest" \
-    "$code_it" --tool-chains dotnet --image code-it-alpine-nope "${super_args[@]}" >/dev/null 2>&1
+    "$code_it" --toolchain dotnet --image code-it-alpine-nope "${super_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "explicit --image is used as-is and errors if missing" "$?"
 
 # ---------------------------------------------------------------------------
@@ -458,7 +458,7 @@ echo "11b. Short-form aliases"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -p "explain this" "${common_args[@]}")
 assert_contains "-p is --prompt" "$out" '--prompt explain\ this'
 out=$(PATH="$stub_docker:$PATH" "$code_it" -t node,bun -b "${common_args[@]}")
-assert_contains "-t is --tool-chains" "$out" "code-it-alpine-node-bun:latest"
+assert_contains "-t is --toolchain" "$out" "code-it-alpine-node-bun:latest"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -b "${common_args[@]}")
 assert_contains "-b is --build-image" "$out" "STUB-DOCKER-BUILD"
 out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" -r container -i code-it-alpine-dotnet-node -w "$script_dir" -s "$save" -d)
@@ -536,7 +536,7 @@ case "$out" in
 esac
 
 # ---------------------------------------------------------------------------
-echo "12b. Tech stack: --tool-chains / --package-caches build args and read-only caches"
+echo "12b. Tech stack: --toolchain / --package-caches build args and read-only caches"
 npm_cache="$tmp/npm-cache"; mkdir -p "$npm_cache"
 bun_cache="$tmp/bun-cache"; mkdir -p "$bun_cache"
 
@@ -549,62 +549,62 @@ assert_contains "dotnet implies NUGET=true" "$out" "--build-arg NUGET=true"
 assert_contains "node implies NPM=true" "$out" "--build-arg NPM=true"
 assert_contains "reports the resolved tech" "$out" "tech dotnet,node; package repos nuget,npm"
 
-# --tool-chains replaces the default set
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains node,bun "${common_args[@]}")
-assert_contains "--tool-chains node,bun drops DOTNET" "$out" "--build-arg DOTNET=false"
-assert_contains "--tool-chains node,bun keeps NODE" "$out" "--build-arg NODE=true"
-assert_contains "--tool-chains node,bun keeps BUN" "$out" "--build-arg BUN=true"
-assert_contains "--tool-chains node,bun drops NUGET (dotnet gone)" "$out" "--build-arg NUGET=false"
-assert_contains "--tool-chains node,bun keeps NPM (node present)" "$out" "--build-arg NPM=true"
+# --toolchain replaces the default set
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain node,bun "${common_args[@]}")
+assert_contains "--toolchain node,bun drops DOTNET" "$out" "--build-arg DOTNET=false"
+assert_contains "--toolchain node,bun keeps NODE" "$out" "--build-arg NODE=true"
+assert_contains "--toolchain node,bun keeps BUN" "$out" "--build-arg BUN=true"
+assert_contains "--toolchain node,bun drops NUGET (dotnet gone)" "$out" "--build-arg NUGET=false"
+assert_contains "--toolchain node,bun keeps NPM (node present)" "$out" "--build-arg NPM=true"
 
-# --package-caches replaces the implied set, independently of --tool-chains
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains node,bun --package-caches npm "${common_args[@]}")
+# --package-caches replaces the implied set, independently of --toolchain
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain node,bun --package-caches npm "${common_args[@]}")
 assert_contains "--package-caches npm keeps NPM" "$out" "--build-arg NPM=true"
 assert_contains "--package-caches npm excludes BUN cache" "$out" "--build-arg NUGET=false"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains node,bun --package-caches bun "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain node,bun --package-caches bun "${common_args[@]}")
 assert_contains "--package-caches bun selects the BUN package cache" "$out" "--build-arg NPM=false"
 assert_contains "--package-caches bun excludes NPM" "$out" "--build-arg NUGET=false"
 
 # --package-caches nuget with no dotnet still selects the NuGet cache (nuget without dotnet)
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains bun --package-caches nuget "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain bun --package-caches nuget "${common_args[@]}")
 assert_contains "nuget package cache without dotnet" "$out" "--build-arg NUGET=true"
 
-# The default image name follows --tool-chains, so the built and run images agree
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains node,bun "${common_args[@]}")
-assert_contains "image name derives from --tool-chains" "$out" "-t code-it-alpine-node-bun:latest"
+# The default image name follows --toolchain, so the built and run images agree
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain node,bun "${common_args[@]}")
+assert_contains "image name derives from --toolchain" "$out" "-t code-it-alpine-node-bun:latest"
 
 # The old --tech spelling is kept as a hidden alias
 out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech bun "${common_args[@]}")
 assert_contains "--tech alias selects BUN" "$out" "--build-arg BUN=true"
 
 # Tech aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains js-node "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain js-node "${common_args[@]}")
 assert_contains "js-node aliases node (NODE=true)" "$out" "--build-arg NODE=true"
 assert_contains "js-node canonical image name" "$out" "-t code-it-alpine-node:latest"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains ts-node "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain ts-node "${common_args[@]}")
 assert_contains "ts-node aliases node (NODE=true)" "$out" "--build-arg NODE=true"
 assert_contains "ts-node canonical image name" "$out" "-t code-it-alpine-node:latest"
 assert_contains "ts-node implies the npm package cache" "$out" "--build-arg NPM=true"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains js-bun "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain js-bun "${common_args[@]}")
 assert_contains "js-bun aliases bun (BUN=true)" "$out" "--build-arg BUN=true"
 assert_contains "js-bun canonical image name" "$out" "-t code-it-alpine-bun:latest"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains ts-bun,bun "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain ts-bun,bun "${common_args[@]}")
 assert_contains "ts-bun aliases bun and dedupes with bun" "$out" "-t code-it-alpine-bun:latest"
 
 # The old --packages spelling is gone, not an alias
 PATH="$stub_docker:$PATH" "$code_it" --build-image --packages npm "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "removed --packages spelling fails" "$?"
 
-# An image label that disagrees with --tool-chains is called out
-out=$(STUB_IMAGE_TOOL_CHAINS=dotnet PATH="$stub_docker:$PATH" "$code_it" --tool-chains node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
-assert_contains "warns when the image label disagrees with --tool-chains" "$out" "looks built for tech 'dotnet'"
+# An image label that disagrees with --toolchain is called out
+out=$(STUB_IMAGE_TOOL_CHAINS=dotnet PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for tech 'dotnet'"
 # Without a label (older images), fall back to the name-based guess
-out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --tool-chains node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "falls back to the image-name guess without a label" "$out" "looks built for tech 'dotnet,node'"
 
 # Unknown names are hard errors
-PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains cobol "${common_args[@]}" >/dev/null 2>&1
-[[ "$?" != "0" ]]; assert "--tool-chains with an unknown name fails" "$?"
+PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain cobol "${common_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "--toolchain with an unknown name fails" "$?"
 PATH="$stub_docker:$PATH" "$code_it" --build-image --package-caches pip "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "--package-caches with an unknown name fails" "$?"
 
@@ -615,12 +615,12 @@ out=$(HOME="$fakehome" BUN_INSTALL_CACHE_DIR="$bun_cache" PATH="$stub_docker:$PA
 assert_contains "bun cache mounted read-only" "$out" "-v \"$bun_cache:/home/agent1/.bun-host:ro\""
 
 # Omitting a package repo from --package-caches suppresses its mount entirely
-out=$(HOME="$fakehome" NPM_CONFIG_CACHE="$npm_cache" PATH="$stub_docker:$PATH" "$code_it" --tool-chains node --package-caches= "${common_args[@]}")
+out=$(HOME="$fakehome" NPM_CONFIG_CACHE="$npm_cache" PATH="$stub_docker:$PATH" "$code_it" --toolchain node --package-caches= "${common_args[@]}")
 case "$out" in
     *.npm-host*) assert "empty --package-caches: no npm mount" 1 ;;
     *)           assert "empty --package-caches: no npm mount" 0 ;;
 esac
-out=$(HOME="$fakehome" NUGET_PACKAGES="$nuget_cache" PATH="$stub_docker:$PATH" "$code_it" --tool-chains dotnet --package-caches npm "${common_args[@]}")
+out=$(HOME="$fakehome" NUGET_PACKAGES="$nuget_cache" PATH="$stub_docker:$PATH" "$code_it" --toolchain dotnet --package-caches npm "${common_args[@]}")
 case "$out" in
     *packages-host*) assert "packages without nuget: no nuget mount" 1 ;;
     *)               assert "packages without nuget: no nuget mount" 0 ;;
@@ -875,10 +875,10 @@ out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$firstbin" bash "$first_run" --d
         --code-it-build "$stub_first_build" 2>&1)
 assert "first-run detection exit code" "$?"
 assert_contains "first-run uses the detected runtime" "$out" "Using container runtime: docker"
-assert_contains "first-run numbers the tool chains" "$out" "1) dotnet"
+assert_contains "first-run numbers the toolchains" "$out" "1) dotnet"
 assert_contains "first-run marks node detected" "$out" "2) node *"
 assert_contains "first-run marks python undetected" "$out" "4) python"
-assert_contains "first-run defaults to the detected tool chains" "$out" "--tool-chains node"
+assert_contains "first-run defaults to the detected toolchains" "$out" "--toolchain node"
 case "$out" in
     *"2) node *"*) assert "first-run detection is not fooled by bun" 0 ;;
     *)             assert "first-run detection is not fooled by bun" 1 ;;
@@ -887,7 +887,7 @@ esac
 # (b) answer parsing: pick tool chain 4 (python) and agent 2 (claude)
 out=$(printf '4\n2\n\n' | HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
         --code-it-build "$stub_first_build" 2>&1)
-assert_contains "first-run parses tool chain numbers" "$out" "--tool-chains python"
+assert_contains "first-run parses tool chain numbers" "$out" "--toolchain python"
 assert_contains "first-run parses agent numbers" "$out" "--agent claude"
 
 # (c) --dry-run builds nothing
@@ -900,7 +900,7 @@ mkdir -p "$fh/.config/opencode" "$fs/.config/opencode"
 echo ORIGINAL > "$fh/.config/opencode/config.json"
 echo NEW > "$fh/.config/opencode/new.json"
 echo KEEP > "$fs/.config/opencode/config.json"
-out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --tool-chains node --agents opencode \
+out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode \
         --save-dir "$fs" --code-it-build "$stub_first_build" 2>&1)
 assert "first-run copy exit code" "$?"
 assert_contains "first-run invoked the build" "$out" "STUB-FIRST-BUILD"
@@ -912,7 +912,7 @@ assert_contains "first-run prints the start command" "$out" "code-it.sh --agent 
 # (e) --dry-run makes no changes and copies nothing
 rm -f "$tmp/first-build-ran"
 fd="$tmp/firstdry"; mkdir -p "$fd"
-out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --dry-run --tool-chains node --agents opencode \
+out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --dry-run --toolchain node --agents opencode \
         --save-dir "$fd/save" --code-it-build "$stub_first_build" 2>&1)
 [[ ! -e "$fd/save" ]]; assert "first-run --dry-run creates no save dir" "$?"
 assert_contains "first-run --dry-run says it will not build" "$out" "dry run: not building"
@@ -920,7 +920,7 @@ assert_contains "first-run --dry-run says what it would copy" "$out" "would copy
 [[ ! -e "$tmp/first-build-ran" ]]; assert "first-run --dry-run ran no build" "$?"
 
 # ---------------------------------------------------------------------------
-echo "19. Image memory and default tool chains"
+echo "19. Image memory and default toolchains"
 histbin="$tmp/histbin"; mkdir -p "$histbin"
 cat > "$histbin/docker" <<'EOF'
 #!/bin/sh
@@ -957,13 +957,13 @@ assert "default selection exit code" "$?"
 assert_contains "uses the remembered image (70% rule)" "$out" "Using remembered image: code-it-alpine-python"
 assert_contains "runs that image" "$out" "code-it-alpine-python:latest"
 
-# (b) explicit --tool-chains bypasses the default selection
-out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" --tool-chains dotnet 2>&1)
+# (b) explicit --toolchain bypasses the default selection
+out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" --toolchain dotnet 2>&1)
 case "$out" in
-    *"Using remembered image"*|*"Using existing image"*) assert "explicit --tool-chains bypasses the default" 1 ;;
-    *)                                                   assert "explicit --tool-chains bypasses the default" 0 ;;
+    *"Using remembered image"*|*"Using existing image"*) assert "explicit --toolchain bypasses the default" 1 ;;
+    *)                                                   assert "explicit --toolchain bypasses the default" 0 ;;
 esac
-assert_contains "explicit --tool-chains is honoured" "$out" "code-it-alpine-dotnet:latest"
+assert_contains "explicit --toolchain is honoured" "$out" "code-it-alpine-dotnet:latest"
 
 # (c) explicit --image bypasses the default selection
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" --image code-it-alpine-dotnet-node 2>&1)
@@ -1014,7 +1014,7 @@ for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     printf '202601%02d code-it-alpine-dotnet-node\n' "$i" >> "$hrec/image-history"
 done
 oldest_before=$(head -1 "$hrec/image-history")
-PATH="$histbin:$PATH" "$code_it" --work-dir "$script_dir" --save-dir "$hrec" --tool-chains dotnet,node >/dev/null 2>&1
+PATH="$histbin:$PATH" "$code_it" --work-dir "$script_dir" --save-dir "$hrec" --toolchain dotnet,node >/dev/null 2>&1
 assert "history recording run exit code" "$?"
 [[ "$(wc -l < "$hrec/image-history")" == "15" ]]; assert "history keeps only 15 lines" "$?"
 grep -qE "^[0-9]{8} code-it-alpine-dotnet-node$" "$hrec/image-history"
@@ -1023,7 +1023,7 @@ assert "history records 'yyyymmdd image-name'" "$?"
 
 # (f) --dry-run records nothing
 hdry="$tmp/histdry"; mkdir -p "$hdry"
-PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hdry" --tool-chains dotnet,node >/dev/null 2>&1
+PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hdry" --toolchain dotnet,node >/dev/null 2>&1
 [[ ! -e "$hdry/image-history" ]]; assert "--dry-run records no history" "$?"
 
 # ---------------------------------------------------------------------------

@@ -121,7 +121,7 @@ If it passes the gate, follow how bun was added (commit 49b3ee7) as the template
 2. Add the known name and any aliases to the shared library (lib/code-it-common.sh
    and lib/CodeItCommon.ps1), so code-it-build, code-it and image naming all pick it
    up.
-3. Add completions (bash, zsh, PowerShell) and the README tables and "Tool chains"
+3. Add completions (bash, zsh, PowerShell) and the README tables and "Toolchains"
    section.
 4. If the tool chain has a package manager with a well-known global cache, add it to
    --package-caches: find the host cache (environment variable, then config, then

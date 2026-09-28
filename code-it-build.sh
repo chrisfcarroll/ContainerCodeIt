@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Builds the code-it container image from the Dockerfile, selecting the tool chains,
+# Builds the code-it container image from the Dockerfile, selecting the toolchains,
 # package caches and coding agents to include. code-it.sh delegates its --build-image
 # and --rebuild-image flags here.
 #
@@ -13,13 +13,13 @@
 #   ./code-it-build.sh [OPTIONS]
 #
 # Options:
-#   --tool-chains, -t LIST   Comma-separated tool chains to build. Default: dotnet,node.
+#   --toolchain, -t LIST   Comma-separated toolchains to build. Default: dotnet,node.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun), python (alias uv).
-#                            --stack is an alias for --tool-chains.
+#                            --stack is an alias for --toolchain.
 #   --package-caches LIST    Comma-separated package repos to support, independent of
-#                            --tool-chains. Known: nuget, npm, bun.
-#                            Default: the repos implied by --tool-chains
+#                            --toolchain. Known: nuget, npm, bun.
+#                            Default: the repos implied by --toolchain
 #                            (dotnet->nuget, node->npm).
 #   --agent, -a LIST         Comma-separated agents to install. Default: opencode,claude.
 #   --list-agents            List the available agents and exit.
@@ -27,7 +27,7 @@
 #                            selected agents' install fragments to today first, so the
 #                            agent install layers rerun and the agents update.
 #   --image, -i NAME         Image name to build. Default: "code-it-alpine-<chains>",
-#                            a slug of the resolved --tool-chains list.
+#                            a slug of the resolved --toolchain list.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile.
 #                            Defaults to this script's own directory.
 #   --runtime, -r NAME       Container runtime to use: "docker" or "container".
@@ -35,9 +35,9 @@
 #   --dry-run, -d            Print the build command without executing it.
 #   --help, -h               Show this help message.
 #
-# The image is labelled with its tool chains and package caches
+# The image is labelled with its toolchains and package caches
 # (code-it.tool-chains=..., code-it.package-caches=...), so code-it.sh can detect a
-# mismatch between the image and the --tool-chains it was asked to run.
+# mismatch between the image and the --toolchain it was asked to run.
 
 set -euo pipefail
 
@@ -48,7 +48,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # Absolute path of an existing directory, without realpath (absent on older macOS)
 abs_dir() { (CDPATH= cd -- "$1" && pwd); }
 
-tool_chains=""
+toolchain=""
 package_caches=""
 package_caches_set=false
 agents_raw=""
@@ -61,8 +61,8 @@ dry_run=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --tool-chains|--tech|--stack|-t)
-            tool_chains="$2"
+        --toolchain|--tech|--stack|-t)
+            toolchain="$2"
             shift 2
             ;;
         --package-caches)
@@ -132,18 +132,18 @@ if [[ "$list_agents" == true ]]; then
     exit 0
 fi
 
-# Resolve the requested tool chains, package caches and agents. An explicit, empty
+# Resolve the requested toolchains, package caches and agents. An explicit, empty
 # --package-caches means "no package caches", not "use the implied ones".
-enabled_tool_chains=$(ci_resolve_tool_chains "$tool_chains") || exit 1
+enabled_toolchain=$(ci_resolve_toolchain "$toolchain") || exit 1
 if [[ "$package_caches_set" == true ]]; then
-    enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_tool_chains") || exit 1
+    enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_toolchain") || exit 1
 else
-    enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_tool_chains") || exit 1
+    enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain") || exit 1
 fi
 enabled_agents=$(ci_resolve_agents "$agents_raw" "$agents_dir") || exit 1
 
 if [[ -z "$image" ]]; then
-    image=$(ci_default_image_name "$enabled_tool_chains")
+    image=$(ci_default_image_name "$enabled_toolchain")
 fi
 
 # Detect / validate the container runtime
@@ -208,11 +208,11 @@ else
     cp "$dockerfile_dir/Dockerfile" "$build_context/Dockerfile"
 fi
 
-# Build args for the tool chains and package caches, spelled the way the
+# Build args for the toolchains and package caches, spelled the way the
 # Dockerfile's ARGs match them (uppercase).
 build_args=()
 for tc in dotnet node bun python; do
-    if ci_has "$enabled_tool_chains" "$tc"; then v=true; else v=false; fi
+    if ci_has "$enabled_toolchain" "$tc"; then v=true; else v=false; fi
     build_args+=(--build-arg "$(printf '%s' "$tc" | tr '[:lower:]' '[:upper:]')=$v")
 done
 for pc in nuget npm; do
@@ -222,11 +222,11 @@ done
 
 # Label the image with its resolution, so code-it.sh can check it rather than guess
 # from the image name.
-build_args+=(--label "code-it.tool-chains=$(ci_join , "$enabled_tool_chains")")
+build_args+=(--label "code-it.tool-chains=$(ci_join , "$enabled_toolchain")")
 build_args+=(--label "code-it.package-caches=$(ci_join , "$enabled_package_caches")")
 build_args+=(--label "code-it.agents=$(ci_join , "$enabled_agents")")
 
-echo "    Building with tech ${enabled_tool_chains// /,}; package repos ${enabled_package_caches// /,}; agents ${enabled_agents// /,}"
+echo "    Building with tech ${enabled_toolchain// /,}; package repos ${enabled_package_caches// /,}; agents ${enabled_agents// /,}"
 
 # Print the command
 echo "    $runtime build ${build_args[*]} -t ${image}:latest $build_context"
