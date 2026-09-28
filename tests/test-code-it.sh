@@ -381,6 +381,63 @@ grep -q 'if \[ "\$PYTHON" = true \]' "$script_dir/Dockerfile"
 assert "Dockerfile gates python3 on PYTHON" "$?"
 
 # ---------------------------------------------------------------------------
+echo "10g. Choosing an existing image that contains the requested tool chains"
+superbin="$tmp/superbin"; mkdir -p "$superbin"
+cat > "$superbin/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+    images) printf '%s\n' $STUB_IMAGES ;;
+    image)
+        for a in "$@"; do last="$a"; done
+        case "$last" in
+            code-it-alpine-dotnet-bun*)  echo dotnet,bun ;;
+            code-it-alpine-dotnet-node*) echo dotnet,node ;;
+            code-it-alpine-dotnet*)      echo dotnet ;;
+            *)                           echo "" ;;
+        esac ;;
+    *) echo "STUB $*" ;;
+esac
+EOF
+chmod +x "$superbin/docker"
+super_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
+
+# The exact image, when it exists, is used unchanged
+out=$(STUB_IMAGES="code-it-alpine-dotnet-bun:latest code-it-alpine-dotnet:latest" PATH="$superbin:$PATH" \
+        "$code_it" --tool-chains dotnet "${super_args[@]}")
+assert_contains "uses the exact image when it exists" "$out" "code-it-alpine-dotnet:latest"
+case "$out" in
+    *"does not exist; using"*) assert "no substitution when the exact image exists" 1 ;;
+    *)                         assert "no substitution when the exact image exists" 0 ;;
+esac
+
+# The exact image missing: the most-recently listed image containing the chain wins
+out=$(STUB_IMAGES="code-it-alpine-dotnet-bun:latest code-it-alpine-dotnet-node:latest" PATH="$superbin:$PATH" \
+        "$code_it" --tool-chains dotnet "${super_args[@]}")
+assert_contains "substitutes a superset image" "$out" "does not exist; using 'code-it-alpine-dotnet-bun'"
+assert_contains "runs the superset image" "$out" "code-it-alpine-dotnet-bun:latest"
+assert_contains "notes the extra tool chains" "$out" "also contains bun"
+
+# Order decides: whichever qualifying image is listed first (most recently built)
+out=$(STUB_IMAGES="code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest" PATH="$superbin:$PATH" \
+        "$code_it" --tool-chains dotnet "${super_args[@]}")
+assert_contains "picks the most recent qualifying image" "$out" "using 'code-it-alpine-dotnet-node'"
+
+# Every requested chain must be present: dotnet-node does not contain bun
+PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest" \
+    "$code_it" --tool-chains dotnet,bun "${super_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "requires every requested chain to be present" "$?"
+
+# No image contains the requested chain: still an error
+PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest" \
+    "$code_it" --tool-chains python "${super_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "errors when no image contains the requested chain" "$?"
+
+# An explicit --image is never substituted, and errors if missing
+PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-bun:latest" \
+    "$code_it" --tool-chains dotnet --image code-it-alpine-nope "${super_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "explicit --image is used as-is and errors if missing" "$?"
+
+# ---------------------------------------------------------------------------
 echo "11. Custom options"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --port 8000 "${common_args[@]}")
 assert_contains "custom --port maps the host port to container 3000" "$out" "-p 8000:3000"
@@ -537,11 +594,11 @@ PATH="$stub_docker:$PATH" "$code_it" --build-image --packages npm "${common_args
 [[ "$?" != "0" ]]; assert "removed --packages spelling fails" "$?"
 
 # An image label that disagrees with --tool-chains is called out
-out=$(STUB_IMAGE_TOOL_CHAINS=dotnet PATH="$stub_docker:$PATH" "$code_it" --tool-chains node,bun --image code-it-alpine-dotnet "${common_args[@]}" 2>&1)
+out=$(STUB_IMAGE_TOOL_CHAINS=dotnet PATH="$stub_docker:$PATH" "$code_it" --tool-chains node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "warns when the image label disagrees with --tool-chains" "$out" "looks built for tech 'dotnet'"
 # Without a label (older images), fall back to the name-based guess
-out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --tool-chains node,bun --image code-it-alpine-dotnet "${common_args[@]}" 2>&1)
-assert_contains "falls back to the image-name guess without a label" "$out" "looks built for tech 'dotnet'"
+out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --tool-chains node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+assert_contains "falls back to the image-name guess without a label" "$out" "looks built for tech 'dotnet,node'"
 
 # Unknown names are hard errors
 PATH="$stub_docker:$PATH" "$code_it" --build-image --tool-chains cobol "${common_args[@]}" >/dev/null 2>&1

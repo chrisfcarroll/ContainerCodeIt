@@ -42,8 +42,11 @@
 #                            Created if missing. Defaults to ~/.config/code-it
 #   --image, -i NAME         Image name to run. Default: "code-it-alpine-<tech>", a
 #                            slug of the resolved --tool-chains list, e.g. code-it-alpine-dotnet,
-#                            code-it-alpine-node-bun. Set it explicitly when running an
-#                            image built with different tech, or give the same --tool-chains.
+#                            code-it-alpine-node-bun. When that image does not exist, the
+#                            most-recently built existing image whose code-it.tool-chains
+#                            label contains every requested tool chain is used instead.
+#                            Set it explicitly to force a particular image (an error if it
+#                            does not exist).
 #   --build-image, -b        If specified, builds the image from the Dockerfile before running.
 #   --rebuild-image, -B      Like --build-image, but first updates the "# last changed"
 #                            cache-bust dates in the Dockerfile to today, forcing the
@@ -184,6 +187,7 @@ code_agent="opencode"
 work_dir_to_mount="."
 save_dir="$HOME/.config/code-it"
 image=""
+image_explicit=false
 build_image=false
 rebuild_image=false
 dockerfile_dir="$script_dir"
@@ -234,6 +238,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --image|-i)
             image="$2"
+            image_explicit=true
             shift 2
             ;;
         --build-image|-b)
@@ -351,31 +356,6 @@ fi
 # Detect / validate the container runtime (after parsing, so --runtime is honoured).
 runtime=$(ci_detect_runtime "$runtime") || exit 1
 
-# Warn if the image was built for a different tool-chain set than the one we are
-# about to run. Prefer the label code-it-build stamped on the image; fall back to
-# the old name-based guess when the runtime cannot inspect labels.
-image_tool_chains=""
-case "$runtime" in
-    docker)
-        image_tool_chains=$(docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "${image}:latest" 2>/dev/null || true)
-        ;;
-    container)
-        image_tool_chains=$(container image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "${image}:latest" 2>/dev/null || true)
-        ;;
-esac
-# A runtime that does not know the format prints its own error text to stdout; keep
-# only a plausible comma-separated tool-chain list.
-case "$image_tool_chains" in
-    *[!a-z,]*|"") image_tool_chains="" ;;
-esac
-if [[ -z "$image_tool_chains" && "$image" == code-it-alpine-* ]]; then
-    image_tool_chains="${image#code-it-alpine-}"
-    image_tool_chains=${image_tool_chains//-/,}
-fi
-if [[ -n "$image_tool_chains" && "$image_tool_chains" != "$(ci_join , "$enabled_tool_chains")" ]]; then
-    echo "Warning: image '$image' looks built for tech '$image_tool_chains' but --tool-chains is '$(ci_join , "$enabled_tool_chains")'." >&2
-    echo "    Pass the same --tool-chains used to build the image, or set --image explicitly." >&2
-fi
 # Give the Apple container runtime enough memory for the agent to work with
 if [[ "$runtime" == "container" ]]; then
     container_args="--memory 3g"
@@ -472,11 +452,42 @@ if [[ "${images_rc:-0}" != 0 ]]; then
     exit 1
 fi
 
-# An existing image is only required when we are not about to build one.
-if [[ "$build_image" == false ]] && ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
-    echo "Warning: $runtime image '$image' does not exist and --build-image was not specified." >&2
-    echo "Either build the image with the --build-image flag or ensure the image is available locally." >&2
-    exit 1
+# An existing image is only required when we are not about to build one. If the exact
+# image is missing and the user did not name one, use the most-recently built existing
+# image whose recorded tool chains contain every requested chain.
+if [[ "$build_image" == false ]]; then
+    if ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
+        if [[ "$image_explicit" == true ]]; then
+            echo "Warning: $runtime image '$image' does not exist." >&2
+            echo "Build it, or set --image to an image that exists." >&2
+            exit 1
+        fi
+        superset_image=$(ci_find_superset_image "$runtime" "$enabled_tool_chains") || superset_image=""
+        if [[ -n "$superset_image" ]]; then
+            echo "    '$image' does not exist; using '$superset_image', which contains ${enabled_tool_chains// /,}"
+            image="$superset_image"
+        else
+            echo "Warning: $runtime image '$image' does not exist and --build-image was not specified." >&2
+            echo "Either build the image with the --build-image flag or ensure the image is available locally." >&2
+            exit 1
+        fi
+    fi
+fi
+
+# Warn if the chosen image was built for a different tool-chain set than the one we
+# are about to run. Prefer the label code-it-build stamped on the image; fall back to
+# the name-based guess. A superset image is fine: only warn when it does not contain
+# every requested chain.
+image_tool_chains=$(ci_image_tool_chains "$runtime" "$image")
+if [[ -n "$image_tool_chains" ]] && ! ci_tool_chains_include "$image_tool_chains" "$enabled_tool_chains"; then
+    echo "Warning: image '$image' looks built for tech '$image_tool_chains' but --tool-chains is '$(ci_join , "$enabled_tool_chains")'." >&2
+    echo "    Pass the same --tool-chains used to build the image, or set --image explicitly." >&2
+elif [[ -n "$image_tool_chains" && "$image_tool_chains" != "$(ci_join , "$enabled_tool_chains")" ]]; then
+    extras=""
+    for c in ${image_tool_chains//,/ }; do
+        ci_has "$enabled_tool_chains" "$c" || extras=$(ci_comma_list_add "$extras" "$c")
+    done
+    echo "    Note: image '$image' also contains ${extras// /,}."
 fi
 
 # Git author info

@@ -74,7 +74,7 @@ agent in the container; the command says so before it copies.
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
 | `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
-| `--image`, `-i` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--tool-chains` (e.g. `code-it-alpine-node-bun`) |
+| `--image`, `-i` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--tool-chains` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
 | `--build-image`, `-b` | `-buildImage` | off | Build the image before running |
 | `--rebuild-image`, `-B` | `-rebuildImage` | off | Build the image, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
@@ -89,6 +89,12 @@ agent in the container; the command says so before it copies.
 note and delegate to `code-it-build` with the same tool chains, package caches, image,
 runtime and Dockerfile directory, then run the container. Prefer calling
 `code-it-build` directly.
+
+When the image derived from `--tool-chains` (e.g. `code-it-alpine-dotnet`) does not
+exist, `code-it` uses the most-recently built existing image whose
+`code-it.tool-chains` label contains every requested chain (e.g.
+`code-it-alpine-dotnet-bun` for `dotnet`), and says which image it chose. An explicit
+`--image` is used as-is and is an error if missing.
 
 ## code-it-build options
 

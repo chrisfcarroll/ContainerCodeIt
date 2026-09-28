@@ -383,6 +383,81 @@ $dfText = Get-Content (Join-Path $scriptDir 'Dockerfile') -Raw
 Assert "Dockerfile installs uv for every image" ($dfText.Contains('apk add --no-cache uv'))
 Assert "Dockerfile gates python3 on PYTHON" ($dfText.Contains('if [ "$PYTHON" = true ]'))
 
+"9g. Choosing an existing image that contains the requested tool chains"
+$superDocker = Join-Path $tmp 'super-docker'
+$null = New-Item -ItemType Directory -Force -Path $superDocker
+if ($onWindows) {
+    Set-Content -Path (Join-Path $superDocker 'docker.cmd') -Value @'
+@echo off
+if "%~1"=="images" (for %%i in (%STUB_IMAGES%) do @echo %%i) & goto :eof
+if "%~1"=="image" (
+    echo %~n0 %* | findstr /C:"code-it-alpine-dotnet-bun" >nul && (echo dotnet,bun& goto :eof)
+    echo %~n0 %* | findstr /C:"code-it-alpine-dotnet-node" >nul && (echo dotnet,node& goto :eof)
+    echo %~n0 %* | findstr /C:"code-it-alpine-dotnet" >nul && (echo dotnet& goto :eof)
+    echo.
+    goto :eof
+)
+echo stub docker: %*
+'@
+} else {
+    Set-Content -Path (Join-Path $superDocker 'docker') -Value @'
+#!/bin/sh
+case "$1" in
+    images) printf '%s\n' $STUB_IMAGES ;;
+    image)
+        for a in "$@"; do last="$a"; done
+        case "$last" in
+            code-it-alpine-dotnet-bun*)  echo dotnet,bun ;;
+            code-it-alpine-dotnet-node*) echo dotnet,node ;;
+            code-it-alpine-dotnet*)      echo dotnet ;;
+            *)                           echo "" ;;
+        esac ;;
+    *) echo "STUB $*" ;;
+esac
+'@
+    chmod +x (Join-Path $superDocker 'docker')
+}
+$superPath = "$superDocker$sep$stubPath"
+
+# The exact image, when it exists, is used unchanged
+$env:STUB_IMAGES = 'code-it-alpine-dotnet-bun:latest code-it-alpine-dotnet:latest'
+try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet') + $commonArgs) $superPath }
+finally { $env:STUB_IMAGES = $null }
+Assert-Contains "uses the exact image when it exists" $r.out 'code-it-alpine-dotnet:latest'
+Assert "no substitution when the exact image exists" (-not $r.out.Contains('does not exist; using'))
+
+# The exact image missing: the most-recently listed image containing the chain wins
+$env:STUB_IMAGES = 'code-it-alpine-dotnet-bun:latest code-it-alpine-dotnet-node:latest'
+try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet') + $commonArgs) $superPath }
+finally { $env:STUB_IMAGES = $null }
+Assert-Contains "substitutes a superset image" $r.out "does not exist; using 'code-it-alpine-dotnet-bun'"
+Assert-Contains "runs the superset image" $r.out 'code-it-alpine-dotnet-bun:latest'
+Assert-Contains "notes the extra tool chains" $r.out 'also contains bun'
+
+# Order decides
+$env:STUB_IMAGES = 'code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest'
+try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet') + $commonArgs) $superPath }
+finally { $env:STUB_IMAGES = $null }
+Assert-Contains "picks the most recent qualifying image" $r.out "using 'code-it-alpine-dotnet-node'"
+
+# Every requested chain must be present
+$env:STUB_IMAGES = 'code-it-alpine-dotnet-node:latest'
+try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet,bun') + $commonArgs) $superPath }
+finally { $env:STUB_IMAGES = $null }
+Assert "requires every requested chain to be present" ($r.code -ne 0)
+
+# No image contains the requested chain
+$env:STUB_IMAGES = 'code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest'
+try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'python') + $commonArgs) $superPath }
+finally { $env:STUB_IMAGES = $null }
+Assert "errors when no image contains the requested chain" ($r.code -ne 0)
+
+# An explicit -image is never substituted
+$env:STUB_IMAGES = 'code-it-alpine-dotnet-bun:latest'
+try { $r = Invoke-Scenario $codeIt (@('-toolChains', 'dotnet', '-image', 'code-it-alpine-nope') + $commonArgs) $superPath }
+finally { $env:STUB_IMAGES = $null }
+Assert "explicit -image is used as-is and errors if missing" ($r.code -ne 0)
+
 # ---------------------------------------------------------------------------
 "10. Custom options"
 $r = Invoke-Scenario $codeIt (@('-port', '8000') + $commonArgs) $stubPath
@@ -529,14 +604,14 @@ Assert-Contains "removed -packages is forwarded to the agent" $r.out '-packages 
 Assert-Contains "removed -packages no longer selects NPM" $r.out '--build-arg NPM=false'
 
 $env:STUB_IMAGE_TOOL_CHAINS = 'dotnet'
-try { $r = Invoke-Scenario $codeIt (@('-toolChains','node,bun','-image','code-it-alpine-dotnet') + $commonArgs) $stubPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolChains','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
 Assert-Contains "warns when the image label disagrees with -toolChains" $r.out "looks built for tech 'dotnet'"
 # Without a label (older images), fall back to the name-based guess
 $env:STUB_IMAGE_TOOL_CHAINS = ''
-try { $r = Invoke-Scenario $codeIt (@('-toolChains','node,bun','-image','code-it-alpine-dotnet') + $commonArgs) $stubPath }
+try { $r = Invoke-Scenario $codeIt (@('-toolChains','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
-Assert-Contains "falls back to the image-name guess without a label" $r.out "looks built for tech 'dotnet'"
+Assert-Contains "falls back to the image-name guess without a label" $r.out "looks built for tech 'dotnet,node'"
 
 # Unknown names are hard errors
 $r = Invoke-Scenario $codeIt (@('-buildImage','-toolChains','cobol') + $commonArgs) $stubPath

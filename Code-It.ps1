@@ -46,8 +46,10 @@
 
 .PARAMETER image
     Image name to run. Default: "code-it-alpine-<tech>", a slug of the resolved -toolChains
-    list, e.g. code-it-alpine-dotnet or code-it-alpine-node-bun. Set it explicitly when
-    running an image built with different tech, or give the same -toolChains.
+    list, e.g. code-it-alpine-dotnet or code-it-alpine-node-bun. When that image does not
+    exist, the most-recently built existing image whose code-it.tool-chains label contains
+    every requested tool chain is used instead. Set it explicitly to force a particular
+    image (an error if it does not exist).
 
 .PARAMETER buildImage
     If specified, builds the image from the Dockerfile before running the container.
@@ -369,32 +371,40 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Verbose ([string]::join("`n", @("    $runtime images") + $validImages)).ToString()
 
-# Warn if the image was built for a different tool-chain set than the one we are
-# about to run. Prefer the label Code-It-Build stamped on the image; fall back to
-# the old name-based guess when the runtime cannot inspect labels.
-$imageToolChains = ""
-if ($runtime -eq "docker") {
-    $imageToolChains = (docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image`:latest" 2>$null)
-} else {
-    $imageToolChains = (container image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image`:latest" 2>$null)
-}
-$imageToolChains = "$imageToolChains".Trim()
-# A runtime that does not know the format prints its own error text; keep only a
-# plausible comma-separated tool-chain list.
-if ($imageToolChains -notmatch '^[a-z,]+$') { $imageToolChains = "" }
-if (-not $imageToolChains -and $image -like 'code-it-alpine-*') {
-    $imageToolChains = ($image.Substring('code-it-alpine-'.Length)) -replace '-', ','
-}
-if ($imageToolChains -and $imageToolChains -ne ($enabledToolChains -join ',')) {
-    Write-Warning "Image '$image' looks built for tech '$imageToolChains' but -toolChains is '$($enabledToolChains -join ',')'."
-    Write-Warning "Pass the same -toolChains used to build the image, or set -image explicitly."
+# An existing image is only required when we are not about to build one. If the exact
+# image is missing and the user did not name one, use the most-recently built existing
+# image whose recorded tool chains contain every requested chain.
+if (-not $buildImage) {
+    $exactExists = $validImages | Where-Object { $_ -and ($_ -eq $image -or $_ -match "^$([regex]::Escape($image))[: ]") } | Select-Object -First 1
+    if (-not $exactExists) {
+        if ($PSBoundParameters.ContainsKey('image')) {
+            Write-Warning "$runtime image '$image' does not exist.
+    Build it, or set -image to an image that exists."
+            exit 1
+        }
+        $supersetImage = Find-CodeItSupersetImage $runtime $enabledToolChains
+        if ($supersetImage) {
+            "    '$image' does not exist; using '$supersetImage', which contains $($enabledToolChains -join ',')"
+            $image = $supersetImage
+        } else {
+            Write-Warning "$runtime image '$image' does not exist and -buildImage was not specified.
+    Either build the image with -buildImage flag or ensure the image is available locally."
+            exit 1
+        }
+    }
 }
 
-# An existing image is only required when we are not about to build one.
-if (-not $buildImage -and -not ($validImages | Where-Object { $_ -and ($_ -eq $image -or $_ -match "^$([regex]::Escape($image))[: ]") } | Select-Object -First 1)) {
-    Write-Warning "$runtime image '$image' does not exist and -buildImage was not specified.
-    Either build the image with -buildImage flag or ensure the image is available locally."
-    exit 1
+# Warn if the chosen image was built for a different tool-chain set than the one we
+# are about to run. Prefer the label Code-It-Build stamped on the image; fall back to
+# the name-based guess. A superset image is fine: only warn when it does not contain
+# every requested chain.
+$imageToolChains = Get-CodeItImageToolChains $runtime $image
+if ($imageToolChains -and -not (Test-CodeItToolChainsInclude $imageToolChains $enabledToolChains)) {
+    Write-Warning "Image '$image' looks built for tech '$imageToolChains' but -toolChains is '$($enabledToolChains -join ',')'."
+    Write-Warning "Pass the same -toolChains used to build the image, or set -image explicitly."
+} elseif ($imageToolChains -and $imageToolChains -ne ($enabledToolChains -join ',')) {
+    $extras = @($imageToolChains -split ',' | Where-Object { $enabledToolChains -notcontains $_ })
+    "    Note: image '$image' also contains $($extras -join ',')"
 }
 
 # Git author info

@@ -58,6 +58,61 @@ function CodeIt-ImageName([string[]]$toolChains) {
     return "code-it-alpine-$($toolChains -join '-')"
 }
 
+# Test-CodeItToolChainsInclude IMAGE_CHAINS_COMMA REQUESTED: true if every requested
+# tool chain is present in the image's chain list.
+function Test-CodeItToolChainsInclude([string]$imageChains, [string[]]$requested) {
+    $have = @($imageChains -split ',')
+    foreach ($r in $requested) {
+        if ($have -notcontains $r) { return $false }
+    }
+    return $true
+}
+
+# Get-CodeItImageToolChains RUNTIME IMAGE: the comma-separated tool chains recorded on
+# IMAGE (its code-it.tool-chains label, or the code-it-alpine-<chains> name), or "".
+function Get-CodeItImageToolChains([string]$runtime, [string]$image) {
+    $chains = ""
+    if ($runtime -eq 'docker') {
+        $chains = (docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' $image 2>$null)
+    } else {
+        $chains = (container image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' $image 2>$null)
+    }
+    $chains = "$chains".Trim()
+    if ($chains -notmatch '^[a-z,]*$') { $chains = "" }
+    if (-not $chains -and $image -like 'code-it-alpine-*') {
+        $chains = ($image.Substring('code-it-alpine-'.Length)) -replace ':.*$', ''
+        $chains = $chains -replace '-', ','
+    }
+    return $chains
+}
+
+# Get-CodeItImageList RUNTIME: existing image "repo:tag" names, most recent first.
+function Get-CodeItImageList([string]$runtime) {
+    if ($runtime -eq 'docker') {
+        return @(docker images --format '{{.Repository}}:{{.Tag}}' 2>$null)
+    }
+    # Apple container's ls is newest first; NAME and TAG are the first two columns.
+    return @(container image ls 2>$null | Select-Object -Skip 1 | ForEach-Object {
+        $f = $_ -split '\s+'
+        if ($f.Count -ge 2) { "$($f[0]):$($f[1])" }
+    })
+}
+
+# Find-CodeItSupersetImage RUNTIME REQUESTED: the repo name of the most-recently built
+# image whose recorded tool chains contain every requested chain, or "".
+function Find-CodeItSupersetImage([string]$runtime, [string[]]$requested) {
+    foreach ($image in (Get-CodeItImageList $runtime)) {
+        if (-not $image) { continue }
+        if ($image -notmatch ':') { $image = "$image`:latest" }
+        $chains = Get-CodeItImageToolChains $runtime $image
+        if (-not $chains) { continue }
+        if (Test-CodeItToolChainsInclude $chains $requested) {
+            return ($image -replace ':.*$', '')
+        }
+    }
+    return ""
+}
+
 # Get-CodeItToolChainCommands NAME: the host commands that reveal NAME is installed.
 function Get-CodeItToolChainCommands([string]$name) {
     switch ($name) {

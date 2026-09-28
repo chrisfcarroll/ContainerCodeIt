@@ -98,6 +98,67 @@ ci_default_image_name() {
     printf 'code-it-alpine-%s' "$(ci_join - "$1")"
 }
 
+# ci_tool_chains_include IMAGE_CHAINS_COMMA REQUESTED_SPACE: true if every requested
+# tool chain is present in the image's comma-separated chain list.
+ci_tool_chains_include() {
+    local image_chains="${1//,/ }" req
+    for req in $2; do
+        ci_has "$image_chains" "$req" || return 1
+    done
+    return 0
+}
+
+# ci_image_tool_chains RUNTIME IMAGE: echo the comma-separated tool chains recorded on
+# IMAGE (its code-it.tool-chains label, or the code-it-alpine-<chains> name), or
+# nothing if it cannot be told.
+ci_image_tool_chains() {
+    local runtime="$1" image="$2" chains=""
+    case "$runtime" in
+        docker)    chains=$(docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image" 2>/dev/null || true) ;;
+        container) chains=$(container image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image" 2>/dev/null || true) ;;
+    esac
+    # A runtime that does not know the format prints its own error text to stdout; keep
+    # only a plausible comma-separated tool-chain list.
+    case "$chains" in
+        *[!a-z,]*|"") chains="" ;;
+    esac
+    if [[ -z "$chains" && "$image" == code-it-alpine-* ]]; then
+        chains="${image#code-it-alpine-}"
+        chains="${chains%%:*}"
+        chains="${chains//-/,}"
+    fi
+    printf '%s' "$chains"
+}
+
+# ci_image_list RUNTIME: existing image "repo:tag" names, most-recently built first.
+ci_image_list() {
+    local runtime="$1"
+    if [[ "$runtime" == "docker" ]]; then
+        docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true
+    else
+        # Apple container's ls is newest first; NAME and TAG are the first two columns.
+        container image ls 2>/dev/null | tail -n +2 | awk 'NF { print $1":"$2 }' || true
+    fi
+}
+
+# ci_find_superset_image RUNTIME REQUESTED_SPACE: echo the repo name of the
+# most-recently built image whose recorded tool chains contain every requested chain,
+# or nothing. Only images whose label (or name) can be read are considered.
+ci_find_superset_image() {
+    local runtime="$1" requested="$2" image image_chains
+    while IFS= read -r image; do
+        [[ -n "$image" ]] || continue
+        [[ "$image" == *:* ]] || image="$image:latest"
+        image_chains=$(ci_image_tool_chains "$runtime" "$image")
+        [[ -n "$image_chains" ]] || continue
+        if ci_tool_chains_include "$image_chains" "$requested"; then
+            printf '%s' "${image%%:*}"
+            return 0
+        fi
+    done < <(ci_image_list "$runtime")
+    return 1
+}
+
 # ci_agent_config AGENTS_DIR NAME KEY: the (unquoted) value of KEY in an agent's
 # config, or return 1. Keys are uppercase and appear once per line.
 ci_agent_config() {
