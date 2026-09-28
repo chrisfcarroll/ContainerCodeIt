@@ -21,20 +21,24 @@
     - The enabled host package caches, mounted read-only
     - Port mappings
 
-    The script supports optional image building and port mappings. Container mounts preserve:
-    - ~/.config/opencode/      : OpenCode configuration (opencode.json, etc.)
-    - ~/.local/share/opencode/ : OpenCode data and auth (auth.json, etc.)
-    - ~/.claude/               : Claude credentials, settings, permissions, memory
-    - ~/.claude.json           : Claude OAuth session data, MCP configs, preferences
+    The script supports optional image building and port mappings. Only the chosen
+    agent's state (from agents/<name>/config) is mounted, so sessions and logins persist.
 
 .PARAMETER WorkDirToMount
     Host directory path to mount as /work in the container. Defaults to the current directory.
 
+.PARAMETER agent
+    Run the agent defined in agents/<name>. Only that agent's state is mounted.
+    Default: opencode. Alias: -a
+
+.PARAMETER listAgents
+    List the available agents and exit.
+
 .PARAMETER opencode
-    Run OpenCode in the container (default). Alias: -o
+    Shortcut for -agent opencode (the default). Alias: -o
 
 .PARAMETER claude
-    Run Claude Code in the container. Alias: -c
+    Shortcut for -agent claude. Alias: -c
 
 .PARAMETER saveDir
     Host directory for storing agent configuration and state volumes. Created if missing.
@@ -183,6 +187,9 @@ param (
     [switch]$claude         = $false,
     [Alias('o')]
     [switch]$opencode       = $false,
+    [Alias('a')]
+    [string]$agent          = "",
+    [switch]$listAgents     = $false,
     [string]$saveDir        = "$HOME/.config/code-it",
     [string]$image          = "",
     [switch]$buildImage     = $false,
@@ -212,12 +219,39 @@ if ($help) {
 
 . "$PSScriptRoot/lib/CodeItCommon.ps1"
 
-# Resolve which agent to run
+$agentsDir = Join-Path $PSScriptRoot 'agents'
+
+# -listAgents lists the available agent definitions and exits.
+if ($listAgents) {
+    foreach ($name in (Get-CodeItListAgents $agentsDir)) {
+        $short = Get-CodeItAgentConfig $agentsDir $name 'AGENT_SHORT'
+        if ($short) { "  {0,-10} -{1}" -f $name, $short } else { "  $name" }
+    }
+    exit 0
+}
+
+# Resolve which agent to run: -c / -o are shortcuts, else -agent NAME, else opencode.
 if ($claude -and $opencode) {
     Write-Warning "Specify only one of -claude or -opencode."
     exit 1
 }
-$codeAgent = if ($claude) { "claude" } else { "opencode" }
+$codeAgent = if ($claude) { "claude" } elseif ($opencode) { "opencode" } elseif ($agent) { $agent } else { "opencode" }
+
+# Load the chosen agent's definition. The agent name is data: shortcut flags are
+# resolved here, but every other detail comes from agents/<name>/config.
+if (-not (Test-CodeItAgentExists $agentsDir $codeAgent)) {
+    Write-Warning "Unknown agent '$codeAgent'. Known agents: $((Get-CodeItListAgents $agentsDir) -join ' ')"
+    Write-Warning "Run .\Code-It.ps1 -listAgents to see them."
+    exit 1
+}
+$agentBinary      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_BINARY'
+$agentStateDirs   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_DIRS'
+$agentStateFiles  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_FILES'
+$agentConfigLabel = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CONFIG_LABEL'
+$agentCmdInteractivePrompt   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_PROMPT'
+$agentCmdInteractiveNoPrompt = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_NO_PROMPT'
+$agentCmdHeadlessPrompt      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_HEADLESS_PROMPT'
+$agentCmdHeadlessNoPrompt    = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_HEADLESS_NO_PROMPT'
 
 # A leading bare argument is the agent's opening prompt, as in `.\Code-It.ps1 -c "do it"`;
 # anything else goes to the agent verbatim
@@ -291,41 +325,32 @@ if (-not $WorkDirToMount -or -not (Test-Path -Path $WorkDirToMount -PathType Con
 }
 $WorkDirToMount = (Resolve-Path $WorkDirToMount).Path
 
-# Create the save dir structure so mounts always work, even on first run.
-# The .claude.json mount is a single file: pre-create it so the runtime does not
-# create a directory in its place.
-$null = New-Item -ItemType Directory -Force -Path "$saveDir/.config/opencode"
-$null = New-Item -ItemType Directory -Force -Path "$saveDir/.local/share/opencode"
-$null = New-Item -ItemType Directory -Force -Path "$saveDir/.claude"
-if (-not (Test-Path -Path "$saveDir/.claude.json")) {
-    Set-Content -Path "$saveDir/.claude.json" -Value '{}'
+# Create the save dir structure so mounts always work, even on first run. State
+# paths come from the agent definition: directories are created; single files are
+# pre-created so the runtime does not make a directory in their place.
+$agentStateDirList   = Split-CodeItList ($agentStateDirs -replace ':', ',')
+$agentStateFileList  = Split-CodeItList ($agentStateFiles -replace ':', ',')
+foreach ($d in $agentStateDirList) {
+    $null = New-Item -ItemType Directory -Force -Path "$saveDir/$d"
 }
-if ($codeAgent -eq "opencode") {
-    $opencodeConfig = "$saveDir/.config/opencode/config.json"
-    if (-not (Test-Path -Path $opencodeConfig)) {
-        $configContents = @'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "permission": "allow"
-}
-'@
-        [System.IO.File]::WriteAllText($opencodeConfig, $configContents, [System.Text.UTF8Encoding]::new($false))
-        "    Created OpenCode configuration: $opencodeConfig"
+foreach ($f in $agentStateFileList) {
+    if (-not (Test-Path -Path "$saveDir/$f")) {
+        Set-Content -Path "$saveDir/$f" -Value '{}'
     }
 }
-else {
-    $claudeSettings = "$saveDir/.claude/settings.json"
-    if (-not (Test-Path -Path $claudeSettings)) {
-        $settingsContents = @'
-{
-  "permissions": {
-    "defaultMode": "auto"
-  },
-  "skipDangerousModePermissionPrompt": true
-}
-'@
-        [System.IO.File]::WriteAllText($claudeSettings, $settingsContents, [System.Text.UTF8Encoding]::new($false))
-        "    Created Claude Code settings: $claudeSettings"
+
+# Write the agent's default configuration file(s) on first run, preserving layout.
+$defaultConfigDir = Join-Path $agentsDir (Join-Path $codeAgent 'default-config')
+if (Test-Path -Path $defaultConfigDir -PathType Container) {
+    $defaultConfigDir = (Resolve-Path $defaultConfigDir).Path
+    foreach ($src in (Get-ChildItem -Force -Recurse -File -Path $defaultConfigDir | Sort-Object FullName)) {
+        $rel = $src.FullName.Substring($defaultConfigDir.Length).TrimStart('/', '\')
+        $dest = Join-Path $saveDir $rel
+        if (-not (Test-Path -Path $dest)) {
+            $null = New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent)
+            Copy-Item -Path $src.FullName -Destination $dest
+            "    Created $agentConfigLabel`: $dest"
+        }
     }
 }
 $saveDir = (Resolve-Path $saveDir).Path
@@ -461,6 +486,7 @@ if ($buildImage) {
     $buildShimParams = @{
         toolChains    = ($enabledToolChains -join ',')
         packageCaches = ($enabledPackageCaches -join ',')
+        agent         = $codeAgent
         image         = $image
         dockerfileDir = $dockerfileDir
         runtime       = $runtime
@@ -474,26 +500,34 @@ if ($buildImage) {
 }
 
 # Translate the prompt, and any pass-through arguments, into the chosen agent's own
-# command line, which the container entrypoint hands to the agent. See
+# command line, from the definition's cmd_* template. {args} expands to the agent
+# args, {prompt} to the opening prompt. See
 #   https://code.claude.com/docs/en/cli-reference
 #   https://opencode.ai/docs/cli/
 $agentCmd = @()
-if ($codeAgent -eq "claude") {
-    # claude [flags] [PROMPT], and -p answers the prompt without going interactive
-    if ($headless -and $promptSet) { $agentCmd += '-p' }
-    $agentCmd += $agentArgs
-    if ($promptSet) { $agentCmd += $prompt }
+if ($headless) {
+    $template = if ($promptSet) { $agentCmdHeadlessPrompt } else { $agentCmdHeadlessNoPrompt }
+} else {
+    $template = if ($promptSet) { $agentCmdInteractivePrompt } else { $agentCmdInteractiveNoPrompt }
 }
-elseif ($headless) {
-    # opencode run [flags] [MESSAGE] answers without starting the TUI
-    $agentCmd += 'run'
-    $agentCmd += $agentArgs
-    if ($promptSet) { $agentCmd += $prompt }
+foreach ($token in ($template -split '\s+' | Where-Object { $_ })) {
+    switch ($token) {
+        '{args}'   { $agentCmd += $agentArgs }
+        '{prompt}' { if ($promptSet) { $agentCmd += $prompt } }
+        default    { $agentCmd += $token }
+    }
 }
-else {
-    # opencode --prompt MESSAGE opens the TUI with the message already sent
-    if ($promptSet) { $agentCmd += @('--prompt', $prompt) }
-    $agentCmd += $agentArgs
+
+# Mount only the chosen agent's state, from its definition.
+$agentMountArgs = @()
+$agentMountPrint = ""
+foreach ($d in $agentStateDirList) {
+    $agentMountArgs += @('-v', "$saveDir/${d}:$containerHome/${d}")
+    $agentMountPrint += "`n                -v `"$saveDir/${d}:$containerHome/${d}`""
+}
+foreach ($f in $agentStateFileList) {
+    $agentMountArgs += @('-v', "$saveDir/${f}:$containerHome/${f}")
+    $agentMountPrint += "`n                -v `"$saveDir/${f}:$containerHome/${f}`""
 }
 
 # Headless runs are one-shot: no tmux and no TTY, so the container exits when the
@@ -514,11 +548,7 @@ if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
                 -e GIT_COMMITTER_NAME=`"$gitAuthorName`" `
                 -e GIT_COMMITTER_EMAIL=`"$gitAuthorEmail`" `
-                -v `"$WorkDirToMount`:/work`" `
-                -v `"$saveDir/.claude`:/home/$agentNameLower/.claude`" `
-                -v `"$saveDir/.claude.json`:/home/$agentNameLower/.claude.json`" `
-                -v `"$saveDir/.config/opencode`:/home/$agentNameLower/.config/opencode`" `
-                -v `"$saveDir/.local/share/opencode`:/home/$agentNameLower/.local/share/opencode`"$cacheMountPrint
+                -v `"$WorkDirToMount`:/work`"$agentMountPrint$cacheMountPrint
             $image`:latest$agentCmdPrint
 "@
 
@@ -535,9 +565,6 @@ if ($dryRun) {
             -e GIT_COMMITTER_NAME="$gitAuthorName" `
             -e GIT_COMMITTER_EMAIL="$gitAuthorEmail" `
             -v "$WorkDirToMount`:/work" `
-            -v "$saveDir/.claude:/home/$agentNameLower/.claude" `
-            -v "$saveDir/.claude.json:/home/$agentNameLower/.claude.json" `
-            -v "$saveDir/.config/opencode:/home/$agentNameLower/.config/opencode" `
-            -v "$saveDir/.local/share/opencode:/home/$agentNameLower/.local/share/opencode" `
+            $agentMountArgs `
             $cacheMountArgs `
     $image`:latest $agentCmd

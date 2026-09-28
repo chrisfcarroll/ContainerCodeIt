@@ -129,7 +129,7 @@ assert_contains "--help documents --headless" "$out" "--headless"
 assert_contains "--help documents the -- separator" "$out" "-- AGENT-ARGS..."
 
 # ---------------------------------------------------------------------------
-echo "3. Default dry-run with docker: opencode agent, all state mounts"
+echo "3. Default dry-run with docker: opencode agent, only its state mounted"
 out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert "dry-run exit code" "$?"
 assert_contains "reports OpenCode config creation" "$out" "Created OpenCode configuration"
@@ -138,20 +138,21 @@ assert_contains "defaults to opencode" "$out" 'CODE_AGENT="opencode"'
 assert_contains "docker run command" "$out" "docker run -it"
 assert_contains "image name" "$out" "code-it-alpine-dotnet-node:latest"
 assert_contains "work dir mount" "$out" "$script_dir:/work"
-assert_contains "claude dir mount" "$out" "/.claude:/home/agent1/.claude"
-assert_contains "claude.json mount" "$out" "/.claude.json:/home/agent1/.claude.json"
 assert_contains "opencode config mount" "$out" "/.config/opencode:/home/agent1/.config/opencode"
-assert_contains "opencode mount" "$out" "/.local/share/opencode:/home/agent1/.local/share/opencode"
+assert_contains "opencode data mount" "$out" "/.local/share/opencode:/home/agent1/.local/share/opencode"
+case "$out" in
+    *"/home/agent1/.claude"*) assert "opencode run mounts no claude state" 1 ;;
+    *)                        assert "opencode run mounts no claude state" 0 ;;
+esac
 assert_contains "docker default auto-assign port" "$out" "-p 0:3000"
 
 # ---------------------------------------------------------------------------
 echo "4. Save dir structure is created for first run"
-[[ -d "$save/.claude" ]];                 assert "save/.claude created" "$?"
 [[ -d "$save/.config/opencode" ]];        assert "save/.config/opencode created" "$?"
 [[ -d "$save/.local/share/opencode" ]];   assert "save/.local/share/opencode created" "$?"
-[[ -f "$save/.claude.json" ]];            assert "save/.claude.json created as a file" "$?"
 [[ "$(tr -d '[:space:]' < "$save/.config/opencode/config.json")" == '{"$schema":"https://opencode.ai/config.json","permission":"allow"}' ]]
 assert "OpenCode config permits all actions" "$?"
+[[ ! -e "$save/.claude" ]];               assert "opencode run creates no claude state" "$?"
 
 # ---------------------------------------------------------------------------
 echo "5. Agent selection switches"
@@ -164,8 +165,26 @@ assert_contains "--claude selects claude" "$out" 'CODE_AGENT="claude"'
 assert_contains "reports Claude settings creation" "$out" "Created Claude Code settings"
 [[ "$(tr -d '[:space:]' < "$save/.claude/settings.json")" == '{"permissions":{"defaultMode":"auto"},"skipDangerousModePermissionPrompt":true}' ]]
 assert "Claude settings enable auto mode and skip prompt" "$?"
+[[ -f "$save/.claude.json" ]];            assert "save/.claude.json pre-created as a file" "$?"
+assert_contains "claude dir mount" "$out" "/.claude:/home/agent1/.claude"
+assert_contains "claude.json mount" "$out" "/.claude.json:/home/agent1/.claude.json"
+case "$out" in
+    *"/home/agent1/.config/opencode"*) assert "claude run mounts no opencode state" 1 ;;
+    *)                                 assert "claude run mounts no opencode state" 0 ;;
+esac
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c "${common_args[@]}")
 assert_contains "-c selects claude" "$out" 'CODE_AGENT="claude"'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent claude "${common_args[@]}")
+assert_contains "--agent claude selects claude" "$out" 'CODE_AGENT="claude"'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode "${common_args[@]}")
+assert_contains "--agent opencode selects opencode" "$out" 'CODE_AGENT="opencode"'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --list-agents)
+assert "--list-agents exit code" "$?"
+assert_contains "--list-agents lists claude" "$out" "claude"
+assert_contains "--list-agents lists opencode" "$out" "opencode"
+assert_contains "--list-agents shows the short flag" "$out" "-o"
+PATH="$stub_docker:$PATH" "$code_it" --agent nosuchagent "${common_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "unknown --agent fails" "$?"
 
 # ---------------------------------------------------------------------------
 echo "6. Alias scripts"
@@ -241,23 +260,25 @@ out=$(STUB_BUILD_FAIL=1 PATH="$stub_docker:$PATH" "$code_it" --build-image --wor
 [[ "$out" != *STUB-DOCKER-RUN* ]]; assert "failed build does not run the container" "$?"
 
 # ---------------------------------------------------------------------------
-echo "10b. Rebuild image (updates the agents)"
+echo "10b. Rebuild image (updates the agent install fragments)"
 dfdir="$tmp/dfdir"; mkdir -p "$dfdir"
-sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$script_dir/Dockerfile" > "$dfdir/Dockerfile"
+cp "$script_dir/Dockerfile" "$dfdir/Dockerfile"
+cp -R "$script_dir/agents" "$dfdir/agents"
+sed -i -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$dfdir/agents/"*/install.dockerfile
 today=$(date +%Y-%m-%d)
 out=$(PATH="$stub_docker:$PATH" "$code_it" --rebuild-image --dockerfile-dir "$dfdir" "${common_args[@]}")
 assert "--rebuild-image exit code" "$?"
 assert_contains "rebuild invokes docker build" "$out" "STUB-DOCKER-BUILD"
 assert_contains "rebuild implies build (no --build-image needed)" "$out" "-t code-it-alpine-dotnet-node:latest"
-grep -q "# last changed $today" "$dfdir/Dockerfile"
-assert "Dockerfile dates bumped to today" "$?"
-grep -q "# last changed 2000-01-01" "$dfdir/Dockerfile" >/dev/null 2>&1
-[[ "$?" != "0" ]]; assert "old dates gone from Dockerfile" "$?"
+grep -q "# last changed $today" "$dfdir/agents/opencode/install.dockerfile"
+assert "opencode install fragment dates bumped to today" "$?"
+grep -q "# last changed 2000-01-01" "$dfdir/agents/opencode/install.dockerfile" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "old dates gone from the fragment" "$?"
 # plain --build-image leaves the dates alone
-sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$script_dir/Dockerfile" > "$dfdir/Dockerfile"
+sed -i -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$dfdir/agents/"*/install.dockerfile
 out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --dockerfile-dir "$dfdir" "${common_args[@]}")
 assert "--build-image exit code (dfdir)" "$?"
-grep -q "# last changed 2000-01-01" "$dfdir/Dockerfile"
+grep -q "# last changed 2000-01-01" "$dfdir/agents/opencode/install.dockerfile"
 assert "--build-image leaves dates unchanged" "$?"
 
 # ---------------------------------------------------------------------------
@@ -298,15 +319,38 @@ PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" -
 
 # --rebuild bumps the dates and then really builds
 bdfdir="$tmp/build-dfdir"; mkdir -p "$bdfdir"
-sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$script_dir/Dockerfile" > "$bdfdir/Dockerfile"
+cp "$script_dir/Dockerfile" "$bdfdir/Dockerfile"
+cp -R "$script_dir/agents" "$bdfdir/agents"
+sed -i -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$bdfdir/agents/"*/install.dockerfile
 out=$(PATH="$stub_docker:$PATH" "$build_it" --rebuild --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
 assert "code-it-build --rebuild exit code" "$?"
 assert_contains "code-it-build --rebuild invokes docker build" "$out" "STUB-DOCKER-BUILD"
-grep -q "# last changed $today" "$bdfdir/Dockerfile"
-assert "code-it-build --rebuild bumps the dates" "$?"
+grep -q "# last changed $today" "$bdfdir/agents/opencode/install.dockerfile"
+assert "code-it-build --rebuild bumps the opencode fragment" "$?"
+grep -q "# last changed $today" "$bdfdir/agents/claude/install.dockerfile"
+assert "code-it-build --rebuild bumps the claude fragment" "$?"
 # A missing Dockerfile is an error
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$tmp" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build without a Dockerfile fails" "$?"
+
+echo "10f. code-it-build agents"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+assert_contains "default build installs opencode and claude" "$out" "agents opencode,claude"
+assert_contains "default build labels the agents" "$out" "--label code-it.agents=opencode,claude"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent opencode 2>&1)
+assert_contains "--agent opencode selects only opencode" "$out" "agents opencode"
+case "$out" in
+    *"agents opencode,claude"*) assert "--agent opencode excludes claude" 1 ;;
+    *)                         assert "--agent opencode excludes claude" 0 ;;
+esac
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
+assert_contains "--agent accepts a list" "$out" "agents claude,opencode"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --list-agents)
+assert "--list-agents exit code" "$?"
+assert_contains "code-it-build --list-agents lists claude" "$out" "claude"
+assert_contains "code-it-build --list-agents lists opencode" "$out" "opencode"
+PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent nosuch >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "code-it-build unknown agent fails" "$?"
 
 echo "10d. code-it reads the image label"
 out=$(STUB_IMAGE_TOOL_CHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
@@ -339,7 +383,7 @@ assert_contains "custom --port maps the host port to container 3000" "$out" "-p 
 out=$(PATH="$stub_docker:$PATH" "$code_it" --port 8000 -o "${common_args[@]}")
 assert_contains "flag after --port value is not eaten" "$out" 'CODE_AGENT="opencode"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent-name "MyAgent" "${common_args[@]}")
-assert_contains "agent name lowercased in mounts" "$out" "/home/myagent/.claude"
+assert_contains "agent name lowercased in mounts" "$out" "/home/myagent/.config/opencode"
 assert_contains "agent name in git author" "$out" 'GIT_AUTHOR_NAME="MyAgent for'
 assert_contains "agent name in git committer" "$out" 'GIT_COMMITTER_NAME="MyAgent for'
 assert_contains "git committer email passed" "$out" 'GIT_COMMITTER_EMAIL='
@@ -363,6 +407,7 @@ case "$out" in
 esac
 alias_dfdir="$tmp/alias-dfdir"; mkdir -p "$alias_dfdir"
 cp "$script_dir/Dockerfile" "$alias_dfdir/Dockerfile"
+cp -R "$script_dir/agents" "$alias_dfdir/agents"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -B --dockerfile-dir "$alias_dfdir" -w "$script_dir" -s "$save" -d)
 assert_contains "-B is --rebuild-image" "$out" "STUB-DOCKER-BUILD"
 
@@ -548,6 +593,8 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless --prompt "tidy" "${comm
 assert_contains "agent flags precede the prompt for claude" "$out" "code-it-alpine-dotnet-node:latest -p --max-turns 5 tidy"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless --prompt "tidy" "${common_args[@]}" -- --model opus)
 assert_contains "agent flags follow run for opencode" "$out" "code-it-alpine-dotnet-node:latest run --model opus tidy"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "${common_args[@]}" -- --session abc)
+assert_contains "opencode headless with no prompt still uses run" "$out" "code-it-alpine-dotnet-node:latest run --session abc"
 # --headless without a prompt leaves the agent command to the caller
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless "${common_args[@]}" -- -p "count the files")
 assert_contains "--headless with no prompt adds no -p of its own" "$out" 'code-it-alpine-dotnet-node:latest -p count\ the\ files'
@@ -603,8 +650,7 @@ if command -v zsh &>/dev/null; then
     mkdir -p "$gowork/repo" "$gobin"
     sed -n "/^RUN cat <<'EOF' >> ~\/go.sh$/,/^EOF$/p" "$script_dir/Dockerfile" \
         | sed '1d;$d' \
-        | sed -e "s#/home/agent1/.opencode/bin/opencode#$gobin/opencode#" \
-              -e "s#/home/agent1/.local/bin/claude#$gobin/claude#" \
+        | sed -e "s#/etc/code-it-agents#$gobin/agents#" \
               -e "s#/work#$gowork#g" > "$tmp/go.sh"
     chmod +x "$tmp/go.sh"
     [[ -s "$tmp/go.sh" ]]; assert "go.sh extracted from the Dockerfile" "$?"
@@ -618,6 +664,8 @@ echo
 EOF
         chmod +x "$gobin/$agent"
     done
+    # go.sh resolves the agent binary from the build-time name=binary map
+    printf 'opencode=%s/opencode\nclaude=%s/claude\n' "$gobin" "$gobin" > "$gobin/agents"
     # tmux takes the command as one string: run it, so what the agent receives is visible
     cat > "$gobin/tmux" <<'EOF'
 #!/bin/sh

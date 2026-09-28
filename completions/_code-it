@@ -26,6 +26,7 @@ _code_it() {
         case ${words[i]} in
             (--claude|-c)   agent=claude ;;
             (--opencode|-o) agent=opencode ;;
+            (--agent|-a)    agent=${words[i+1]} ;;
             (--)            seen_dashdash=1 ;;
         esac
     done
@@ -70,14 +71,16 @@ _code_it() {
         (--runtime|-r)    compadd -- docker container; return ;;
         (--image|-i)      compadd -- code-it-alpine-dotnet-node; return ;;
         (--agent-name) compadd -- Agent1; return ;;
+        (--agent|-a)   compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
         (--tool-chains|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
         (--prompt|-p|--port) return ;;   # free text: leave it to the user
     esac
 
-    compadd -- --opencode -o --claude -c --prompt -p --headless --work-dir -w --save-dir -s \
-        --image -i --build-image -b --rebuild-image -B --dockerfile-dir --runtime -r --port \
-        --agent-name --tool-chains -t --stack --package-caches --dry-run -d --help -h --
+    compadd -- --agent -a --list-agents --opencode -o --claude -c --prompt -p --headless \
+        --work-dir -w --save-dir -s --image -i --build-image -b --rebuild-image -B \
+        --dockerfile-dir --runtime -r --port --agent-name --tool-chains -t --stack \
+        --package-caches --dry-run -d --help -h --
 }
 
 _code_it "$@"

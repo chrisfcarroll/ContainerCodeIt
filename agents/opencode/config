@@ -1,0 +1,16 @@
+# OpenCode agent definition. Readable from bash (it is sourced) and PowerShell
+# (parsed as key=value). Keep one key per line.
+AGENT_NAME=opencode
+AGENT_SHORT=o
+AGENT_COMMAND=opencode
+AGENT_BINARY=/home/agent1/.opencode/bin/opencode
+AGENT_INSTALL=install.dockerfile
+AGENT_CONFIG_LABEL='OpenCode configuration'
+# State created under --save-dir and mounted into the container home
+AGENT_STATE_DIRS='.config/opencode:.local/share/opencode'
+AGENT_STATE_FILES=''
+# Prompt translation: {args} is the agent arguments, {prompt} the opening prompt
+AGENT_CMD_INTERACTIVE_PROMPT='--prompt {prompt} {args}'
+AGENT_CMD_INTERACTIVE_NO_PROMPT='{args}'
+AGENT_CMD_HEADLESS_PROMPT='run {args} {prompt}'
+AGENT_CMD_HEADLESS_NO_PROMPT='run {args}'

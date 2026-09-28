@@ -175,6 +175,11 @@ RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
 # ===========================================================================
 # Coding agents and user environment
 # ===========================================================================
+# The coding agents' install layers are assembled into this file at build time by
+# code-it-build from agents/<name>/install.dockerfile for the --agent list, which
+# also writes /etc/code-it-agents (name=binary per line) for go.sh to read. The
+# marker below is where that block goes; building this file directly would leave
+# the image without agents, so use code-it-build.
 RUN mkdir -p ~/.local/bin
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
 # uv keeps its cache and tool installs inside the agent's home. It is never the
@@ -182,8 +187,7 @@ RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
 RUN mkdir -p ~/.cache/uv
 RUN echo "export UV_CACHE_DIR=\"\$HOME/.cache/uv\"" >> ~/.zshrc
 ENV UV_CACHE_DIR=/home/agent1/.cache/uv
-RUN curl -fsSL https://opencode.ai/install | bash # last changed 2026-09-26
-RUN curl -fsSL https://claude.ai/install.sh | bash # last changed 2026-09-26
+# @@CODE_IT_AGENT_INSTALLS@@
 RUN git config --global rerere.enabled true
 RUN git config --global alias.root 'rev-parse --show-toplevel'
 RUN git config --global alias.lg  "log --color --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --graph"
@@ -237,11 +241,20 @@ if [ -d "$HOME/.bun-host" ] ; then
     mkdir -p "$HOME/.bun/install/cache"
     cp -a -n "$HOME/.bun-host/." "$HOME/.bun/install/cache/" 2>/dev/null || true
 fi
-case "${CODE_AGENT:-opencode}" in
-    opencode) agent_bin=/home/agent1/.opencode/bin/opencode ;;
-    claude)   agent_bin=/home/agent1/.local/bin/claude ;;
-    *)        echo "Defaulting to opencode" ; agent_bin=/home/agent1/.opencode/bin/opencode ;;
-esac
+# The build wrote the selected agents to /etc/code-it-agents as name=binary lines,
+# so the binary is data, not a hardcoded case. Fall back to the first one listed.
+agent_file=/etc/code-it-agents
+agent_bin=""
+if [ -f "$agent_file" ] && [ -n "${CODE_AGENT:-}" ] ; then
+    agent_bin=$(sed -n "s/^${CODE_AGENT}=//p" "$agent_file" | head -n 1)
+fi
+if [ -z "$agent_bin" ] && [ -f "$agent_file" ] ; then
+    agent_bin=$(head -n 1 "$agent_file" | cut -d= -f2-)
+fi
+if [ -z "$agent_bin" ] ; then
+    echo "No coding agent configured in $agent_file" >&2
+    exit 1
+fi
 if [ "${CODE_AGENT_HEADLESS:-}" = "1" ] ; then
     exec "$agent_bin" "$@"
 fi

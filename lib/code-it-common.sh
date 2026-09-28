@@ -19,6 +19,7 @@ CI_DEFAULT_TOOL_CHAINS="dotnet node"
 CI_KNOWN_TOOL_CHAINS="dotnet node bun python"
 CI_KNOWN_PACKAGE_CACHES="nuget npm bun"
 CI_CONTAINER_PORT=3000
+CI_DEFAULT_AGENTS="opencode claude"
 
 ci_comma_list_add() {
     case " $1 " in
@@ -95,6 +96,56 @@ ci_resolve_package_caches() {
 # ci_default_image_name TOOL_CHAINS: e.g. code-it-alpine-dotnet or code-it-alpine-node-bun
 ci_default_image_name() {
     printf 'code-it-alpine-%s' "$(ci_join - "$1")"
+}
+
+# ci_agent_config AGENTS_DIR NAME KEY: the (unquoted) value of KEY in an agent's
+# config, or return 1. Keys are uppercase and appear once per line.
+ci_agent_config() {
+    local file="$1/$2/config" line
+    [[ -f "$file" ]] || return 1
+    line=$(grep -m1 "^$3=" "$file" 2>/dev/null) || return 1
+    [[ -n "$line" ]] || return 1
+    line=${line#*=}
+    case "$line" in
+        \'*\') line=${line#\'}; line=${line%\'} ;;
+        \"*\") line=${line#\"}; line=${line%\"} ;;
+    esac
+    printf '%s' "$line"
+}
+
+# ci_agent_exists AGENTS_DIR NAME
+ci_agent_exists() { [[ -f "$1/$2/config" ]]; }
+
+# ci_list_agents AGENTS_DIR: print one agent name per line
+ci_list_agents() {
+    local d
+    for d in "$1"/*/; do
+        [[ -f "$d/config" ]] || continue
+        basename "$d"
+    done
+}
+
+# ci_resolve_agents RAW AGENTS_DIR: canonical space-separated agent list, or return 1.
+# An empty RAW means the default agents.
+ci_resolve_agents() {
+    local raw="$1" agents_dir="$2" out="" a
+    local -a requested
+    if [[ -n "$raw" ]]; then
+        IFS=',' read -r -a requested <<< "$raw"
+    else
+        read -r -a requested <<< "$CI_DEFAULT_AGENTS"
+    fi
+    for a in ${requested[@]+"${requested[@]}"}; do
+        if [[ -z "$a" ]]; then
+            continue
+        elif ci_agent_exists "$agents_dir" "$a"; then
+            out=$(ci_comma_list_add "$out" "$a")
+        else
+            echo "Warning: Unknown agent '$a'. Known agents: $(ci_list_agents "$agents_dir" | tr '\n' ' ')" >&2
+            return 1
+        fi
+    done
+    printf '%s' "$out"
 }
 
 # ci_detect_runtime REQUESTED: echo the runtime to use, warning and returning 1 if

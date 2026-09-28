@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 #
-# Builds the code-it container image from the Dockerfile, selecting the tool chains
-# and package caches to include. code-it.sh delegates its --build-image and
-# --rebuild-image flags here.
+# Builds the code-it container image from the Dockerfile, selecting the tool chains,
+# package caches and coding agents to include. code-it.sh delegates its --build-image
+# and --rebuild-image flags here.
+#
+# The coding agents' install layers live in agents/<name>/install.dockerfile. This
+# script assembles them into the Dockerfile (replacing the
+# "# @@CODE_IT_AGENT_INSTALLS@@" marker) and writes /etc/code-it-agents, the
+# name=binary map the container's go.sh reads. So agents are data, not branches.
 #
 # Usage:
 #   ./code-it-build.sh [OPTIONS]
@@ -16,8 +21,11 @@
 #                            --tool-chains. Known: nuget, npm, bun.
 #                            Default: the repos implied by --tool-chains
 #                            (dotnet->nuget, node->npm).
-#   --rebuild                Bump the Dockerfile's "# last changed" dates to today first,
-#                            so the agent install layers rerun and the agents update.
+#   --agent, -a LIST         Comma-separated agents to install. Default: opencode,claude.
+#   --list-agents            List the available agents and exit.
+#   --rebuild                Bump the "# last changed" dates in the Dockerfile and the
+#                            selected agents' install fragments to today first, so the
+#                            agent install layers rerun and the agents update.
 #   --image, -i NAME         Image name to build. Default: "code-it-alpine-<chains>",
 #                            a slug of the resolved --tool-chains list.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile.
@@ -43,6 +51,8 @@ abs_dir() { (CDPATH= cd -- "$1" && pwd); }
 tool_chains=""
 package_caches=""
 package_caches_set=false
+agents_raw=""
+list_agents=false
 rebuild=false
 image=""
 dockerfile_dir="$script_dir"
@@ -59,6 +69,14 @@ while [[ $# -gt 0 ]]; do
             package_caches="$2"
             package_caches_set=true
             shift 2
+            ;;
+        --agent|--agents|-a)
+            agents_raw="$2"
+            shift 2
+            ;;
+        --list-agents)
+            list_agents=true
+            shift
             ;;
         --rebuild)
             rebuild=true
@@ -97,7 +115,24 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Resolve the requested tool chains and package caches. An explicit, empty
+# The agent definitions live next to the Dockerfile when it ships them, else next
+# to this script.
+agents_dir="$dockerfile_dir/agents"
+[[ -d "$agents_dir" ]] || agents_dir="$script_dir/agents"
+
+if [[ "$list_agents" == true ]]; then
+    while IFS= read -r name; do
+        short=$(ci_agent_config "$agents_dir" "$name" AGENT_SHORT)
+        if [[ -n "$short" ]]; then
+            printf '  %-10s -%s\n' "$name" "$short"
+        else
+            printf '  %s\n' "$name"
+        fi
+    done < <(ci_list_agents "$agents_dir")
+    exit 0
+fi
+
+# Resolve the requested tool chains, package caches and agents. An explicit, empty
 # --package-caches means "no package caches", not "use the implied ones".
 enabled_tool_chains=$(ci_resolve_tool_chains "$tool_chains") || exit 1
 if [[ "$package_caches_set" == true ]]; then
@@ -105,6 +140,7 @@ if [[ "$package_caches_set" == true ]]; then
 else
     enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_tool_chains") || exit 1
 fi
+enabled_agents=$(ci_resolve_agents "$agents_raw" "$agents_dir") || exit 1
 
 if [[ -z "$image" ]]; then
     image=$(ci_default_image_name "$enabled_tool_chains")
@@ -119,14 +155,57 @@ if [[ ! -f "$dockerfile_dir/Dockerfile" ]]; then
 fi
 dockerfile_dir=$(abs_dir "$dockerfile_dir")
 
-# --rebuild: bump the "# last changed" cache-bust dates to today, so the agent
-# install layers rebuild and update the agents. (Write to a temp file and move:
-# portable in-place edit for BSD and GNU sed.)
-if [[ "$rebuild" == true ]]; then
+# --rebuild: bump the "# last changed" cache-bust dates to today in the Dockerfile
+# and in the selected agent install fragments, so those layers rebuild and update the
+# agents. (Write to a temp file and move: portable in-place edit for BSD and GNU sed.)
+bump_last_changed() {
+    local file="$1" today
+    [[ -f "$file" ]] || return 0
     today=$(date +%Y-%m-%d)
-    sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed $today/" "$dockerfile_dir/Dockerfile" > "$dockerfile_dir/Dockerfile.tmp" \
-        && mv "$dockerfile_dir/Dockerfile.tmp" "$dockerfile_dir/Dockerfile"
-    echo "    Updated '# last changed' dates in $dockerfile_dir/Dockerfile to $today"
+    sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed $today/" "$file" > "$file.tmp" \
+        && mv "$file.tmp" "$file"
+}
+if [[ "$rebuild" == true ]]; then
+    bump_last_changed "$dockerfile_dir/Dockerfile"
+    for a in $enabled_agents; do
+        install_fragment=$(ci_agent_config "$agents_dir" "$a" AGENT_INSTALL)
+        [[ -n "$install_fragment" ]] && bump_last_changed "$agents_dir/$a/$install_fragment"
+    done
+    echo "    Updated '# last changed' dates to $(date +%Y-%m-%d)"
+fi
+
+# Assemble the Dockerfile: replace the agent-install marker with the selected
+# fragments plus the name=binary map go.sh reads.
+marker='# @@CODE_IT_AGENT_INSTALLS@@'
+agent_block="# --- coding agents: ${enabled_agents// /,} (assembled from agents/) ---"
+for a in $enabled_agents; do
+    install_fragment=$(ci_agent_config "$agents_dir" "$a" AGENT_INSTALL)
+    fragment_path="$agents_dir/$a/$install_fragment"
+    if [[ ! -f "$fragment_path" ]]; then
+        echo "Warning: agent '$a' has no install fragment at $fragment_path" >&2
+        exit 1
+    fi
+    agent_block+=$'\n'"$(cat "$fragment_path")"
+done
+agent_file_entries=""
+for a in $enabled_agents; do
+    agent_binary=$(ci_agent_config "$agents_dir" "$a" AGENT_BINARY)
+    agent_file_entries+=" '$a=$agent_binary'"
+done
+agent_block+=$'\n'"RUN printf '%s\\n'$agent_file_entries > /etc/code-it-agents"
+
+build_context=$(mktemp -d)
+trap 'rm -rf "$build_context"' EXIT
+if grep -qF "$marker" "$dockerfile_dir/Dockerfile"; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" == "$marker" ]]; then
+            printf '%s\n' "$agent_block"
+        else
+            printf '%s\n' "$line"
+        fi
+    done < "$dockerfile_dir/Dockerfile" > "$build_context/Dockerfile"
+else
+    cp "$dockerfile_dir/Dockerfile" "$build_context/Dockerfile"
 fi
 
 # Build args for the tool chains and package caches, spelled the way the
@@ -145,14 +224,15 @@ done
 # from the image name.
 build_args+=(--label "code-it.tool-chains=$(ci_join , "$enabled_tool_chains")")
 build_args+=(--label "code-it.package-caches=$(ci_join , "$enabled_package_caches")")
+build_args+=(--label "code-it.agents=$(ci_join , "$enabled_agents")")
 
-echo "    Building with tech ${enabled_tool_chains// /,}; package repos ${enabled_package_caches// /,}"
+echo "    Building with tech ${enabled_tool_chains// /,}; package repos ${enabled_package_caches// /,}; agents ${enabled_agents// /,}"
 
 # Print the command
-echo "    $runtime build ${build_args[*]} -t ${image}:latest $dockerfile_dir"
+echo "    $runtime build ${build_args[*]} -t ${image}:latest $build_context"
 
 if [[ "$dry_run" == true ]]; then
     exit 0
 fi
 
-"$runtime" build "${build_args[@]}" -t "${image}:latest" "$dockerfile_dir"
+"$runtime" build "${build_args[@]}" -t "${image}:latest" "$build_context"

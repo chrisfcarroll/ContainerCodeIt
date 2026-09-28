@@ -1,13 +1,17 @@
 #! /usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Builds the code-it container image, selecting tool chains and package caches.
+    Builds the code-it container image, selecting tool chains, caches and agents.
 
 .DESCRIPTION
-    Builds the Alpine image from the Dockerfile with the requested tool chains and
-    package caches, and labels the image with that resolution so Code-It.ps1 can
-    check it rather than guess from the image name. Code-It.ps1's -buildImage and
-    -rebuildImage flags delegate here.
+    Builds the Alpine image from the Dockerfile with the requested tool chains,
+    package caches and coding agents, and labels the image with that resolution so
+    Code-It.ps1 can check it rather than guess from the image name. Code-It.ps1's
+    -buildImage and -rebuildImage flags delegate here.
+
+    The agents' install layers live in agents/<name>/install.dockerfile. This script
+    assembles them into the Dockerfile (replacing the "# @@CODE_IT_AGENT_INSTALLS@@"
+    marker) and writes /etc/code-it-agents, the name=binary map go.sh reads.
 
 .PARAMETER toolChains
     Comma-separated tool chains to build. Known: dotnet, node (aliases js-node,
@@ -19,9 +23,15 @@
     nuget, npm, bun. Default: the repos implied by -toolChains (dotnet->nuget,
     node->npm). An explicit, empty list means no package caches.
 
+.PARAMETER agent
+    Comma-separated agents to install. Default: opencode,claude.
+
+.PARAMETER listAgents
+    List the available agents and exit.
+
 .PARAMETER rebuild
-    Bump the Dockerfile's "# last changed" dates to today first, so the agent install
-    layers rerun and the agents update.
+    Bump the "# last changed" dates in the Dockerfile and selected agent install
+    fragments to today first, so the agent install layers rerun and the agents update.
 
 .PARAMETER image
     Image name to build. Default: "code-it-alpine-<chains>", a slug of the resolved
@@ -37,7 +47,7 @@
     Print the build command without executing it.
 
 .EXAMPLE
-    .\Code-It-Build.ps1 -toolChains 'node,bun' -packageCaches npm
+    .\Code-It-Build.ps1 -toolChains 'node,bun' -packageCaches npm -agent opencode
 
 .EXAMPLE
     .\Code-It-Build.ps1 -rebuild
@@ -48,6 +58,9 @@ param (
     [Alias('tech', 'stack')]
     [string]$toolChains    = "",
     [string]$packageCaches = "",
+    [Alias('agents')]
+    [string]$agent         = "",
+    [switch]$listAgents    = $false,
     [switch]$rebuild       = $false,
     [string]$image         = "",
     [string]$dockerfileDir = $PSScriptRoot,
@@ -64,7 +77,20 @@ if ($help) {
 
 . "$PSScriptRoot/lib/CodeItCommon.ps1"
 
-# Resolve the requested tool chains and package caches. An explicit, empty
+# The agent definitions live next to the Dockerfile when it ships them, else next
+# to this script.
+$agentsDir = Join-Path $dockerfileDir 'agents'
+if (-not (Test-Path -Path $agentsDir -PathType Container)) { $agentsDir = Join-Path $PSScriptRoot 'agents' }
+
+if ($listAgents) {
+    foreach ($name in (Get-CodeItListAgents $agentsDir)) {
+        $short = Get-CodeItAgentConfig $agentsDir $name 'AGENT_SHORT'
+        if ($short) { "  {0,-10} -{1}" -f $name, $short } else { "  $name" }
+    }
+    exit 0
+}
+
+# Resolve the requested tool chains, package caches and agents. An explicit, empty
 # -packageCaches means "no package caches", not "use the implied ones".
 $enabledToolChains = Resolve-CodeItToolChains $toolChains
 if ($null -eq $enabledToolChains) { exit 1 }
@@ -74,6 +100,8 @@ if ($PSBoundParameters.ContainsKey('packageCaches')) {
     $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolChains
 }
 if ($null -eq $enabledPackageCaches) { exit 1 }
+$enabledAgents = Resolve-CodeItAgents $agent $agentsDir
+if ($null -eq $enabledAgents) { exit 1 }
 
 if (-not $image) { $image = CodeIt-ImageName $enabledToolChains }
 
@@ -86,34 +114,73 @@ if (-not (Test-Path -Path "$dockerfileDir/Dockerfile" -PathType Leaf)) {
 }
 $dockerfileDir = (Resolve-Path $dockerfileDir).Path
 
-if ($rebuild) {
-    # Bump the "# last changed" cache-bust dates in the Dockerfile to force re-run of installations.
+function Update-CodeItLastChanged([string]$file) {
+    if (-not (Test-Path -Path $file -PathType Leaf)) { return }
     $today = [DateTime]::Today.ToString('yyyy-MM-dd')
-    $dockerfile = "$dockerfileDir/Dockerfile"
-    $dockerfileText = [IO.File]::ReadAllText($dockerfile) -replace '# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}', "# last changed $today"
-    [IO.File]::WriteAllText($dockerfile, $dockerfileText)
-    "    Updated '# last changed' dates in $dockerfileDir/Dockerfile to $today"
+    $text = [IO.File]::ReadAllText($file) -replace '# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}', "# last changed $today"
+    [IO.File]::WriteAllText($file, $text)
 }
 
-# Build args for the tool chains and package caches, spelled the way the Dockerfile's
-# ARGs match them (uppercase), plus a label recording the resolution.
-$buildArgs = @()
-foreach ($tc in @('dotnet', 'node', 'bun', 'python')) {
-    $buildArgs += @('--build-arg', "$($tc.ToUpper())=$(Bool-Arg ($enabledToolChains -contains $tc))")
+if ($rebuild) {
+    Update-CodeItLastChanged "$dockerfileDir/Dockerfile"
+    foreach ($a in $enabledAgents) {
+        $install = Get-CodeItAgentConfig $agentsDir $a 'AGENT_INSTALL'
+        if ($install) { Update-CodeItLastChanged (Join-Path $agentsDir (Join-Path $a $install)) }
+    }
+    "    Updated '# last changed' dates to $([DateTime]::Today.ToString('yyyy-MM-dd'))"
 }
-foreach ($pc in @('nuget', 'npm')) {
-    $buildArgs += @('--build-arg', "$($pc.ToUpper())=$(Bool-Arg ($enabledPackageCaches -contains $pc))")
+
+# Assemble the Dockerfile: replace the agent-install marker with the selected
+# fragments plus the name=binary map go.sh reads.
+$marker = '# @@CODE_IT_AGENT_INSTALLS@@'
+$block = "# --- coding agents: $($enabledAgents -join ',') (assembled from agents/) ---`n"
+foreach ($a in $enabledAgents) {
+    $install = Get-CodeItAgentConfig $agentsDir $a 'AGENT_INSTALL'
+    $fragmentPath = Join-Path $agentsDir (Join-Path $a $install)
+    if (-not (Test-Path -Path $fragmentPath -PathType Leaf)) {
+        Write-Warning "Agent '$a' has no install fragment at $fragmentPath"
+        exit 1
+    }
+    $block += (Get-Content $fragmentPath -Raw)
+    if (-not $block.EndsWith("`n")) { $block += "`n" }
 }
-$buildArgs += @('--label', "code-it.tool-chains=$($enabledToolChains -join ',')")
-$buildArgs += @('--label', "code-it.package-caches=$($enabledPackageCaches -join ',')")
+$entries = foreach ($a in $enabledAgents) {
+    $bin = Get-CodeItAgentConfig $agentsDir $a 'AGENT_BINARY'
+    "'$a=$bin'"
+}
+$block += "RUN printf '%s\n' $($entries -join ' ') > /etc/code-it-agents`n"
 
-"    Building with tech $($enabledToolChains -join ','); package repos $($enabledPackageCaches -join ',')"
-"    $runtime build $($buildArgs -join ' ') -t $image`:latest $dockerfileDir"
+$base = ([IO.File]::ReadAllText("$dockerfileDir/Dockerfile")) -replace "`r`n", "`n"
+$assembled = if ($base.Contains($marker)) { $base.Replace($marker, $block.TrimEnd("`n")) } else { $base }
 
-if ($dryRun) { exit 0 }
+$buildContext = Join-Path ([IO.Path]::GetTempPath()) ("code-it-build-" + [Guid]::NewGuid().ToString('N'))
+$null = New-Item -ItemType Directory -Force -Path $buildContext
+[IO.File]::WriteAllText((Join-Path $buildContext 'Dockerfile'), $assembled, [System.Text.UTF8Encoding]::new($false))
 
-& $runtime build $buildArgs -t "$image`:latest" $dockerfileDir
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "$runtime build failed with exit code $LASTEXITCODE"
-    exit $LASTEXITCODE
+try {
+    # Build args for the tool chains and package caches, spelled the way the
+    # Dockerfile's ARGs match them (uppercase), plus labels recording the resolution.
+    $buildArgs = @()
+    foreach ($tc in @('dotnet', 'node', 'bun', 'python')) {
+        $buildArgs += @('--build-arg', "$($tc.ToUpper())=$(Bool-Arg ($enabledToolChains -contains $tc))")
+    }
+    foreach ($pc in @('nuget', 'npm')) {
+        $buildArgs += @('--build-arg', "$($pc.ToUpper())=$(Bool-Arg ($enabledPackageCaches -contains $pc))")
+    }
+    $buildArgs += @('--label', "code-it.tool-chains=$($enabledToolChains -join ',')")
+    $buildArgs += @('--label', "code-it.package-caches=$($enabledPackageCaches -join ',')")
+    $buildArgs += @('--label', "code-it.agents=$($enabledAgents -join ',')")
+
+    "    Building with tech $($enabledToolChains -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ',')"
+    "    $runtime build $($buildArgs -join ' ') -t $image`:latest $buildContext"
+
+    if ($dryRun) { exit 0 }
+
+    & $runtime build $buildArgs -t "$image`:latest" $buildContext
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "$runtime build failed with exit code $LASTEXITCODE"
+        exit $LASTEXITCODE
+    }
+} finally {
+    Remove-Item -Recurse -Force $buildContext -EA Silent
 }

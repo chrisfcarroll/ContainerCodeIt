@@ -17,6 +17,7 @@ $script:CodeItKnownPackageCaches = @('nuget', 'npm', 'bun')
 # uv is Python's package manager here, so it selects the python tool chain
 $script:CodeItToolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun'; 'uv' = 'python' }
 $script:CodeItContainerPort      = 3000
+$script:CodeItDefaultAgents      = @('opencode', 'claude')
 
 function Split-CodeItList([string]$list) {
     # The unary comma keeps an empty result as an array, not $null
@@ -55,6 +56,49 @@ function Resolve-CodeItPackageCaches([string]$raw, [string[]]$toolChains) {
 
 function CodeIt-ImageName([string[]]$toolChains) {
     return "code-it-alpine-$($toolChains -join '-')"
+}
+
+# Get-CodeItAgentConfig DIR NAME KEY: the (unquoted) value of KEY in an agent's
+# config, or $null. Keys are uppercase and appear once per line.
+function Get-CodeItAgentConfig([string]$dir, [string]$name, [string]$key) {
+    $file = Join-Path $dir (Join-Path $name 'config')
+    if (-not (Test-Path -Path $file -PathType Leaf)) { return $null }
+    foreach ($line in Get-Content $file) {
+        if ($line -match "^$([regex]::Escape($key))=(.*)$") {
+            $v = $Matches[1]
+            if ($v.Length -ge 2 -and (($v[0] -eq "'" -and $v[-1] -eq "'") -or ($v[0] -eq '"' -and $v[-1] -eq '"'))) {
+                $v = $v.Substring(1, $v.Length - 2)
+            }
+            return $v
+        }
+    }
+    return $null
+}
+
+function Test-CodeItAgentExists([string]$dir, [string]$name) {
+    return (Test-Path -Path (Join-Path $dir (Join-Path $name 'config')) -PathType Leaf)
+}
+
+function Get-CodeItListAgents([string]$dir) {
+    if (-not (Test-Path -Path $dir -PathType Container)) { return ,@() }
+    return ,@(Get-ChildItem -Directory -Path $dir |
+        Where-Object { Test-Path -Path (Join-Path $_.FullName 'config') -PathType Leaf } |
+        ForEach-Object { $_.Name })
+}
+
+function Resolve-CodeItAgents([string]$raw, [string]$dir) {
+    $requested = if ($raw) { Split-CodeItList $raw } else { $script:CodeItDefaultAgents }
+    $out = @()
+    foreach ($a in $requested) {
+        if (-not $a) { continue }
+        if (Test-CodeItAgentExists $dir $a) {
+            $out += $a
+        } else {
+            Write-Warning "Unknown agent '$a'. Known agents: $((Get-CodeItListAgents $dir) -join ' ')"
+            return $null
+        }
+    }
+    return ,$out
 }
 
 function Bool-Arg([bool]$on) { if ($on) { 'true' } else { 'false' } }

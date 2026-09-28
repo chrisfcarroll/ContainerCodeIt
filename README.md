@@ -44,8 +44,10 @@ In principal either powershell or bash scripts should work on any O/S.
 
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
-| `--claude`, `-c` | `-claude`, `-c` | off | Run Claude Code |
-| `--opencode`, `-o` | `-opencode`, `-o` | on (default) | Run OpenCode |
+| `--agent`, `-a` | `-agent`, `-a` | `opencode` | Run the agent defined in `agents/NAME`; only its state is mounted |
+| `--list-agents` | `-listAgents` | - | List the available agents and exit |
+| `--claude`, `-c` | `-claude`, `-c` | off | Shortcut for `--agent claude` |
+| `--opencode`, `-o` | `-opencode`, `-o` | on (default) | Shortcut for `--agent opencode` |
 | `--prompt`, `-p`, or a bare argument | `-prompt`, or a bare argument | none | Opening prompt for the agent |
 | `--headless` | `-headless` | off | Run the agent one-shot in the foreground instead of in tmux: no TTY, and the container exits with the agent's exit code |
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
@@ -76,6 +78,8 @@ chains and package caches). They accept the same logical parameters:
 |---|---|---|---|
 | `--tool-chains LIST`, `-t` | `-toolChains LIST` | `dotnet,node` | Tool chains to build (aliases as above) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `tool-chains` | Package repos to support; an explicit empty list means none |
+| `--agent, -a LIST` | `-agent LIST` | `opencode,claude` | Agents to install |
+| `--list-agents` | `-listAgents` | - | List the available agents and exit |
 | `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today first |
 | `--image`, `-i` | `-image` | `code-it-alpine-<chains>` | Image name to build |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
@@ -135,6 +139,31 @@ Alpine's repos. `uv` and `uvx` are installed for every image, including the defa
 The system Python is externally managed, so use `uv venv` / `uv tool` rather than
 `pip install` into it; uv keeps its cache in the agent's home via `UV_CACHE_DIR` and
 fetches musl CPython builds for x86_64 and aarch64.
+
+## Agents
+
+Coding agents are data, not `if claude / else opencode` branches. Each agent is one
+directory, `agents/<name>/`:
+
+| File | Purpose |
+|---|---|
+| `config` | `key=value` (readable by bash and PowerShell): the container binary path, host command, state dirs/files, prompt-translation templates, config label, short flag |
+| `install.dockerfile` | the install layer, run as `agent1`, with a `# last changed YYYY-MM-DD` cache-bust line |
+| `default-config/` | configuration copied into `--save-dir` on first run, preserving layout |
+
+`code-it-build --agent NAME[,NAME...]` assembles the selected install fragments into
+the Dockerfile and writes `/etc/code-it-agents` (a `name=binary` map) that the
+container's `go.sh` reads, so no agent names are hardcoded in script logic. The
+default is `opencode,claude`. `code-it --agent NAME` runs one of them and mounts only
+that agent's state.
+
+```bash
+./code-it-build.sh --agent opencode          # a leaner image, OpenCode only
+./code-it.sh --agent opencode                # run it
+./code-it.sh --list-agents                   # what is available
+```
+
+Adding an agent means adding one `agents/<name>/` directory; no script edits.
 
 ## Prompts and agent flags
 
@@ -220,8 +249,6 @@ docker run -it --rm \
     -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
     -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
     -v ~/my-repos:/work \
-    -v ~/.config/code-it/.claude:/home/agent1/.claude \
-    -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
     -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \
     -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
     code-it-alpine-dotnet-node:latest
@@ -232,7 +259,7 @@ docker run -it --rm \
 Edit the **Dockerfile** to taste. The default build includes:
 
 - **Alpine Linux 3.24** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
-- **Claude Code CLI** and **OpenCode CLI**, and **uv/uvx** (in every image)
+- The agents you select with `--agent` (default **Claude Code CLI** and **OpenCode CLI**), and **uv/uvx** (in every image)
 - A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, plus
   `dotnet`, `node`, `npm`, `bun` and/or `python3` for whichever techs/packages are enabled
 
@@ -250,9 +277,7 @@ container exits when the agent does. That is what `--headless` uses.
 - One Dockerfile now supports build-time tech-stack lists (`dotnet`, `node`, `bun`,
   `python`, and the package repos `nuget`, `npm`), so combinations do not need separate
   files. Java is the obvious next tech to add.
-- The image still ships both coding agents; making the agents build-time switches too is
-  the next step.
-- Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it --rebuild-image` / `code-it.ps1 -rebuildImage`)
+- Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it-build --rebuild` / `Code-It-Build.ps1 -rebuild`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
 
 ## Runtime detection
@@ -267,15 +292,15 @@ Or on MacOs, specify `--runtime docker` or `--runtime container` (`-runtime` in 
 
 ## Volume mounts
 
-The launcher scripts keep all agent state under one save dir (default `~/.config/code-it`, created on first run), so your sessions and logins are saved.
+The launcher scripts keep the chosen agent's state under one save dir (default `~/.config/code-it`, created on first run), so your sessions and logins are saved. Only the selected agent's paths (from its `agents/<name>/config`) are mounted.
 
 | Mount point | Purpose |
 |---|---|
 | `/work` | Host directory containing git repos for the agent to work on |
-| `/home/agent1/.claude` | Persists Claude credentials, settings, permissions, and memory |
-| `/home/agent1/.claude.json` | Persists Claude OAuth session data, MCP configs, and preferences |
-| `/home/agent1/.config/opencode` | Persists OpenCode configuration, including `opencode.json` |
-| `/home/agent1/.local/share/opencode` | Persists OpenCode data and auth |
+| `/home/agent1/.claude` | Claude only: credentials, settings, permissions, memory |
+| `/home/agent1/.claude.json` | Claude only: OAuth session data, MCP configs, preferences |
+| `/home/agent1/.config/opencode` | OpenCode only: configuration, including `opencode.json` |
+| `/home/agent1/.local/share/opencode` | OpenCode only: data and auth |
 | `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache (a `fallbackPackageFolder`), if `nuget` is enabled and a cache is found |
 | `/home/agent1/.npm-host` | **Read-only.** Host npm cache, if `npm` is enabled and a cache is found; seeded into `~/.npm` at startup |
 | `/home/agent1/.bun-host` | **Read-only.** Host Bun cache, if `bun` is enabled and a cache is found; seeded into `~/.bun/install/cache` at startup |

@@ -1,0 +1,16 @@
+# Claude Code agent definition. Readable from bash (it is sourced) and PowerShell
+# (parsed as key=value). Keep one key per line.
+AGENT_NAME=claude
+AGENT_SHORT=c
+AGENT_COMMAND=claude
+AGENT_BINARY=/home/agent1/.local/bin/claude
+AGENT_INSTALL=install.dockerfile
+AGENT_CONFIG_LABEL='Claude Code settings'
+# State created under --save-dir and mounted into the container home
+AGENT_STATE_DIRS='.claude'
+AGENT_STATE_FILES='.claude.json'
+# Prompt translation: {args} is the agent arguments, {prompt} the opening prompt
+AGENT_CMD_INTERACTIVE_PROMPT='{args} {prompt}'
+AGENT_CMD_INTERACTIVE_NO_PROMPT='{args}'
+AGENT_CMD_HEADLESS_PROMPT='-p {args} {prompt}'
+AGENT_CMD_HEADLESS_NO_PROMPT='{args}'

@@ -16,10 +16,11 @@ _code_it_build() {
         (--image|-i)       compadd -- code-it-alpine-dotnet-node; return ;;
         (--tool-chains|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
+        (--agent|-a)       compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
     esac
 
-    compadd -- --tool-chains -t --stack --package-caches --rebuild --image -i \
-        --dockerfile-dir --runtime -r --dry-run -d --help -h
+    compadd -- --tool-chains -t --stack --package-caches --agent -a --list-agents \
+        --rebuild --image -i --dockerfile-dir --runtime -r --dry-run -d --help -h
 }
 
 _code_it_build "$@"

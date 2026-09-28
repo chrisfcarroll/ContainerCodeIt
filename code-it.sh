@@ -20,8 +20,11 @@
 #   ./code-it.sh [OPTIONS] [PROMPT] [-- AGENT-ARGS...]
 #
 # Options:
-#   --opencode, -o           Run OpenCode in the container (default).
-#   --claude, -c             Run Claude Code in the container.
+#   --agent, -a NAME         Run the agent defined in agents/NAME. Only that agent's
+#                            state is mounted.
+#   --opencode, -o           Shortcut for --agent opencode (the default).
+#   --claude, -c             Shortcut for --agent claude.
+#   --list-agents            List the available agents and exit.
 #   --prompt, -p TEXT        Open the agent with TEXT as its first prompt. A single bare
 #                            argument means the same thing, so these are equivalent:
 #                              ./code-it.sh -c --prompt "explain this repo"
@@ -193,11 +196,14 @@ prompt=""
 prompt_set=false
 headless=false
 agent_args=()
+list_agents=false
 
 # Tech stack (see --help). Empty means "use the defaults": dotnet,node and the
 # package repos they imply (dotnet->nuget, node->npm).
 tool_chains=""
 package_caches=""
+
+agents_dir="$script_dir/agents"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -208,6 +214,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --opencode|-o)
             code_agent="opencode"
+            shift
+            ;;
+        --agent|-a)
+            code_agent="$2"
+            shift 2
+            ;;
+        --list-agents)
+            list_agents=true
             shift
             ;;
         --work-dir|-w)
@@ -294,6 +308,29 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# --list-agents lists the available agent definitions and exits.
+if [[ "$list_agents" == true ]]; then
+    while IFS= read -r name; do
+        short=$(ci_agent_config "$agents_dir" "$name" AGENT_SHORT)
+        if [[ -n "$short" ]]; then
+            printf '  %-10s -%s\n' "$name" "$short"
+        else
+            printf '  %s\n' "$name"
+        fi
+    done < <(ci_list_agents "$agents_dir")
+    exit 0
+fi
+
+# Load the chosen agent's definition. The agent name is data: shortcut flags are
+# resolved here, but every other detail comes from agents/<name>/config.
+if ! ci_agent_exists "$agents_dir" "$code_agent"; then
+    echo "Warning: Unknown agent '$code_agent'. Known agents: $(ci_list_agents "$agents_dir" | tr '\n' ' ')" >&2
+    echo "Run $0 --list-agents to see them." >&2
+    exit 1
+fi
+# shellcheck disable=SC1090
+. "$agents_dir/$code_agent/config"
 
 # Resolve --tool-chains / --package-caches into a set of known tech names (space-separated
 # in $enabled_tool_chains) and known package repo names (in $enabled_package_caches).
@@ -388,35 +425,37 @@ if [[ ! -d "$work_dir_to_mount" ]]; then
 fi
 work_dir_to_mount=$(abs_dir "$work_dir_to_mount")
 
-# Create the save dir structure so mounts always work, even on first run.
-# The .claude.json mount is a single file: pre-create it so the runtime does not
-# create a directory in its place.
-mkdir -p "$save_dir/.claude" "$save_dir/.config/opencode" "$save_dir/.local/share/opencode"
-[[ -f "$save_dir/.claude.json" ]] || echo '{}' > "$save_dir/.claude.json"
-if [[ "$code_agent" == "opencode" ]]; then
-    opencode_config="$save_dir/.config/opencode/config.json"
-    if [[ ! -e "$opencode_config" ]]; then
-        cat > "$opencode_config" <<'EOF'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "permission": "allow"
-}
-EOF
-        echo "    Created OpenCode configuration: $opencode_config"
-    fi
-else
-    claude_settings="$save_dir/.claude/settings.json"
-    if [[ ! -e "$claude_settings" ]]; then
-        cat > "$claude_settings" <<'EOF'
-{
-  "permissions": {
-    "defaultMode": "auto"
-  },
-  "skipDangerousModePermissionPrompt": true
-}
-EOF
-        echo "    Created Claude Code settings: $claude_settings"
-    fi
+# Create the save dir structure so mounts always work, even on first run. State
+# paths come from the agent definition: directories are created; single files are
+# pre-created so the runtime does not make a directory in their place.
+agent_state_dirs=()
+if [[ -n "${AGENT_STATE_DIRS:-}" ]]; then
+    IFS=':' read -r -a agent_state_dirs <<< "$AGENT_STATE_DIRS"
+fi
+for d in ${agent_state_dirs[@]+"${agent_state_dirs[@]}"}; do
+    [[ -n "$d" ]] && mkdir -p "$save_dir/$d"
+done
+agent_state_files=()
+if [[ -n "${AGENT_STATE_FILES:-}" ]]; then
+    IFS=':' read -r -a agent_state_files <<< "$AGENT_STATE_FILES"
+fi
+for f in ${agent_state_files[@]+"${agent_state_files[@]}"}; do
+    [[ -n "$f" ]] || continue
+    [[ -e "$save_dir/$f" ]] || echo '{}' > "$save_dir/$f"
+done
+
+# Write the agent's default configuration file(s) on first run, preserving layout.
+default_config_dir="$agents_dir/$code_agent/default-config"
+if [[ -d "$default_config_dir" ]]; then
+    while IFS= read -r src; do
+        rel=${src#"$default_config_dir"/}
+        dest="$save_dir/$rel"
+        if [[ ! -e "$dest" ]]; then
+            mkdir -p "$(dirname "$dest")"
+            cp "$src" "$dest"
+            echo "    Created $AGENT_CONFIG_LABEL: $dest"
+        fi
+    done < <(find "$default_config_dir" -type f | sort)
 fi
 save_dir=$(abs_dir "$save_dir")
 
@@ -542,6 +581,7 @@ if [[ "$build_image" == true ]]; then
     build_shim_args=(
         --tool-chains "$(ci_join , "$enabled_tool_chains")"
         --package-caches "$(ci_join , "$enabled_package_caches")"
+        --agent "$code_agent"
         --image "$image"
         --dockerfile-dir "$dockerfile_dir"
         --runtime "$runtime"
@@ -553,33 +593,28 @@ if [[ "$build_image" == true ]]; then
 fi
 
 # Translate the prompt, and any -- pass-through arguments, into the chosen agent's own
-# command line, which the container entrypoint hands to the agent. See
-#   https://code.claude.com/docs/en/cli-reference
-#   https://opencode.ai/docs/cli/
+# command line, from the definition's cmd_* template, which the container entrypoint
+# hands to the agent. {args} expands to the agent args, {prompt} to the opening prompt.
+# See https://code.claude.com/docs/en/cli-reference and https://opencode.ai/docs/cli/
 agent_cmd=()
-if [[ "$code_agent" == "claude" ]]; then
-    # claude [flags] [PROMPT], and -p answers the prompt without going interactive
-    if [[ "$headless" == true && "$prompt_set" == true ]]; then
-        agent_cmd+=(-p)
-    fi
-    agent_cmd+=(${agent_args[@]+"${agent_args[@]}"})
+if [[ "$headless" == true ]]; then
     if [[ "$prompt_set" == true ]]; then
-        agent_cmd+=("$prompt")
+        agent_cmd_template="$AGENT_CMD_HEADLESS_PROMPT"
+    else
+        agent_cmd_template="$AGENT_CMD_HEADLESS_NO_PROMPT"
     fi
-elif [[ "$headless" == true ]]; then
-    # opencode run [flags] [MESSAGE] answers without starting the TUI
-    agent_cmd+=(run)
-    agent_cmd+=(${agent_args[@]+"${agent_args[@]}"})
-    if [[ "$prompt_set" == true ]]; then
-        agent_cmd+=("$prompt")
-    fi
+elif [[ "$prompt_set" == true ]]; then
+    agent_cmd_template="$AGENT_CMD_INTERACTIVE_PROMPT"
 else
-    # opencode --prompt MESSAGE opens the TUI with the message already sent
-    if [[ "$prompt_set" == true ]]; then
-        agent_cmd+=(--prompt "$prompt")
-    fi
-    agent_cmd+=(${agent_args[@]+"${agent_args[@]}"})
+    agent_cmd_template="$AGENT_CMD_INTERACTIVE_NO_PROMPT"
 fi
+for token in $agent_cmd_template; do
+    case "$token" in
+        '{args}')   agent_cmd+=(${agent_args[@]+"${agent_args[@]}"}) ;;
+        '{prompt}') [[ "$prompt_set" == true ]] && agent_cmd+=("$prompt") ;;
+        *)          agent_cmd+=("$token") ;;
+    esac
+done
 
 # Headless runs are one-shot: no tmux and no TTY, so the container exits when the
 # agent does, and its output can be piped or redirected.
@@ -599,6 +634,22 @@ for arg in ${agent_cmd[@]+"${agent_cmd[@]}"}; do
     agent_cmd_print+=" $(printf '%q' "$arg")"
 done
 
+# Mount only the chosen agent's state, read from its definition.
+agent_mounts=()
+agent_mounts_print=""
+for d in ${agent_state_dirs[@]+"${agent_state_dirs[@]}"}; do
+    [[ -n "$d" ]] || continue
+    agent_mounts+=(-v "$save_dir/$d:$container_home/$d")
+    agent_mounts_print+="
+                -v \"$save_dir/$d:$container_home/$d\" \\"
+done
+for f in ${agent_state_files[@]+"${agent_state_files[@]}"}; do
+    [[ -n "$f" ]] || continue
+    agent_mounts+=(-v "$save_dir/$f:$container_home/$f")
+    agent_mounts_print+="
+                -v \"$save_dir/$f:$container_home/$f\" \\"
+done
+
 # Print the command
 cat <<EOF
     $runtime run ${tty_args[*]} --rm -p $port_mapping \\
@@ -608,11 +659,7 @@ cat <<EOF
                 -e GIT_AUTHOR_EMAIL="$git_author_email" \\
                 -e GIT_COMMITTER_NAME="$git_author_name" \\
                 -e GIT_COMMITTER_EMAIL="$git_author_email" \\
-                -v "$work_dir_to_mount:/work" \\
-                -v "$save_dir/.claude:/home/$agent_name_lower/.claude" \\
-                -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \\
-                -v "$save_dir/.local/share/opencode:/home/$agent_name_lower/.local/share/opencode" \\
-                -v "$save_dir/.config/opencode:/home/$agent_name_lower/.config/opencode" \\$cache_mounts_print
+                -v "$work_dir_to_mount:/work" \\$agent_mounts_print$cache_mounts_print
                 ${image}:latest$agent_cmd_print
 EOF
 
@@ -629,9 +676,6 @@ fi
             -e GIT_COMMITTER_NAME="$git_author_name" \
             -e GIT_COMMITTER_EMAIL="$git_author_email" \
             -v "$work_dir_to_mount:/work" \
-            -v "$save_dir/.claude:/home/$agent_name_lower/.claude" \
-            -v "$save_dir/.claude.json:/home/$agent_name_lower/.claude.json" \
-            -v "$save_dir/.config/opencode:/home/$agent_name_lower/.config/opencode" \
-            -v "$save_dir/.local/share/opencode:/home/$agent_name_lower/.local/share/opencode" \
+            "${agent_mounts[@]+"${agent_mounts[@]}"}" \
             "${cache_mounts[@]+"${cache_mounts[@]}"}" \
     "${image}:latest" ${agent_cmd[@]+"${agent_cmd[@]}"}

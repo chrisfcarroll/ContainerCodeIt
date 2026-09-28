@@ -157,7 +157,7 @@ foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','lib/CodeItCommon.ps1','Claud
 }
 
 # ---------------------------------------------------------------------------
-"2. Default dry-run: opencode agent, all state mounts"
+"2. Default dry-run: opencode agent, only its state mounted"
 $r = Invoke-Scenario $codeIt $commonArgs $stubPath
 Assert "dry-run exit code 0" ($r.code -eq 0)
 Assert-Contains "reports OpenCode config creation" $r.out 'Created OpenCode configuration'
@@ -166,20 +166,18 @@ Assert-Contains "defaults to opencode" $r.out 'CODE_AGENT="opencode"'
 Assert-Contains "docker run command" $r.out 'docker run -it'
 Assert-Contains "image name" $r.out 'code-it-alpine-dotnet-node:latest'
 Assert-Contains "work dir mount" $r.out "$scriptDir`:/work"
-Assert-Contains "claude dir mount" $r.out '/.claude:/home/agent1/.claude'
-Assert-Contains "claude.json mount" $r.out '/.claude.json:/home/agent1/.claude.json'
 Assert-Contains "opencode config mount" $r.out '/.config/opencode:/home/agent1/.config/opencode'
 Assert-Contains "opencode mount" $r.out '/.local/share/opencode:/home/agent1/.local/share/opencode'
+Assert "opencode run mounts no claude state" (-not $r.out.Contains('/home/agent1/.claude'))
 Assert-Contains "default auto-assign port" $r.out '-p 0:3000'
 
 # ---------------------------------------------------------------------------
 "3. Save dir structure is created for first run"
-Assert "save/.claude created" (Test-Path "$save/.claude" -PathType Container)
 Assert "save/.config/opencode created" (Test-Path "$save/.config/opencode" -PathType Container)
 Assert "save/.local/share/opencode created" (Test-Path "$save/.local/share/opencode" -PathType Container)
-Assert "save/.claude.json created as a file" (Test-Path "$save/.claude.json" -PathType Leaf)
 $opencodeConfig = Get-Content "$save/.config/opencode/config.json" -Raw | ConvertFrom-Json
 Assert "OpenCode config permits all actions" ($opencodeConfig.permission -eq 'allow')
+Assert "opencode run creates no claude state" (-not (Test-Path "$save/.claude"))
 
 # ---------------------------------------------------------------------------
 "4. Agent selection switches"
@@ -190,11 +188,25 @@ Assert-Contains "-o selects opencode" $r.out 'CODE_AGENT="opencode"'
 $r = Invoke-Scenario $codeIt (@('-claude') + $commonArgs) $stubPath
 Assert-Contains "-claude selects claude" $r.out 'CODE_AGENT="claude"'
 Assert-Contains "reports Claude settings creation" $r.out 'Created Claude Code settings'
+Assert-Contains "claude dir mount" $r.out '/.claude:/home/agent1/.claude'
+Assert-Contains "claude.json mount" $r.out '/.claude.json:/home/agent1/.claude.json'
+Assert "claude run mounts no opencode state" (-not $r.out.Contains('/home/agent1/.config/opencode'))
 $claudeSettings = Get-Content "$save/.claude/settings.json" -Raw | ConvertFrom-Json
 Assert "Claude settings enable auto mode" ($claudeSettings.permissions.defaultMode -eq 'auto')
 Assert "Claude settings skip dangerous-mode prompt" ($claudeSettings.skipDangerousModePermissionPrompt -eq $true)
+Assert "save/.claude.json pre-created as a file" (Test-Path "$save/.claude.json" -PathType Leaf)
 $r = Invoke-Scenario $codeIt (@('-c') + $commonArgs) $stubPath
 Assert-Contains "-c selects claude" $r.out 'CODE_AGENT="claude"'
+$r = Invoke-Scenario $codeIt (@('-agent','claude') + $commonArgs) $stubPath
+Assert-Contains "-agent claude selects claude" $r.out 'CODE_AGENT="claude"'
+$r = Invoke-Scenario $codeIt (@('-agent','opencode') + $commonArgs) $stubPath
+Assert-Contains "-agent opencode selects opencode" $r.out 'CODE_AGENT="opencode"'
+$r = Invoke-ScenarioCommand "& '$codeIt' -listAgents" $stubPath
+Assert "listAgents exit code 0" ($r.code -eq 0)
+Assert-Contains "-listAgents lists claude" $r.out 'claude'
+Assert-Contains "-listAgents lists opencode" $r.out 'opencode'
+$r = Invoke-Scenario $codeIt (@('-agent','nosuchagent') + $commonArgs) $stubPath
+Assert "unknown -agent fails" ($r.code -ne 0)
 $r = Invoke-Scenario $codeIt (@('-c','-o') + $commonArgs) $stubPath
 Assert "-c and -o together fails" ($r.code -ne 0)
 
@@ -255,36 +267,31 @@ Assert "failed build exits non-zero" ($r.code -ne 0)
 Assert "failed build does not run the container" (-not $r.out.Contains('STUB-DOCKER-RUN'))
 
 # ---------------------------------------------------------------------------
-"9b. Rebuild image (updates the agents)"
+"9b. Rebuild image (updates the agent install fragments)"
 $dfDir = Join-Path $tmp 'dfdir'
 $null = New-Item -ItemType Directory -Force -Path $dfDir
-$dfPath = Join-Path $dfDir 'Dockerfile'
-# Write the fixture with explicit LF: Set-Content would join lines with CRLF on Windows
-$dfOriginal = [IO.File]::ReadAllText((Join-Path $scriptDir 'Dockerfile')) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'
-$dfLF = $dfOriginal -replace "`r`n", "`n"
-[IO.File]::WriteAllText($dfPath, $dfLF)
+Copy-Item (Join-Path $scriptDir 'Dockerfile') (Join-Path $dfDir 'Dockerfile')
+Copy-Item (Join-Path $scriptDir 'agents') (Join-Path $dfDir 'agents') -Recurse -Force
+$openFragmentPath = Join-Path $dfDir 'agents/opencode/install.dockerfile'
+$openFragmentOld = [IO.File]::ReadAllText($openFragmentPath) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'
+[IO.File]::WriteAllText($openFragmentPath, $openFragmentOld)
 $today = [DateTime]::Today.ToString('yyyy-MM-dd')
 $r = Invoke-Scenario $codeIt (@('-rebuildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
 Assert "-rebuildImage exit code 0" ($r.code -eq 0)
 Assert-Contains "rebuild invokes docker build" $r.out 'STUB-DOCKER-BUILD'
 Assert-Contains "rebuild implies build (no -buildImage needed)" $r.out '-t code-it-alpine-dotnet-node:latest'
-$df = Get-Content $dfPath -Raw
-Assert "Dockerfile dates bumped to today" ($df.Contains("# last changed $today"))
-Assert "old dates gone from Dockerfile" (-not $df.Contains('# last changed 2000-01-01'))
-Assert "rebuild leaves LF Dockerfile without carriage returns" (-not $df.Contains("`r"))
-Assert "rebuild changes only the dates" ($df -eq ($dfLF -replace '# last changed 2000-01-01', "# last changed $today"))
-$dfBytes = [IO.File]::ReadAllBytes($dfPath)
-Assert "rebuild writes no BOM" (-not ($dfBytes[0] -eq 0xEF -and $dfBytes[1] -eq 0xBB -and $dfBytes[2] -eq 0xBF))
-[IO.File]::WriteAllText($dfPath, ($dfLF -replace "`n", "`r`n"))
-$r = Invoke-Scenario $codeIt (@('-rebuildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
-$df = [IO.File]::ReadAllText($dfPath)
-Assert "rebuild keeps CRLF Dockerfile as CRLF" (-not ($df -replace "`r`n", '').Contains("`n"))
+$frag = Get-Content $openFragmentPath -Raw
+Assert "opencode fragment dates bumped to today" ($frag.Contains("# last changed $today"))
+Assert "old dates gone from the fragment" (-not $frag.Contains('# last changed 2000-01-01'))
+Assert "rebuild changes only the dates" ($frag -eq ($openFragmentOld -replace '# last changed 2000-01-01', "# last changed $today"))
+$fragBytes = [IO.File]::ReadAllBytes($openFragmentPath)
+Assert "rebuild writes no BOM" (-not ($fragBytes[0] -eq 0xEF -and $fragBytes[1] -eq 0xBB -and $fragBytes[2] -eq 0xBF))
 # plain -buildImage leaves the dates untouched
-(Get-Content (Join-Path $scriptDir 'Dockerfile')) -replace '# last changed [0-9-]+', '# last changed 2000-01-01' | Set-Content $dfPath
+[IO.File]::WriteAllText($openFragmentPath, $openFragmentOld)
 $r = Invoke-Scenario $codeIt (@('-buildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
 Assert "-buildImage exit code 0 (dfdir)" ($r.code -eq 0)
-$df = Get-Content $dfPath -Raw
-Assert "-buildImage leaves dates unchanged" ($df.Contains('# last changed 2000-01-01'))
+$frag = Get-Content $openFragmentPath -Raw
+Assert "-buildImage leaves dates unchanged" ($frag.Contains('# last changed 2000-01-01'))
 
 # ---------------------------------------------------------------------------
 "9c. Code-It-Build.ps1: dry-run, labels, -tech, -rebuild"
@@ -322,15 +329,36 @@ Assert "Code-It-Build unknown package cache fails" ($r.code -ne 0)
 # -rebuild bumps the dates and then really builds
 $bDfDir = Join-Path $tmp 'build-dfdir'
 $null = New-Item -ItemType Directory -Force -Path $bDfDir
-$bDfPath = Join-Path $bDfDir 'Dockerfile'
-[IO.File]::WriteAllText($bDfPath, $dfLF)
+Copy-Item (Join-Path $scriptDir 'Dockerfile') (Join-Path $bDfDir 'Dockerfile')
+Copy-Item (Join-Path $scriptDir 'agents') (Join-Path $bDfDir 'agents') -Recurse -Force
+foreach ($a in @('opencode', 'claude')) {
+    $p = Join-Path $bDfDir "agents/$a/install.dockerfile"
+    [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'))
+}
 $r = Invoke-Scenario $codeItBuild @('-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker') $stubPath
 Assert "Code-It-Build -rebuild exit code 0" ($r.code -eq 0)
 Assert-Contains "Code-It-Build -rebuild invokes docker build" $r.out 'STUB-DOCKER-BUILD'
-Assert "Code-It-Build -rebuild bumps the dates" ((Get-Content $bDfPath -Raw).Contains("# last changed $today"))
+Assert "Code-It-Build -rebuild bumps the opencode fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode/install.dockerfile') -Raw).Contains("# last changed $today"))
+Assert "Code-It-Build -rebuild bumps the claude fragment" ((Get-Content (Join-Path $bDfDir 'agents/claude/install.dockerfile') -Raw).Contains("# last changed $today"))
 # A missing Dockerfile is an error
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $tmp) $stubPath
 Assert "Code-It-Build without a Dockerfile fails" ($r.code -ne 0)
+
+"9f. Code-It-Build agents"
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+Assert-Contains "default build installs opencode and claude" $r.out 'agents opencode,claude'
+Assert-Contains "default build labels the agents" $r.out '--label code-it.agents=opencode,claude'
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-agent', 'opencode') $stubPath
+Assert-Contains "-agent opencode selects only opencode" $r.out 'agents opencode'
+Assert "default -agent excludes claude" (-not $r.out.Contains('agents opencode,claude'))
+$r = Invoke-ScenarioCommand "& '$codeItBuild' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
+Assert-Contains "-agent accepts a list" $r.out 'agents claude,opencode'
+$r = Invoke-ScenarioCommand "& '$codeItBuild' -listAgents" $stubPath
+Assert "Code-It-Build -listAgents exit code 0" ($r.code -eq 0)
+Assert-Contains "Code-It-Build -listAgents lists claude" $r.out 'claude'
+Assert-Contains "Code-It-Build -listAgents lists opencode" $r.out 'opencode'
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-agent', 'nosuch') $stubPath
+Assert "Code-It-Build unknown agent fails" ($r.code -ne 0)
 
 "9d. Code-It reads the image label"
 $env:STUB_IMAGE_TOOL_CHAINS = 'node,bun'
@@ -362,7 +390,7 @@ Assert-Contains "custom -port maps the host port to container 3000" $r.out '-p 8
 $r = Invoke-Scenario $codeIt (@('-port', '0') + $commonArgs) $stubPath
 Assert-Contains "-port 0 lets docker auto-assign" $r.out '-p 0:3000'
 $r = Invoke-Scenario $codeIt (@('-agentName', 'MyAgent') + $commonArgs) $stubPath
-Assert-Contains "agent name lowercased in mounts" $r.out '/home/myagent/.claude'
+Assert-Contains "agent name lowercased in mounts" $r.out '/home/myagent/.config/opencode'
 Assert-Contains "agent name in git author" $r.out 'GIT_AUTHOR_NAME="MyAgent for'
 Assert-Contains "agent name in git committer" $r.out 'GIT_COMMITTER_NAME="MyAgent for'
 Assert-Contains "git committer email passed" $r.out 'GIT_COMMITTER_EMAIL='

@@ -3,8 +3,8 @@
 # Install by sourcing it, e.g. from ~/.bashrc:
 #     source /path/to/ContainerCodeIt/completions/code-it-build.bash
 
-_code_it_build_opts='--tool-chains -t --stack --package-caches --rebuild --image -i
-    --dockerfile-dir --runtime -r --dry-run -d --help -h'
+_code_it_build_opts='--tool-chains -t --stack --package-caches --agent -a --list-agents
+    --rebuild --image -i --dockerfile-dir --runtime -r --dry-run -d --help -h'
 
 _code_it_build() {
     local cur prev
@@ -22,6 +22,8 @@ _code_it_build() {
             COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv" -- "$cur") ); return ;;
         --package-caches)
             COMPREPLY=( $(compgen -W "nuget npm bun" -- "$cur") ); return ;;
+        --agent|-a)
+            COMPREPLY=( $(compgen -W "$(ls "${BASH_SOURCE[0]%/*}/../agents" 2>/dev/null)" -- "$cur") ); return ;;
     esac
 
     COMPREPLY=( $(compgen -W "$_code_it_build_opts" -- "$cur") )
