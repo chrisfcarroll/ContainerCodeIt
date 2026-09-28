@@ -202,9 +202,10 @@ headless=false
 agent_args=()
 list_agents=false
 
-# Tech stack (see --help). Empty means "use the defaults": dotnet,node and the
-# package repos they imply (dotnet->nuget, node->npm).
+# Tech stack (see --help). Empty means "use the remembered image, else the defaults":
+# dotnet,node and the package repos they imply (dotnet->nuget, node->npm).
 tool_chains=""
+tool_chains_explicit=false
 package_caches=""
 
 agents_dir="$script_dir/agents"
@@ -268,6 +269,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --tool-chains|--tech|--stack|-t)
             tool_chains="$2"
+            tool_chains_explicit=true
             shift 2
             ;;
         --package-caches)
@@ -438,6 +440,24 @@ if [[ -d "$default_config_dir" ]]; then
     done < <(find "$default_config_dir" -type f | sort)
 fi
 save_dir=$(abs_dir "$save_dir")
+history_file="$save_dir/image-history"
+
+# With no explicit --tool-chains or --image, default to the remembered image that
+# covers at least 70% of the weighted recent usage (see Specs/09-image-memory.md).
+if [[ "$tool_chains_explicit" == false && "$image_explicit" == false ]]; then
+    memory_image=$(ci_history_choose_image "$runtime" "$history_file") || memory_image=""
+    if [[ -n "$memory_image" ]]; then
+        memory_chains=$(ci_image_tool_chains "$runtime" "$memory_image")
+        if [[ -n "$memory_chains" ]]; then
+            enabled_tool_chains=$(ci_resolve_tool_chains "$memory_chains") || exit 1
+            if [[ -z "$package_caches" ]]; then
+                enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_tool_chains") || exit 1
+            fi
+            image="$memory_image"
+            echo "    Using remembered image: $image"
+        fi
+    fi
+fi
 
 echo "    Checking $image ..."
 
@@ -678,6 +698,7 @@ if [[ "$dry_run" == true ]]; then
     exit 0
 fi
 
+run_rc=0
 "$runtime" run "${tty_args[@]}" --rm -p "$port_mapping" \
             $container_args \
             ${headless_env[@]+"${headless_env[@]}"} \
@@ -689,4 +710,8 @@ fi
             -v "$work_dir_to_mount:/work" \
             "${agent_mounts[@]+"${agent_mounts[@]}"}" \
             "${cache_mounts[@]+"${cache_mounts[@]}"}" \
-    "${image}:latest" ${agent_cmd[@]+"${agent_cmd[@]}"}
+    "${image}:latest" ${agent_cmd[@]+"${agent_cmd[@]}"} || run_rc=$?
+
+# Remember the image used, so later runs can default their tool chains to it.
+ci_history_record "$history_file" "$image"
+exit "$run_rc"

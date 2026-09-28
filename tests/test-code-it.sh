@@ -918,6 +918,78 @@ assert_contains "first-run --dry-run says what it would copy" "$out" "would copy
 [[ ! -e "$tmp/first-build-ran" ]]; assert "first-run --dry-run ran no build" "$?"
 
 # ---------------------------------------------------------------------------
+echo "19. Image memory and default tool chains"
+histbin="$tmp/histbin"; mkdir -p "$histbin"
+cat > "$histbin/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest ;;
+    image)
+        for a in "$@"; do last="$a"; done
+        case "$last" in
+            *python*)      echo python ;;
+            *dotnet-node*) echo dotnet,node ;;
+            *dotnet*)      echo dotnet ;;
+            *)             echo "" ;;
+        esac ;;
+    run)   echo "HIST-RUN $*" ;;
+    build) echo "HIST-BUILD $*" ;;
+    *)     echo "STUB $*" ;;
+esac
+EOF
+chmod +x "$histbin/docker"
+
+# (a) no --tool-chains: the remembered image covering >=70% is used
+hsel="$tmp/histselect"; mkdir -p "$hsel"
+printf '20260101 code-it-alpine-dotnet-node\n20260102 code-it-alpine-python\n20260103 code-it-alpine-python\n20260104 code-it-alpine-python\n20260105 code-it-alpine-python\n' > "$hsel/image-history"
+out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" 2>&1)
+assert "history selection exit code" "$?"
+assert_contains "uses the remembered image" "$out" "Using remembered image: code-it-alpine-python"
+assert_contains "runs the remembered image" "$out" "code-it-alpine-python:latest"
+
+# (b) explicit --tool-chains bypasses the memory
+out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" --tool-chains dotnet 2>&1)
+case "$out" in
+    *"Using remembered image"*) assert "explicit --tool-chains bypasses memory" 1 ;;
+    *)                          assert "explicit --tool-chains bypasses memory" 0 ;;
+esac
+assert_contains "explicit --tool-chains is honoured" "$out" "code-it-alpine-dotnet:latest"
+
+# (c) explicit --image bypasses the memory
+out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hsel" --image code-it-alpine-dotnet-node 2>&1)
+case "$out" in
+    *"Using remembered image"*) assert "explicit --image bypasses memory" 1 ;;
+    *)                          assert "explicit --image bypasses memory" 0 ;;
+esac
+
+# (d) no history: the built-in default is unchanged
+hnone="$tmp/histnone"; mkdir -p "$hnone"
+out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hnone" 2>&1)
+assert_contains "no history: default image is used" "$out" "code-it-alpine-dotnet-node:latest"
+case "$out" in
+    *"Using remembered image"*) assert "no history: nothing remembered" 1 ;;
+    *)                          assert "no history: nothing remembered" 0 ;;
+esac
+
+# (e) every non-dry-run invocation is recorded, keeping only the newest 15
+hrec="$tmp/histrecord"; mkdir -p "$hrec"
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    printf '202601%02d code-it-alpine-dotnet-node\n' "$i" >> "$hrec/image-history"
+done
+oldest_before=$(head -1 "$hrec/image-history")
+PATH="$histbin:$PATH" "$code_it" --work-dir "$script_dir" --save-dir "$hrec" --tool-chains dotnet,node >/dev/null 2>&1
+assert "history recording run exit code" "$?"
+[[ "$(wc -l < "$hrec/image-history")" == "15" ]]; assert "history keeps only 15 lines" "$?"
+grep -qE "^[0-9]{8} code-it-alpine-dotnet-node$" "$hrec/image-history"
+assert "history records 'yyyymmdd image-name'" "$?"
+[[ "$(head -1 "$hrec/image-history")" != "$oldest_before" ]]; assert "history forgets the oldest line" "$?"
+
+# (f) --dry-run records nothing
+hdry="$tmp/histdry"; mkdir -p "$hdry"
+PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hdry" --tool-chains dotnet,node >/dev/null 2>&1
+[[ ! -e "$hdry/image-history" ]]; assert "--dry-run records no history" "$?"
+
+# ---------------------------------------------------------------------------
 echo
 echo "Results: $pass passed, $fail failed"
 [[ "$fail" == "0" ]] || exit 1

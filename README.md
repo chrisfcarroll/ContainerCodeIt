@@ -81,7 +81,7 @@ agent in the container; the command says so before it copies.
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--tool-chains LIST`, `-t` | `-toolChains LIST` | `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`) |
+| `--tool-chains LIST`, `-t` | `-toolChains LIST` | remembered image, else `dotnet,node` | Comma-separated tech stacks: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `tool-chains` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
@@ -125,7 +125,8 @@ launchers expose them as two comma-separated lists, passed to `docker build` as
 `--build-arg`s:
 
 - `--tool-chains` / `-toolChains` (alias `--stack` / `-stack`) — tech stacks to build:
-  `dotnet`, `node`, `bun`, `python`. Default `dotnet,node`.
+  `dotnet`, `node`, `bun`, `python`. Default: the remembered image if there is one
+  (see below), else `dotnet,node`.
   `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
   `bun`; `uv` is an alias for `python`. Aliases resolve to the canonical name, so
   `--tool-chains ts-node` is `--tool-chains node` and produces the same image name.
@@ -137,6 +138,16 @@ launchers expose them as two comma-separated lists, passed to `docker build` as
 A list *replaces* the default set rather than toggling it, so there is no per-tech
 on/off flag to clash with future tech names as the list grows. Each tech left out skips
 its layers entirely.
+
+### Default tool chains from recent images
+
+`code-it` remembers the images you run in `image-history` in the save dir: the most
+recent 15 invocations, one `yyyymmdd image-name` per line. When you run `code-it`
+without `--tool-chains` and without `--image`, it picks the most recent remembered
+image whose tool chains cover at least 70% of your weighted recent usage, weighting
+the most recent invocation 15 and the oldest 1. That way the default follows what you
+actually use. Explicit `--tool-chains` or `--image` always wins, and a dry run is not
+recorded.
 
 ```bash
 # Match the original image: .NET + Node.js (nuget + npm implied)

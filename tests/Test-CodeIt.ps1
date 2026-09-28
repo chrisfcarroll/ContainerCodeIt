@@ -843,6 +843,98 @@ Assert-Contains "first-run warns that credentials are copied" $r.out 'credential
 Assert-Contains "first-run prints the start command" $r.out 'Code-It.ps1 -agent opencode'
 
 # ---------------------------------------------------------------------------
+"12e. Image memory and default tool chains"
+$histDocker = Join-Path $tmp 'hist-docker'
+$null = New-Item -ItemType Directory -Force -Path $histDocker
+if ($onWindows) {
+    Set-Content -Path (Join-Path $histDocker 'docker.cmd') -Value @'
+@echo off
+if "%~1"=="images" (
+  echo code-it-alpine-dotnet:latest
+  echo code-it-alpine-dotnet-node:latest
+  echo code-it-alpine-python:latest
+  goto :eof
+)
+if "%~1"=="image" (
+  echo %* | findstr /C:"python" >nul && (echo python& goto :eof)
+  echo %* | findstr /C:"dotnet-node" >nul && (echo dotnet,node& goto :eof)
+  echo %* | findstr /C:"dotnet" >nul && (echo dotnet& goto :eof)
+  echo.
+  goto :eof
+)
+if "%~1"=="run" echo HIST-RUN %*& goto :eof
+if "%~1"=="build" echo HIST-BUILD %*& goto :eof
+echo STUB %*
+'@
+} else {
+    Set-Content -Path (Join-Path $histDocker 'docker') -Value @'
+#!/bin/sh
+case "$1" in
+    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest ;;
+    image)
+        for a in "$@"; do last="$a"; done
+        case "$last" in
+            *python*)      echo python ;;
+            *dotnet-node*) echo dotnet,node ;;
+            *dotnet*)      echo dotnet ;;
+            *)             echo "" ;;
+        esac ;;
+    run)   echo "HIST-RUN $*" ;;
+    build) echo "HIST-BUILD $*" ;;
+    *)     echo "STUB $*" ;;
+esac
+'@
+    chmod +x (Join-Path $histDocker 'docker')
+}
+$histPath = "$histDocker$sep$stubPath"
+
+# no -toolChains: the remembered image covering >=70% is used
+$hsel = Join-Path $tmp 'histselect'; $null = New-Item -ItemType Directory -Force -Path $hsel
+@(
+    '20260101 code-it-alpine-dotnet-node'
+    '20260102 code-it-alpine-python'
+    '20260103 code-it-alpine-python'
+    '20260104 code-it-alpine-python'
+    '20260105 code-it-alpine-python'
+) | Set-Content -Path (Join-Path $hsel 'image-history')
+$r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
+Assert "history selection exit code 0" ($r.code -eq 0)
+Assert-Contains "uses the remembered image" $r.out 'Using remembered image: code-it-alpine-python'
+Assert-Contains "runs the remembered image" $r.out 'code-it-alpine-python:latest'
+
+# explicit -toolChains bypasses the memory
+$r = Invoke-Scenario $codeIt @('-dryRun', '-toolChains', 'dotnet', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
+Assert "explicit -toolChains bypasses memory" (-not $r.out.Contains('Using remembered image'))
+Assert-Contains "explicit -toolChains is honoured" $r.out 'code-it-alpine-dotnet:latest'
+
+# explicit -image bypasses the memory
+$r = Invoke-Scenario $codeIt @('-dryRun', '-image', 'code-it-alpine-dotnet-node', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
+Assert "explicit -image bypasses memory" (-not $r.out.Contains('Using remembered image'))
+
+# no history: the built-in default is unchanged
+$hnone = Join-Path $tmp 'histnone'; $null = New-Item -ItemType Directory -Force -Path $hnone
+$r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hnone) $histPath
+Assert-Contains "no history: default image is used" $r.out 'code-it-alpine-dotnet-node:latest'
+Assert "no history: nothing remembered" (-not $r.out.Contains('Using remembered image'))
+
+# every non-dry invocation is recorded, keeping only the newest 15
+$hrec = Join-Path $tmp 'histrecord'; $null = New-Item -ItemType Directory -Force -Path $hrec
+$recLines = 1..15 | ForEach-Object { ('202601{0:d2} code-it-alpine-dotnet-node' -f $_) }
+$recLines | Set-Content -Path (Join-Path $hrec 'image-history')
+$oldestBefore = (Get-Content (Join-Path $hrec 'image-history'))[0]
+$r = Invoke-Scenario $codeIt @('-WorkDirToMount', $scriptDir, '-saveDir', $hrec, '-toolChains', 'dotnet,node') $histPath
+Assert "history recording run exit code 0" ($r.code -eq 0)
+$recOut = @(Get-Content (Join-Path $hrec 'image-history'))
+Assert "history keeps only 15 lines" ($recOut.Count -eq 15)
+Assert "history records 'yyyymmdd image-name'" ((($recOut | Select-Object -Last 1) -match '^\d{8} code-it-alpine-dotnet-node$'))
+Assert "history forgets the oldest line" ($recOut[0] -ne $oldestBefore)
+
+# dry-run records nothing
+$hdry = Join-Path $tmp 'histdry'; $null = New-Item -ItemType Directory -Force -Path $hdry
+$r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hdry, '-toolChains', 'dotnet,node') $histPath
+Assert "dry-run records no history" (-not (Test-Path -Path (Join-Path $hdry 'image-history')))
+
+# ---------------------------------------------------------------------------
 "13. PowerShell tab completion"
 $completion = Join-Path $scriptDir 'completions/CodeItCompletion.ps1'
 $completerTest = @"

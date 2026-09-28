@@ -113,6 +113,69 @@ function Find-CodeItSupersetImage([string]$runtime, [string[]]$requested) {
     return ""
 }
 
+# Test-CodeItImageExists RUNTIME IMAGE: true if the runtime has the image.
+function Test-CodeItImageExists([string]$runtime, [string]$image) {
+    try {
+        if ($runtime -eq 'docker') {
+            & docker image inspect $image *> $null
+            return ($LASTEXITCODE -eq 0)
+        }
+        & container image inspect $image *> $null
+        return ($LASTEXITCODE -eq 0)
+    } catch { return $false }
+}
+
+# Add-CodeItHistory FILE IMAGE: append "yyyyMMdd IMAGE", keeping the newest 15 lines.
+function Add-CodeItHistory([string]$file, [string]$image) {
+    if (-not $image) { return }
+    $lines = @()
+    if (Test-Path -Path $file) { $lines = @(Get-Content -Path $file | Where-Object { $_ }) }
+    $lines += "$([DateTime]::Today.ToString('yyyyMMdd')) $image"
+    if ($lines.Count -gt 15) { $lines = $lines[-15..-1] }
+    $dir = Split-Path $file -Parent
+    if ($dir -and -not (Test-Path -Path $dir)) { $null = New-Item -ItemType Directory -Force -Path $dir }
+    [IO.File]::WriteAllLines($file, $lines, [System.Text.UTF8Encoding]::new($false))
+}
+
+# Get-CodeItHistoryImage RUNTIME FILE: the most-recently remembered image that still
+# exists and whose tool chains cover >=70% of weighted usage, or "". Weights run from
+# 1 (oldest remembered) to 15 (most recent).
+function Get-CodeItHistoryImage([string]$runtime, [string]$file) {
+    if (-not (Test-Path -Path $file)) { return "" }
+    $lines = @(Get-Content -Path $file | Where-Object { $_ })
+    $n = $lines.Count
+    if ($n -eq 0) { return "" }
+    $images = @()
+    $chains = @()
+    foreach ($l in $lines) {
+        $img = ($l -split '\s+', 2)[1]
+        $images += $img
+        $chains += (Get-CodeItImageToolChains $runtime $img)
+    }
+    $total = 0
+    for ($i = 0; $i -lt $n; $i++) { $total += 15 - $n + 1 + $i }
+    if ($total -le 0) { return "" }
+    $weights = @{}
+    foreach ($c in $script:CodeItKnownToolChains) { $weights[$c] = 0 }
+    for ($i = 0; $i -lt $n; $i++) {
+        $w = 15 - $n + 1 + $i
+        $set = @($chains[$i] -split ',')
+        foreach ($c in $script:CodeItKnownToolChains) {
+            if ($set -contains $c) { $weights[$c] += $w }
+        }
+    }
+    for ($j = $n - 1; $j -ge 0; $j--) {
+        $cov = 0
+        foreach ($c in @($chains[$j] -split ',')) {
+            if ($weights.ContainsKey($c)) { $cov += $weights[$c] }
+        }
+        if ($cov * 10 -ge $total * 7) {
+            if (Test-CodeItImageExists $runtime $images[$j]) { return $images[$j] }
+        }
+    }
+    return ""
+}
+
 # Get-CodeItToolChainCommands NAME: the host commands that reveal NAME is installed.
 function Get-CodeItToolChainCommands([string]$name) {
     switch ($name) {

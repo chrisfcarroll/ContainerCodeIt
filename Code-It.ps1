@@ -356,6 +356,27 @@ if (Test-Path -Path $defaultConfigDir -PathType Container) {
     }
 }
 $saveDir = (Resolve-Path $saveDir).Path
+$historyFile = Join-Path $saveDir 'image-history'
+
+# With no explicit -toolChains or -image, default to the remembered image that covers
+# at least 70% of the weighted recent usage (see Specs/09-image-memory.md).
+if (-not $PSBoundParameters.ContainsKey('toolChains') -and -not $PSBoundParameters.ContainsKey('image')) {
+    $memoryImage = Get-CodeItHistoryImage $runtime $historyFile
+    if ($memoryImage) {
+        $memoryChains = Get-CodeItImageToolChains $runtime $memoryImage
+        if ($memoryChains) {
+            $resolvedMemoryChains = Resolve-CodeItToolChains $memoryChains
+            if ($null -ne $resolvedMemoryChains) {
+                $enabledToolChains = $resolvedMemoryChains
+                if (-not $PSBoundParameters.ContainsKey('packageCaches')) {
+                    $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolChains
+                }
+                $image = $memoryImage
+                "    Using remembered image: $image"
+            }
+        }
+    }
+}
 
 "    Checking $image ..."
 
@@ -566,6 +587,7 @@ if ($dryRun) {
     exit 0
 }
 
+$runRc = 0
 & $runtime run $ttyArgs --rm -p $portMapping `
             $containerArgs `
             $headlessEnv `
@@ -578,3 +600,8 @@ if ($dryRun) {
             $agentMountArgs `
             $cacheMountArgs `
     $image`:latest $agentCmd
+if ($LASTEXITCODE -ne 0) { $runRc = $LASTEXITCODE }
+
+# Remember the image used, so later runs can default their tool chains to it.
+Add-CodeItHistory $historyFile $image
+exit $runRc
