@@ -1,66 +1,75 @@
 # ContainerCodeIt
 
-Sandbox your agentic AI properly, in a container, with access to a single working directory, where it can work free of permissions interruption. 
+Sandbox your agentic AI properly: in a container, with access to a single working directory, where it can work free of permissions interruption.
 
-The default Dockerfile includes **OpenCode** and **Claude Code** agents.
+The default Dockerfile offers **OpenCode** and **Claude Code** agents, but you can add others.
 
-```bash
-code-it.sh     # or -o or --opencode (this is the default)
-code-it.sh -c  # or -claude
-```
-
-```powershell
-Code-It.ps1      # or -o or -opencode (this is the default)
-Code-It.ps1 -c   # or -claude 
-```
-
-The agent gets work done by having a single mounted directory, typically one containing a git repo or repos, so it can get, commit and push.
+The agent gets work done by having a _single mounted directory_, typically one containing a git repo or repos, so it can work and commit.
 
 ## Prerequisites
 
 - Docker or Apple Containers.
-- Tested on MacOs and Windows 11, not tested by me Linux
-
-In principal either powershell or bash scripts should work on any O/S.
+- Tested on MacOs and Windows 11, minimal testing on Linux.
+- Runs on both bash and PowerShell on any O/S.
 
 ## Quick start
 
 ```bash
-# Build and run with the included Dockerfile
-./code-it.sh --build-image
-
-# Thereafter, no need to rebuild the image, except to get agent harness updates.
-./code-it.sh [-o] [-c] [--work-dir path ]
+./code-it.sh #bash or zsh
+./Code-It.ps1 # powershell
 ```
 
-```powershell
-.\Code-It.ps1 -buildImage
-.\Code-It.ps1 -o [[-WorkDirToMount] <string>]
-```
+## Exiting a container
+
+Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succession.
 
 ## First run
 
-`code-it-first-run` does the whole setup interactively: it checks the container runtime
-and git, detects which toolchains and agents you have on the host, asks which to
+`code-it` first run does interactive setup. it checks the container runtime
+and git, attempts to detect if you have at least one toolchain and agent already, asks which to
 include (pre-selecting what it found), shows the resulting `code-it-build` command and
-runs it, offers to copy your existing agent logins into the save dir, and prints the
-`code-it` command to start.
+runs it, offering to re-use your existing agent session state. Existing state is copied, not moved 
+or symlinked or changed. Copied state will include your agent login in the container.
+The script waits for you to confirm y/n before doing anything.
 
-You rarely need to call it yourself: `code-it` runs it for you when the save dir does
-not exist yet, or when there is no `code-it-*` image to run.
+## Adding a new agent
+
+`code-it-add-agent NAME [--url URL]` will use code-it to attempt to add agent NAME 
+to your setup. The agent doing the install will first attempt to check 
+“is NAME a well-known, maintained agent with official docs and an official install
+channel?”.
+If it passes, it will read its docs, adds the definition, add tests, extend the README, 
+add completions, run the tests, then commit.
+
+It will refuse to run on a dirty repository, works on a new branch
+`add-agent/NAME` (never committing to your current branch, never pushing), and prints
+the branch and a diff summary when it finishes. A gate refusal leaves the repo
+unchanged and is propagated as the tool's non-zero exit code.
 
 ```bash
-./code-it-first-run.sh
-./code-it-first-run.sh --yes --dry-run   # no questions, and change nothing
+./code-it-add-agent.sh cursor --url https://docs.cursor.com/cli
+./code-it-add-agent.sh cursor --dry-run     # show the prompt and command only
+
+.\Code-It-Add-Agent.ps1 cursor -url https://docs.cursor.com/cli
 ```
 
-```powershell
-.\Code-It-FirstRun.ps1
-```
+## Adding a toolchain
 
-State is **copied**, never moved or symlinked, and existing files are never
-overwritten. Copying carries your credentials, which will then be readable by the
-agent in the container; the command says so before it copies.
+`code-it-add-tool-chain NAME [--url URL]` will use code-it to attempt to add a new
+supported toolchain to your repo and image.
+The in-container agent gates on: NAME being a well-known language/runtime whose 
+toolchain installs securely (Alpine repos or the vendor's HTTPS distribution with checksum
+or signature verification where published, musl builds for x86_64 and aarch64, actively
+maintained).
+It generates an `ARG`-guarded Dockerfile layer, the name and aliases in the shared library, completions and README, an optional read-only
+package cache, tests, and a commit.
+
+```bash
+./code-it-add-tool-chain.sh java --url https://openjdk.org/install/
+./code-it-add-tool-chain.sh java --dry-run
+
+.\Code-It-Add-Tool-Chain.ps1 java -url https://openjdk.org/install/
+```
 
 ## Code-It options
 
@@ -88,11 +97,6 @@ agent in the container; the command says so before it copies.
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
-`--build-image` and `--rebuild-image` are now thin shims: they print a deprecation
-note and delegate to `code-it-build` with the same toolchains, package caches, image,
-runtime and Dockerfile directory, then run the container. Prefer calling
-`code-it-build` directly.
-
 When the image derived from `--toolchain` (e.g. `code-it-alpine-dotnet`) does not
 exist, `code-it` uses the most-recently built existing image whose
 `code-it.tool-chains` label contains every requested chain (e.g.
@@ -106,11 +110,11 @@ chains and package caches). They accept the same logical parameters:
 
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
-| `--toolchain LIST`, `-t` | `-toolchain LIST` | `dotnet,node` | Toolchains to build (aliases as above) |
+| `--toolchain LIST`, `-t` | `-toolchain LIST` |   | Toolchains to build (aliases as above) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Package repos to support; an explicit empty list means none |
 | `--agent, -a LIST` | `-agent LIST` | `opencode,claude` | Agents to install |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
-| `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today first |
+| `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today, to force agent curl-install refreshes. |
 | `--image`, `-i` | `-image` | `code-it-alpine-<chains>` | Image name to build |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
@@ -121,9 +125,12 @@ The image is labelled `code-it.tool-chains=<chains>` and
 built for a different tool-chain set, falling back to the image-name guess for images
 that predate the label.
 
-## Tech stacks
+The included Dockerfile is based on alpine3.24, which uses musl, and the architecture (amd64 or aarch64)
+of your host machine.
 
-The Dockerfile takes build-time switches for the tech stacks to include, and the
+## Toolchains
+
+The Dockerfile takes build-time switches for the toolchains to include, and the
 launchers expose them as two comma-separated lists, passed to `docker build` as
 `--build-arg`s:
 
@@ -138,37 +145,12 @@ launchers expose them as two comma-separated lists, passed to `docker build` as
   (`dotnet`->`nuget`, `node`->`npm`). Python has no host cache mount: uv must write its
   own cache, so the container keeps it in the agent's home (`UV_CACHE_DIR`).
 
-A list *replaces* the default set rather than toggling it, so there is no per-tech
-on/off flag to clash with future tech names as the list grows. Each tech left out skips
-its layers entirely.
+Each enabled toolchain also adds a passwordless `doas` rule to the container, so you (or your
+agent) can install further related tools.
 
-### Default: the remembered image, an existing image, or first-run
-
-`code-it` records the image used at the end of every non-dry run in `image-history` in
-the save dir: the most recent 15 invocations, one `yyyymmdd image-name` per line,
-dropping the oldest on the 16th.
-
-Run `code-it` with no `--toolchain` and no `--image` and it picks the default for
-you:
-
-1. If the save dir does not exist yet, it runs `code-it-first-run` (there is no setup
-   to run).
-2. Otherwise, if `image-history` exists, it uses the 70% weighted rule: the most
-   recent remembered image whose toolchains cover at least 70% of your weighted
-   recent usage, weighting the most recent invocation 15 and the oldest 1.
-3. Otherwise (no history, or the weighted rule selected nothing), it uses an existing
-   `code-it-*` image: the most recently used remembered one that still exists, else
-   the most recently built. The image's toolchains come from its label or name, so
-   the run and its caches agree.
-4. Otherwise there is no `code-it-*` image at all: it runs `code-it-first-run`.
-
-So the default follows what you actually use, falls back to any existing code-it
-image, and only then starts first-run. Explicit `--toolchain` or `--image` always
-wins.
+Subsequent calls to `code-it` with no --toolchain specified will reuse your most-used recent toolchain.
 
 ```bash
-# Match the original image: .NET + Node.js (nuget + npm implied)
-./code-it.sh --build-image
 
 # A Bun-only sandbox with a read-only host Bun cache
 ./code-it.sh --build-image --toolchain bun --package-caches bun
@@ -176,7 +158,7 @@ wins.
 # Node.js and Bun, but npm only (e.g. you drive Bun through npm)
 ./code-it.sh --build-image --toolchain node,bun --package-caches npm
 
-# Python 3 with uv (uv is in every image): --stack is an alias for --toolchain
+# Python 3 with uv ( --stack is an alias for --toolchain )
 ./code-it-build.sh --stack python
 ```
 
@@ -184,33 +166,13 @@ wins.
 .\Code-It.ps1 -buildImage -toolchain 'node,bun' -packageCaches npm
 ```
 
-Each enabled tech also adds a passwordless `doas` rule, so the agent can install more
-tools itself (`doas dotnet`, `doas node`, `doas npm`, `doas bun`, `doas python3`).
+### Included toolchains
 
-### Python
+`--toolchain dotnet` installs dotnet10 and dotnet8 from Alpine repos.
+`--toolchain python` adds Python 3, uv and uvx from Alpine's repos.
 
-`--toolchain python` (or `--stack python`, or the old alias `uv`) adds Python 3 from
-Alpine's repos. `uv` and `uvx` are installed for every image, including the default.
-The system Python is externally managed, so use `uv venv` / `uv tool` rather than
-`pip install` into it; uv keeps its cache in the agent's home via `UV_CACHE_DIR` and
-fetches musl CPython builds for x86_64 and aarch64.
 
 ## Agents
-
-Coding agents are data, not `if claude / else opencode` branches. Each agent is one
-directory, `agents/<name>/`:
-
-| File | Purpose |
-|---|---|
-| `config` | `key=value` (readable by bash and PowerShell): the container binary path, host command, state dirs/files, prompt-translation templates, config label, short flag |
-| `install.dockerfile` | the install layer, run as `agent1`, with a `# last changed YYYY-MM-DD` cache-bust line |
-| `default-config/` | configuration copied into `--save-dir` on first run, preserving layout |
-
-`code-it-build --agent NAME[,NAME...]` assembles the selected install fragments into
-the Dockerfile and writes `/etc/code-it-agents` (a `name=binary` map) that the
-container's `go.sh` reads, so no agent names are hardcoded in script logic. The
-default is `opencode,claude`. `code-it --agent NAME` runs one of them and mounts only
-that agent's state.
 
 ```bash
 ./code-it-build.sh --agent opencode          # a leaner image, OpenCode only
@@ -218,15 +180,13 @@ that agent's state.
 ./code-it.sh --list-agents                   # what is available
 ```
 
-Adding an agent means adding one `agents/<name>/` directory; no script edits.
-
-## Prompts and agent flags
+## Agent-specific Prompts, parameters and flags
 
 Anything you want the coding agent itself to see can be passed through the launcher.
 
 ```bash
 ./code-it.sh -c "explain this repo"        # opens Claude Code with that first prompt
-./claude-it.sh "explain this repo"         # the same, via the alias script
+./claude-it.sh "explain this repo"         # the same, using the claude-it alias script
 
 # One-shot: the agent answers the prompt, exits, and the container shuts down
 ./code-it.sh -c --headless "run the tests and fix any failures"
@@ -236,6 +196,7 @@ Anything you want the coding agent itself to see can be passed through the launc
 ./claude-it.sh -- --continue --model opus
 ./claude-it.sh --headless "tidy the imports" -- --max-turns 5
 ```
+⚠️ Note! --headless provides no feedback. You may be looking at a blank screen until the agent finishes the prompt.
 
 ```powershell
 .\Code-It.ps1 -c "explain this repo"
@@ -246,12 +207,6 @@ Anything you want the coding agent itself to see can be passed through the launc
 .\Claude-It.ps1 --continue --model opus
 .\Claude-It.ps1 -headless -prompt "tidy the imports" --max-turns 5
 ```
-
-In PowerShell a bare argument is now the prompt, so `-WorkDirToMount` is no longer bound
-positionally: pass it by name, `.\Code-It.ps1 -WorkDirToMount ~/my-repos`. And a short
-agent flag that PowerShell reads as one of the script's own parameters (`-p` matches both
-`-port` and `-prompt`) is rejected before the script runs: spell it in full, `--print`,
-or pass it as `-agentArgs '-p','...'`. `code-it.sh` has no such problem: use `--`.
 
 The launcher translates the prompt into each agent's own command line
 ([Claude Code](https://code.claude.com/docs/en/cli-reference),
@@ -266,7 +221,15 @@ Interactively the agent still runs inside tmux. With `--headless` it runs in the
 foreground with no TTY allocated (`docker run -i`), so output can be piped or redirected
 and the container's exit code is the agent's.
 
-## Tab completion
+## tmux
+
+The container includes tmux and starts a shell as well as your agent inside the container.
+Press `Ctrl-B S` then use the up/down arrow keys to switch between the agent session and the shell.
+Press `Ctrl-B S` again to switch back.
+
+The shell is zsh, and some common abbreviations for git (`gco`, `glog`, `gs`, …)
+
+## tab completion in bash, zsh, powershell
 
 The `completions/` directory completes the launchers' own options, and, after `--`, the
 flags of whichever agent is selected — `claude-it.sh` completes Claude Code flags,
@@ -312,29 +275,8 @@ docker run -it --rm \
     code-it-alpine-dotnet-node:latest
 ```
 
-## What's in the image
-
-Edit the **Dockerfile** to taste. The default build includes:
-
-- **Alpine Linux 3.24** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
-- The agents you select with `--agent` (default **Claude Code CLI** and **OpenCode CLI**), and **uv/uvx** (in every image)
-- A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, plus
-  `dotnet`, `node`, `npm`, `bun` and/or `python3` for whichever techs/packages are enabled
-
-Use the [tech lists](#tech-stacks) to build an image with a different mix, for example
-Bun instead of .NET + Node.js, or add Python with `--stack python`.
-
-On startup, the container launches a **tmux** session running the chosen agent, and a `zsh` terminal available via the tmux switch hotkey sequence, `Ctrl-B S`.
-
-Arguments given to the container after the image name are passed straight to the agent, and
-with `-e CODE_AGENT_HEADLESS=1` the agent runs in the foreground instead of in tmux, so the
-container exits when the agent does. That is what `--headless` uses.
-
 ## Rough Edges
 
-- One Dockerfile now supports build-time tech-stack lists (`dotnet`, `node`, `bun`,
-  `python`, and the package repos `nuget`, `npm`), so combinations do not need separate
-  files. Java is the obvious next tech to add.
 - Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it-build --rebuild` / `Code-It-Build.ps1 -rebuild`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
 
@@ -367,9 +309,9 @@ Alternatively, pass `-e ANTHROPIC_API_KEY=sk-...` (claude) or a provider API key
 
 # Isolating your agent from upstream origin repos.
 
-To isolate your upstream repo from your agents, git clone your working tree locally. Git works fine with origin repos on the local filesystem. 
+You don't need to do this if your upstream repos need credentials, because your credentials won't be available inside the container. But to isolate your upstream repo from your agents, git clone your working tree locally. Git works fine with origin repos on the local filesystem. 
 
-This works easiest if you give the agent its own branch (to avoid git error, 'updating the current branch in a non-bare repository is denied') as well as its own cloned repo.
+This works easiest if you give the agent its own branch (to avoid the git error, 'updating the current branch in a non-bare repository is denied') as well as its own cloned repo.
 
 ```bash
 mkdir ~/ReposForAgents
@@ -428,47 +370,6 @@ seeded at startup into `~/.bun/install/cache` in the same way.
 ### PyPi, etc.
 
 To do.
-
-## Adding an agent
-
-`code-it-add-agent NAME [--url URL]` runs code-it headless with a built-in prompt that
-adds a new `agents/NAME/` definition. The in-container agent first applies a gate
-(is NAME a well-known, maintained agent with official docs and an official install
-channel?), and if it passes, reads its docs, adds the definition, tests, README row and
-completions, runs the tests, and commits.
-
-The tool refuses to run on a dirty repository, works on a new branch
-`add-agent/NAME` (never committing to your current branch, never pushing), and prints
-the branch and a diff summary when it finishes. A gate refusal leaves the repo
-unchanged and is propagated as the tool's non-zero exit code.
-
-```bash
-./code-it-add-agent.sh cursor --url https://docs.cursor.com/cli
-./code-it-add-agent.sh cursor --dry-run     # show the prompt and command only
-```
-
-```powershell
-.\Code-It-Add-Agent.ps1 cursor -url https://docs.cursor.com/cli
-```
-
-## Adding a tool chain
-
-`code-it-add-tool-chain NAME [--url URL]` is the same idea for languages and runtimes.
-The in-container agent gates on NAME being a well-known language/runtime whose tool
-chain installs securely (Alpine repos or the vendor's HTTPS distribution with checksum
-or signature verification where published, musl builds for x86_64 and aarch64, actively
-maintained), then follows how `bun` was added: an `ARG`-guarded Dockerfile layer, the
-name and aliases in the shared library, completions and README, an optional read-only
-package cache, tests, and a commit.
-
-```bash
-./code-it-add-tool-chain.sh java --url https://openjdk.org/install/
-./code-it-add-tool-chain.sh java --dry-run
-```
-
-```powershell
-.\Code-It-Add-Tool-Chain.ps1 java -url https://openjdk.org/install/
-```
 
 ## Tests
 
