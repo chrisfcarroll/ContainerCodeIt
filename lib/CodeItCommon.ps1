@@ -3,19 +3,18 @@
     defines functions and constants only, and runs nothing on its own.
 
         Split-CodeItList LIST                  comma string -> trimmed array
-        Resolve-CodeItToolchain RAW           -> canonical array, or $null on error
-        Resolve-CodeItPackageCaches RAW CHAINS -> array, or $null on error
+        Resolve-CodeItToolchain RAW DIR        -> canonical array, or $null on error
+        Resolve-CodeItPackageCaches RAW CHAINS TC_DIR PC_DIR -> array, or $null on error
         CodeIt-ImageName CHAINS                -> code-it-alpine-<chains>
         Detect-CodeItRuntime REQUESTED         -> docker|container, or $null on error
         Bool-Arg BOOL                          -> 'true'|'false'
+
+    Tool chains, package caches and agents are data: each is a directory with a
+    config and an install fragment. Known names come from the directory listing;
+    aliases and host detection from each config.
 #>
 
 $script:CodeItDefaultToolchain  = @('dotnet', 'node')
-$script:CodeItKnownToolchain    = @('dotnet', 'node', 'bun', 'python')
-$script:CodeItKnownPackageCaches = @('nuget', 'npm', 'bun')
-# js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both);
-# uv is Python's package manager here, so it selects the python tool chain
-$script:CodeItToolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun'; 'uv' = 'python' }
 $script:CodeItContainerPort      = 3000
 $script:CodeItDefaultAgents      = @('opencode', 'claude')
 
@@ -25,14 +24,35 @@ function Split-CodeItList([string]$list) {
     return ,@($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
-function Resolve-CodeItToolchain([string]$raw) {
+# Get-CodeItDefinitions DIR: the definition names under DIR (DIR/<name>/config).
+function Get-CodeItDefinitions([string]$dir) {
+    if (-not (Test-Path -Path $dir -PathType Container)) { return ,@() }
+    return ,@(Get-ChildItem -Directory -Path $dir |
+        Where-Object { Test-Path -Path (Join-Path $_.FullName 'config') -PathType Leaf } |
+        ForEach-Object { $_.Name })
+}
+
+function Get-CodeItListToolchains([string]$dir) { return Get-CodeItDefinitions $dir }
+function Get-CodeItListPackageCaches([string]$dir) { return Get-CodeItDefinitions $dir }
+
+# Get-CodeItToolchainAlias DIR NAME: canonical name for NAME, resolving the aliases
+# declared in each toolchains/<name>/config. Unknown names pass through.
+function Get-CodeItToolchainAlias([string]$dir, [string]$name) {
+    if (Test-Path -Path (Join-Path $dir (Join-Path $name 'config')) -PathType Leaf) { return $name }
+    foreach ($d in (Get-CodeItDefinitions $dir)) {
+        $aliases = Get-CodeItAgentConfig $dir $d 'TOOLCHAIN_ALIASES'
+        if ($aliases -and @($aliases -split '\s+' | Where-Object { $_ }) -contains $name) { return $d }
+    }
+    return $name
+}
+
+function Resolve-CodeItToolchain([string]$raw, [string]$dir) {
     $requested = if ($raw) { Split-CodeItList $raw } else { $script:CodeItDefaultToolchain }
-    $resolved = @($requested | ForEach-Object {
-        if ($script:CodeItToolChainAliases.ContainsKey($_)) { $script:CodeItToolChainAliases[$_] } else { $_ }
-    } | Where-Object { $_ } | Select-Object -Unique)
+    $resolved = @($requested | ForEach-Object { Get-CodeItToolchainAlias $dir $_ } |
+        Where-Object { $_ } | Select-Object -Unique)
     foreach ($t in $resolved) {
-        if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $script:CodeItKnownToolchain) {
-            Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv)."
+        if ($t -notmatch '^[a-z][a-z0-9-]*$' -or -not (Test-Path -Path (Join-Path $dir (Join-Path $t 'config')) -PathType Leaf)) {
+            Write-Warning "Unknown tool chain '$t'. Known: $((Get-CodeItListToolchains $dir) -join ', ')."
             Write-Warning "A comma-separated list is expected, e.g. -toolchain 'node,bun'."
             return $null
         }
@@ -40,13 +60,18 @@ function Resolve-CodeItToolchain([string]$raw) {
     return ,$resolved
 }
 
-function Resolve-CodeItPackageCaches([string]$raw, [string[]]$toolchain) {
+function Resolve-CodeItPackageCaches([string]$raw, [string[]]$toolchain, [string]$tcDir, [string]$pcDir) {
     $requested = if ($raw) { Split-CodeItList $raw } else {
-        @(@('nuget') * ($toolchain -contains 'dotnet') + @('npm') * ($toolchain -contains 'node'))
+        $implied = @()
+        foreach ($t in $toolchain) {
+            $c = Get-CodeItAgentConfig $tcDir $t 'TOOLCHAIN_PACKAGE_CACHE'
+            if ($c) { $implied += $c }
+        }
+        $implied
     }
     foreach ($p in $requested) {
-        if ($p -notmatch '^[a-z][a-z0-9-]*$' -or $p -notin $script:CodeItKnownPackageCaches) {
-            Write-Warning "Unknown package repo '$p'. Known: $($script:CodeItKnownPackageCaches -join ', ')."
+        if ($p -notmatch '^[a-z][a-z0-9-]*$' -or -not (Test-Path -Path (Join-Path $pcDir (Join-Path $p 'config')) -PathType Leaf)) {
+            Write-Warning "Unknown package repo '$p'. Known: $((Get-CodeItListPackageCaches $pcDir) -join ', ')."
             Write-Warning "A comma-separated list is expected, e.g. -packageCaches nuget,npm."
             return $null
         }
@@ -126,10 +151,11 @@ function Test-CodeItImageExists([string]$runtime, [string]$image) {
     } catch { return $false }
 }
 
-# Get-CodeItHistoryImage RUNTIME FILE: the most-recently remembered image that still
-# exists and whose toolchains cover >=70% of weighted usage, or "". Weights run from
-# 1 (oldest remembered) to 15 (most recent). Spec 09.
-function Get-CodeItHistoryImage([string]$runtime, [string]$file) {
+# Get-CodeItHistoryImage RUNTIME FILE TC_DIR: the most-recently remembered image
+# that still exists and whose toolchains cover >=70% of weighted usage, or "". Weights
+# run from 1 (oldest remembered) to 15 (most recent). Only the tool chains known in
+# TC_DIR count. Spec 09.
+function Get-CodeItHistoryImage([string]$runtime, [string]$file, [string]$tcDir) {
     if (-not (Test-Path -Path $file)) { return "" }
     $lines = @(Get-Content -Path $file | Where-Object { $_ })
     $n = $lines.Count
@@ -144,19 +170,22 @@ function Get-CodeItHistoryImage([string]$runtime, [string]$file) {
     $total = 0
     for ($i = 0; $i -lt $n; $i++) { $total += 15 - $n + 1 + $i }
     if ($total -le 0) { return "" }
-    $weights = @{}
-    foreach ($c in $script:CodeItKnownToolchain) { $weights[$c] = 0 }
-    for ($i = 0; $i -lt $n; $i++) {
-        $w = 15 - $n + 1 + $i
-        $set = @($chains[$i] -split ',')
-        foreach ($c in $script:CodeItKnownToolchain) {
-            if ($set -contains $c) { $weights[$c] += $w }
-        }
-    }
+    # Plain assignment: the definition helpers return an array object, and @() would
+    # wrap it as a single nested element.
+    $known = Get-CodeItListToolchains $tcDir
+    if ($null -eq $known) { $known = @() }
+    # Coverage of image j is sum over remembered i of w_i * |chains(i) ∩ chains(j)|,
+    # counting only known tool chains.
     for ($j = $n - 1; $j -ge 0; $j--) {
         $cov = 0
-        foreach ($c in @($chains[$j] -split ',')) {
-            if ($weights.ContainsKey($c)) { $cov += $weights[$c] }
+        $setJ = @($chains[$j] -split ',')
+        for ($i = 0; $i -lt $n; $i++) {
+            $w = 15 - $n + 1 + $i
+            $common = 0
+            foreach ($c in @($chains[$i] -split ',')) {
+                if (($known -contains $c) -and ($setJ -contains $c)) { $common++ }
+            }
+            $cov += $w * $common
         }
         if ($cov * 10 -ge $total * 7) {
             if (Test-CodeItImageExists $runtime $images[$j]) { return $images[$j] }
@@ -219,19 +248,16 @@ function Get-CodeItDefaultImage([string]$runtime, [string]$file) {
     return $existing[0]
 }
 
-# Get-CodeItToolchainCommands NAME: the host commands that reveal NAME is installed.
-function Get-CodeItToolchainCommands([string]$name) {
-    switch ($name) {
-        'dotnet' { return @('dotnet --version') }
-        'node'   { return @('node --version', 'volta --version') }
-        'bun'    { return @('bun --version') }
-        'python' { return @('python3 --version', 'uv --version') }
-        default  { return @() }
-    }
+# Get-CodeItToolchainCommands DIR NAME: the host commands that reveal NAME is
+# installed, from the tool chain's config (TOOLCHAIN_DETECT, colon-separated).
+function Get-CodeItToolchainCommands([string]$dir, [string]$name) {
+    $cmds = Get-CodeItAgentConfig $dir $name 'TOOLCHAIN_DETECT'
+    if (-not $cmds) { return ,@() }
+    return ,@($cmds -split ':' | Where-Object { $_ })
 }
 
-function Test-CodeItToolchainDetected([string]$name) {
-    foreach ($c in (Get-CodeItToolchainCommands $name)) {
+function Test-CodeItToolchainDetected([string]$dir, [string]$name) {
+    foreach ($c in (Get-CodeItToolchainCommands $dir $name)) {
         $exe = ($c -split '\s+')[0]
         if (Get-Command $exe -EA Silent) { return $true }
     }
@@ -275,12 +301,7 @@ function Test-CodeItAgentExists([string]$dir, [string]$name) {
     return (Test-Path -Path (Join-Path $dir (Join-Path $name 'config')) -PathType Leaf)
 }
 
-function Get-CodeItListAgents([string]$dir) {
-    if (-not (Test-Path -Path $dir -PathType Container)) { return ,@() }
-    return ,@(Get-ChildItem -Directory -Path $dir |
-        Where-Object { Test-Path -Path (Join-Path $_.FullName 'config') -PathType Leaf } |
-        ForEach-Object { $_.Name })
-}
+function Get-CodeItListAgents([string]$dir) { return Get-CodeItDefinitions $dir }
 
 function Resolve-CodeItAgents([string]$raw, [string]$dir) {
     $requested = if ($raw) { Split-CodeItList $raw } else { $script:CodeItDefaultAgents }
@@ -295,6 +316,28 @@ function Resolve-CodeItAgents([string]$raw, [string]$dir) {
         }
     }
     return ,$out
+}
+
+# Get-CodeItAgentStateMkdirPaths DIR NAMES: the home-relative state paths (state
+# dirs, and the parent of state files) for the named agents, deduped in order.
+# Used to pre-create them agent-owned so bind mounts have a writable parent.
+function Get-CodeItAgentStateMkdirPaths([string]$dir, [string[]]$names) {
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($name in $names) {
+        foreach ($key in @('AGENT_STATE_DIRS', 'AGENT_STATE_FILES')) {
+            $v = Get-CodeItAgentConfig $dir $name $key
+            if (-not $v) { continue }
+            foreach ($p in @($v -split ':' | Where-Object { $_ })) {
+                if ($key -eq 'AGENT_STATE_FILES') {
+                    # A file in the home's root needs no directory created for it.
+                    if (-not $p.Contains('/')) { continue }
+                    $p = $p.Substring(0, $p.LastIndexOf('/'))
+                }
+                if (-not $out.Contains($p)) { $out.Add($p) }
+            }
+        }
+    }
+    return ,@($out)
 }
 
 function Bool-Arg([bool]$on) { if ($on) { 'true' } else { 'false' } }

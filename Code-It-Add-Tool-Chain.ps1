@@ -84,23 +84,28 @@ AND its tool chain installs securely:
 - actively maintained with security updates.
 Otherwise stop, write the reason to stdout, make no changes, and exit non-zero.
 
-If it passes the gate, follow how bun was added (commit 49b3ee7) as the template:
-1. Dockerfile: declare ARG <UPPER>=false, normalise it into /etc/code-it-tech.env,
-   add an install layer guarded by it, and a minimal passwordless doas permit.
-2. Add the known name and any aliases to the shared library (lib/code-it-common.sh
-   and lib/CodeItCommon.ps1), so code-it-build, code-it and image naming all pick it
-   up.
-3. Add completions (bash, zsh, PowerShell) and the README tables and "Toolchains"
+If it passes the gate, follow how the existing tool chains are defined as data:
+1. Add a toolchains/<name>/ definition, exactly like the existing ones. Do not edit
+   the Dockerfile, Code-It-Build or the shared library: definitions are discovered
+   from the directory.
+   - toolchains/<name>/install.dockerfile: a root-run, self-contained install layer
+     with a "# last changed YYYY-MM-DD" cache-bust line, plus its own passwordless
+     doas permit appended to /etc/doas.d/doas.conf.
+   - toolchains/<name>/config: TOOLCHAIN_INSTALL=install.dockerfile,
+     TOOLCHAIN_DETECT=<host command(s), colon-separated>,
+     TOOLCHAIN_ALIASES=<space-separated aliases, if any>, and
+     TOOLCHAIN_PACKAGE_CACHE=<implied package cache, if any>.
+2. Add completions (bash, zsh, PowerShell) and the README tables and "Toolchains"
    section.
-4. If the tool chain has a package manager with a well-known global cache, add it to
-   --package-caches: find the host cache (environment variable, then config, then
-   default path, as NuGet does), mount it read-only at ~/.<name>-host, and either
-   seed the container's writable cache from it (as npm and bun do in go.sh) or
-   register it as a read-only fallback (as NuGet does). Never let the container write
-   to the host cache.
-5. Add tests to tests/test-code-it.sh and tests/Test-CodeIt.ps1 mirroring the bun
+3. If the tool chain has a package manager with a well-known global cache, add a
+   package-caches/<name>/ definition: find the host cache (environment variable,
+   then config, then default path, as NuGet does), mount it read-only at
+   ~/.<name>-host, and either seed the container's writable cache from it (as npm
+   and bun do in go.sh) or register it as a read-only fallback (as NuGet does).
+   Never let the container write to the host cache.
+4. Add tests to tests/test-code-it.sh and tests/Test-CodeIt.ps1 mirroring the bun
    ones. Build the image and run the tool chain's --version headlessly.
-6. Commit with a conventional commit message.
+5. Commit with a conventional commit message.
 
 Do not push. Work only on the current branch.
 '@

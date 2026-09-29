@@ -3,7 +3,7 @@
 # Install by sourcing it, e.g. from ~/.bashrc:
 #     source /path/to/ContainerCodeIt/completions/code-it-build.bash
 
-_code_it_build_opts='--toolchain -t --stack --package-caches --agent -a --list-agents
+_code_it_build_opts='--toolchain -t --stack --package-caches --agent -a --list-agents --list-toolchains --list-package-caches
     --rebuild --image -i --dockerfile-dir --runtime -r --dry-run -d --help -h'
 
 _code_it_build() {
@@ -19,7 +19,7 @@ _code_it_build() {
         --image|-i)
             COMPREPLY=( $(compgen -W "code-it-alpine-dotnet-node $(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
         --toolchain|-t|--stack)
-            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh" -- "$cur") ); return ;;
         --package-caches)
             COMPREPLY=( $(compgen -W "nuget npm bun" -- "$cur") ); return ;;
         --agent|-a)

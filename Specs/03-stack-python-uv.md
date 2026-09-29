@@ -1,6 +1,7 @@
 # 03 — Add Python (with uv) as a toolchain
 
-See 00-conventions.md. Depends on 01.
+See 00-conventions.md. Depends on 01. Amended by 11: uv is no longer installed for
+every image; it belongs to the `python` tool chain.
 
 ## Goal
 `code-it-build --stack python` gives a working Python toolchain: `python3`, `uv`, `uvx`.

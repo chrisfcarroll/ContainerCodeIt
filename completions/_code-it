@@ -72,7 +72,7 @@ _code_it() {
         (--image|-i)      compadd -- code-it-alpine-dotnet-node; return ;;
         (--agent-name) compadd -- Agent1; return ;;
         (--agent|-a)   compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
-        (--toolchain|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv; return ;;
+        (--toolchain|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
         (--prompt|-p|--port) return ;;   # free text: leave it to the user
     esac

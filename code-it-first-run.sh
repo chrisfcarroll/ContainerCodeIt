@@ -70,6 +70,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 agents_dir="$script_dir/agents"
+toolchains_dir="$script_dir/toolchains"
+package_caches_dir="$script_dir/package-caches"
 
 # 1. Container runtime and git, reusing code-it's detection and advice.
 runtime=$(ci_detect_runtime "$runtime") || exit 1
@@ -79,7 +81,10 @@ if ! command -v git &>/dev/null; then
 fi
 
 # 2. Detect host toolchains and agents.
-toolchain_available=($CI_KNOWN_TOOLCHAIN)
+toolchain_available=()
+while IFS= read -r t; do
+    toolchain_available+=("$t")
+done < <(ci_list_definitions "$toolchains_dir")
 agents_available=()
 for a in $CI_DEFAULT_AGENTS; do
     ci_agent_exists "$agents_dir" "$a" && agents_available+=("$a")
@@ -90,7 +95,7 @@ done < <(ci_list_agents "$agents_dir")
 
 detected_toolchain=""
 for t in "${toolchain_available[@]}"; do
-    if ci_toolchain_detected "$t"; then
+    if ci_toolchain_detected "$toolchains_dir" "$t"; then
         detected_toolchain=$(ci_comma_list_add "$detected_toolchain" "$t")
     fi
 done
@@ -151,7 +156,7 @@ echo "== ContainerCodeIt first run =="
 echo "Using container runtime: $runtime"
 
 if [[ -n "$toolchain_arg" ]]; then
-    chosen_toolchain=$(ci_resolve_toolchain "$toolchain_arg") || exit 1
+    chosen_toolchain=$(ci_resolve_toolchain "$toolchain_arg" "$toolchains_dir") || exit 1
 else
     default_tcs="$detected_toolchain"
     [[ -n "$default_tcs" ]] || default_tcs="$CI_DEFAULT_TOOLCHAIN"

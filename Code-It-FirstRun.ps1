@@ -66,6 +66,8 @@ if ($help) {
 . "$PSScriptRoot/lib/CodeItCommon.ps1"
 
 $agentsDir = Join-Path $PSScriptRoot 'agents'
+$toolchainsDir = Join-Path $PSScriptRoot 'toolchains'
+$packageCachesDir = Join-Path $PSScriptRoot 'package-caches'
 
 # 1. Container runtime and git, reusing code-it's detection and advice.
 $runtime = Detect-CodeItRuntime $runtime
@@ -76,7 +78,7 @@ if (-not (Get-Command git -EA Silent)) {
 }
 
 # 2. Detect host toolchains and agents.
-$toolchainAvailable = $script:CodeItKnownToolchain
+$toolchainAvailable = @(Get-CodeItListToolchains $toolchainsDir)
 $agentsAvailable = @()
 foreach ($a in $script:CodeItDefaultAgents) {
     if (Test-CodeItAgentExists $agentsDir $a) { $agentsAvailable += $a }
@@ -85,7 +87,7 @@ foreach ($a in (Get-CodeItListAgents $agentsDir)) {
     if ($agentsAvailable -notcontains $a) { $agentsAvailable += $a }
 }
 
-$detectedToolchain = @($toolchainAvailable | Where-Object { Test-CodeItToolchainDetected $_ })
+$detectedToolchain = @($toolchainAvailable | Where-Object { Test-CodeItToolchainDetected $toolchainsDir $_ })
 $detectedAgents     = @($agentsAvailable | Where-Object { Test-CodeItAgentDetected $agentsDir $_ })
 
 # Parse-answer ANSWER ITEMS...: numbers (1-based) or names -> comma list
@@ -120,7 +122,7 @@ Write-Host "== ContainerCodeIt first run =="
 Write-Host "Using container runtime: $runtime"
 
 if ($toolchain) {
-    $chosenToolchain = Resolve-CodeItToolchain $toolchain
+    $chosenToolchain = Resolve-CodeItToolchain $toolchain $toolchainsDir
     if ($null -eq $chosenToolchain) { exit 1 }
 } else {
     $defaultTcs = if ($detectedToolchain.Count) { $detectedToolchain -join ' ' } else { $script:CodeItDefaultToolchain -join ' ' }

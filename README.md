@@ -2,7 +2,9 @@
 
 Sandbox your agentic AI properly, in a container, with access to a single working directory, where it can work free of permissions interruption. 
 
-The default Dockerfile includes **OpenCode** and **Claude Code** agents.
+The base image includes the **OpenCode** agent; **Claude Code**, tool chains and
+package caches are assembled by `code-it-build` (the default build adds Claude Code,
+.NET and Node.js).
 
 ```bash
 code-it.sh     # or -o or --opencode (this is the default)
@@ -84,7 +86,7 @@ agent in the container; the command says so before it copies.
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--toolchain LIST`, `-t` | `-toolchain LIST` | remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
+| `--toolchain LIST`, `-t` | `-toolchain LIST` | remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`; see `code-it-build --list-toolchains`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
@@ -110,6 +112,8 @@ chains and package caches). They accept the same logical parameters:
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Package repos to support; an explicit empty list means none |
 | `--agent, -a LIST` | `-agent LIST` | `opencode,claude` | Agents to install |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
+| `--list-toolchains` | `-listToolchains` | - | List the available toolchains and their aliases, then exit |
+| `--list-package-caches` | `-listPackageCaches` | - | List the available package caches and exit |
 | `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today first |
 | `--image`, `-i` | `-image` | `code-it-alpine-<chains>` | Image name to build |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
@@ -121,26 +125,43 @@ The image is labelled `code-it.tool-chains=<chains>` and
 built for a different tool-chain set, falling back to the image-name guess for images
 that predate the label.
 
-## Tech stacks
+## Tool chains and package caches
 
-The Dockerfile takes build-time switches for the tech stacks to include, and the
-launchers expose them as two comma-separated lists, passed to `docker build` as
-`--build-arg`s:
+Tool chains, package caches and agents are **data, not branches**. Each tool chain is
+one directory, `toolchains/<name>/`:
 
-- `--toolchain` / `-toolchain` (alias `--stack` / `-stack`) — toolchains to build:
-  `dotnet`, `node`, `bun`, `python`. Default: the remembered image, else an existing
-  code-it image, else the first-run setup (see below).
-  `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
-  `bun`; `uv` is an alias for `python`. Aliases resolve to the canonical name, so
-  `--toolchain ts-node` is `--toolchain node` and produces the same image name.
+| File | Purpose |
+|---|---|
+| `config` | `key=value`: the install fragment name, host detect command(s), aliases, and any package cache it implies |
+| `install.dockerfile` | a root-run, self-contained install layer (its packages, its `doas` permits) with a `# last changed YYYY-MM-DD` cache-bust line |
+
+`code-it-build` assembles only the selected fragments into the Dockerfile, replacing
+the `@@CODE_IT_TOOLCHAIN_INSTALLS@@` / `@@CODE_IT_PACKAGE_CACHE_INSTALLS@@` markers.
+Unselected tool chains cost **nothing** in the assembled Dockerfile, which matters
+because Apple's `container` builder sends it in a gRPC header and fails above ~16 KB
+(`apple/container#735`): adding a new tool chain no longer grows every build.
+
+The launchers expose two comma-separated lists:
+
+- `--toolchain` / `-toolchain` (alias `--stack` / `-stack`) — tool chains to build.
+  Known names and aliases come from `toolchains/*/config`; run
+  `code-it-build --list-toolchains` to see them. Today: `dotnet`, `node` (aliases
+  `js-node`, `ts-node`), `bun` (aliases `js-bun`, `ts-bun`), `python` (alias `uv`),
+  `powershell` (alias `pwsh`). Default: the remembered image, else an existing
+  code-it image, else the first-run setup (see below); `code-it-build` itself defaults
+  to `dotnet,node`.
 - `--package-caches` / `-packageCaches` — package repos whose host cache is mounted
-  read-only: `nuget`, `npm`, `bun`. Default: the repos implied by `--toolchain`
-  (`dotnet`->`nuget`, `node`->`npm`). Python has no host cache mount: uv must write its
-  own cache, so the container keeps it in the agent's home (`UV_CACHE_DIR`).
+  read-only: `nuget`, `npm`, `bun` (`package-caches/<name>/`). Default: the repos
+  implied by `--toolchain`, from each tool chain's `config`
+  (`dotnet`->`nuget`, `node`->`npm`). Python has no host cache mount: uv must write
+  its own cache, so the container keeps it in the agent's home (`UV_CACHE_DIR`).
 
 A list *replaces* the default set rather than toggling it, so there is no per-tech
-on/off flag to clash with future tech names as the list grows. Each tech left out skips
-its layers entirely.
+on/off flag to clash with future tech names as the list grows.
+
+Adding a tool chain means adding one `toolchains/<name>/` directory (and optionally a
+`package-caches/<name>/` one): no script edits. Versioned variants (`dotnet8`,
+`node22`, ...) can be added the same way later.
 
 ### Default: the remembered image, an existing image, or first-run
 
@@ -176,7 +197,7 @@ wins.
 # Node.js and Bun, but npm only (e.g. you drive Bun through npm)
 ./code-it.sh --build-image --toolchain node,bun --package-caches npm
 
-# Python 3 with uv (uv is in every image): --stack is an alias for --toolchain
+# Python 3 with uv (both from Alpine's repos)
 ./code-it-build.sh --stack python
 ```
 
@@ -189,11 +210,11 @@ tools itself (`doas dotnet`, `doas node`, `doas npm`, `doas bun`, `doas python3`
 
 ### Python
 
-`--toolchain python` (or `--stack python`, or the old alias `uv`) adds Python 3 from
-Alpine's repos. `uv` and `uvx` are installed for every image, including the default.
-The system Python is externally managed, so use `uv venv` / `uv tool` rather than
-`pip install` into it; uv keeps its cache in the agent's home via `UV_CACHE_DIR` and
-fetches musl CPython builds for x86_64 and aarch64.
+`--toolchain python` (or `--stack python`, or the old alias `uv`) adds Python 3 and
+`uv`/`uvx` from Alpine's repos. The system Python is externally managed, so use
+`uv venv` / `uv tool` rather than `pip install` into it; uv keeps its cache in the
+agent's home via `UV_CACHE_DIR` and fetches musl CPython builds for x86_64 and
+aarch64.
 
 ## Agents
 
@@ -211,6 +232,10 @@ the Dockerfile and writes `/etc/code-it-agents` (a `name=binary` map) that the
 container's `go.sh` reads, so no agent names are hardcoded in script logic. The
 default is `opencode,claude`. `code-it --agent NAME` runs one of them and mounts only
 that agent's state.
+
+The base Dockerfile carries a marked default region with opencode, so building it
+directly (with no args) gives a working default image; `code-it-build` replaces that
+whole region, so an assembled image contains exactly the agents it was asked for.
 
 ```bash
 ./code-it-build.sh --agent opencode          # a leaner image, OpenCode only
@@ -314,15 +339,21 @@ docker run -it --rm \
 
 ## What's in the image
 
-Edit the **Dockerfile** to taste. The default build includes:
+Edit the **Dockerfile** (the base) or the definitions to taste. The base image is
+**Alpine Linux 3.24** with **zsh**, **vim**, **tmux**, **git** and the default
+**OpenCode** agent; the default build adds:
 
-- **Alpine Linux 3.24** with **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, **PowerShell 7**
-- The agents you select with `--agent` (default **Claude Code CLI** and **OpenCode CLI**), and **uv/uvx** (in every image)
+- **.NET SDK 8.0 and 10, and Mono**, **Node.js** and **npm**, and (with
+  `--toolchain powershell`) **PowerShell 7**
+- The agents you select with `--agent` (default **Claude Code CLI** and **OpenCode CLI**)
 - A **non-root user `agent1`** with passwordless `doas` for installations: `apk`, plus
-  `dotnet`, `node`, `npm`, `bun` and/or `python3` for whichever techs/packages are enabled
+  each selected tool chain or package cache's commands (`dotnet`, `node`, `npm`,
+  `nuget`, `bun`, `python3`)
 
-Use the [tech lists](#tech-stacks) to build an image with a different mix, for example
-Bun instead of .NET + Node.js, or add Python with `--stack python`.
+Use the [tool-chain lists](#tool-chains-and-package-caches) to build an image with a
+different mix, for example Bun instead of .NET + Node.js, or add Python with
+`--stack python`. PowerShell is offered by first-run when `pwsh` or `powershell` is
+detected on the host.
 
 On startup, the container launches a **tmux** session running the chosen agent, and a `zsh` terminal available via the tmux switch hotkey sequence, `Ctrl-B S`.
 
@@ -332,9 +363,11 @@ container exits when the agent does. That is what `--headless` uses.
 
 ## Rough Edges
 
-- One Dockerfile now supports build-time tech-stack lists (`dotnet`, `node`, `bun`,
-  `python`, and the package repos `nuget`, `npm`), so combinations do not need separate
-  files. Java is the obvious next tech to add.
+- Tool chains are data fragments (`toolchains/<name>/config` +
+  `install.dockerfile`), so combinations do not need separate files and unselected
+  variants cost nothing in the 16 KB-limited buildable Dockerfile. Java is the obvious
+  next tool chain to add; versioned variants (`dotnet8`, `node22`, ...) can follow the
+  same pattern.
 - Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it-build --rebuild` / `Code-It-Build.ps1 -rebuild`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
 
@@ -457,9 +490,10 @@ unchanged and is propagated as the tool's non-zero exit code.
 The in-container agent gates on NAME being a well-known language/runtime whose tool
 chain installs securely (Alpine repos or the vendor's HTTPS distribution with checksum
 or signature verification where published, musl builds for x86_64 and aarch64, actively
-maintained), then follows how `bun` was added: an `ARG`-guarded Dockerfile layer, the
-name and aliases in the shared library, completions and README, an optional read-only
-package cache, tests, and a commit.
+maintained), then adds a `toolchains/NAME/` definition (config + install.dockerfile)
+exactly like the existing ones, an optional `package-caches/NAME/` definition,
+completions and README, tests, and a commit. No Dockerfile or script edits: definitions
+are discovered from their directories.
 
 ```bash
 ./code-it-add-tool-chain.sh java --url https://openjdk.org/install/

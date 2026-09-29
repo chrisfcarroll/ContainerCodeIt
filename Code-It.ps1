@@ -222,6 +222,8 @@ if ($help) {
 . "$PSScriptRoot/lib/CodeItCommon.ps1"
 
 $agentsDir = Join-Path $PSScriptRoot 'agents'
+$toolchainsDir = Join-Path $PSScriptRoot 'toolchains'
+$packageCachesDir = Join-Path $PSScriptRoot 'package-caches'
 
 # -listAgents lists the available agent definitions and exits.
 if ($listAgents) {
@@ -269,13 +271,17 @@ $promptSet = [bool]$prompt
 # -rebuildImage implies -buildImage
 if ($rebuildImage) { $buildImage = $true }
 
-# Resolve -toolchain / -packageCaches. A list replaces the default set rather than
-# toggling it, so there are no per-tech on/off parameters to clash with future tech
-# names. -toolchain defaults to dotnet,node; -packageCaches defaults to the repos
-# implied by -toolchain (dotnet->nuget, node->npm).
-$enabledToolchain = Resolve-CodeItToolchain $toolchain
+# Resolve -toolchain / -packageCaches, reading the known names and aliases from the
+# toolchains/ and package-caches/ definitions. A list replaces the default set rather
+# than toggling it. -toolchain defaults to dotnet,node; -packageCaches defaults to
+# the repos implied by -toolchain.
+$enabledToolchain = Resolve-CodeItToolchain $toolchain $toolchainsDir
 if ($null -eq $enabledToolchain) { exit 1 }
-$enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolchain
+if ($PSBoundParameters.ContainsKey('packageCaches') -and -not $packageCaches) {
+    $enabledPackageCaches = @()
+} else {
+    $enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolchain $toolchainsDir $packageCachesDir
+}
 if ($null -eq $enabledPackageCaches) { exit 1 }
 
 # Default image name from the tool-chain list, e.g. code-it-alpine-dotnet or
@@ -314,7 +320,7 @@ if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameter
         $defaultImage = ""
     } else {
         if (Test-Path -Path $defaultHistory -PathType Leaf) {
-            $defaultImage = Get-CodeItHistoryImage $runtime $defaultHistory
+            $defaultImage = Get-CodeItHistoryImage $runtime $defaultHistory $toolchainsDir
             if ($defaultImage) { $defaultLabel = "remembered image" }
         }
         if (-not $defaultImage) {
@@ -331,11 +337,11 @@ if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameter
         & $firstRun -saveDir $saveDir -workDir $WorkDirToMount -runtime $runtime
         exit $LASTEXITCODE
     }
-    $resolvedDefaultChains = Resolve-CodeItToolchain $defaultChains
+    $resolvedDefaultChains = Resolve-CodeItToolchain $defaultChains $toolchainsDir
     if ($null -eq $resolvedDefaultChains) { exit 1 }
     $enabledToolchain = $resolvedDefaultChains
     if (-not $PSBoundParameters.ContainsKey('packageCaches')) {
-        $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolchain
+        $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolchain $toolchainsDir $packageCachesDir
     }
     $image = $defaultImage
     "    Using $defaultLabel`: $image"

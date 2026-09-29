@@ -1,193 +1,73 @@
 FROM alpine:3.24
 
 # ===========================================================================
-# Base image: tools every sandbox needs, whatever the tech stack
+# Base image: the tools every sandbox needs, whatever the tech stack.
+#
+# Tool chains and package caches are not here: code-it-build assembles the
+# selected ones from toolchains/<name>/ and package-caches/<name>/ into the
+# markers below. Coding agents work the same way (agents/<name>/), except that
+# this file carries the default agent (opencode) in a marked region that
+# code-it-build replaces. Built directly, with no args, this file yields a base
+# image with zsh, vim, tmux, git, the default agent, and no tool chains.
 # ===========================================================================
-RUN apk add --no-cache zsh curl doas
-RUN apk add --no-cache vim chromium ttf-freefont freetype-dev
-RUN apk add --no-cache uv
-RUN apk add --no-cache ca-certificates less ncurses-terminfo-base krb5-libs libgcc libintl libssl3 libstdc++
-RUN apk add --no-cache tzdata userspace-rcu zlib icu-libs
-RUN apk -X https://dl-cdn.alpinelinux.org/alpine/edge/main add --no-cache lttng-ust openssh-client
-RUN apk add --no-cache docs oh-my-zsh tmux
-RUN apk add --no-cache libgcc libstdc++ ripgrep bash # Claude.AI & opencode dependencies
-RUN apk add --no-cache musl-locales ncurses-terminfo
-RUN apk add --no-cache krb5
-RUN apk add --no-cache git
+RUN apk add --no-cache zsh curl doas vim tmux git docs oh-my-zsh
+RUN apk add --no-cache ca-certificates less ripgrep bash
+RUN apk add --no-cache libgcc libstdc++ # Claude Code & OpenCode native dependencies
+RUN apk add --no-cache musl-locales ncurses-terminfo ncurses-terminfo-base
+RUN apk add --no-cache openssh-client
 RUN touch /etc/rc.conf
 RUN sed -i 's/#unicode="NO"/#unicode="NO"\nunicode="YES"/' /etc/rc.conf
 
-# ===========================================================================
-# Tech stack selection
-#
-# These build switches are declared as low in the file as the layers that use
-# them allow, so changing one only invalidates the layers below it. Each is a
-# boolean, and each switched off skips its install layer entirely:
-#
-#   DOTNET   .NET SDK + Mono                 (implies NUGET)
-#   NODE     Node.js                         (implies NPM)
-#   BUN      Bun, the all-in-one JS runtime  (implies nothing: it bundles its
-#                                             own runtime, bundler and package
-#                                             manager)
-#   PYTHON   Python 3 (uv is installed for every image, see the base layer)
-#   NUGET    NuGet package cache support      (may be selected without DOTNET)
-#   NPM      npm package cache support        (may be selected without NODE)
-#
-# NUGET and NPM may be left empty to follow DOTNET and NODE respectively. The
-# effective values are normalised once into /etc/code-it-tech.env so the later
-# layers can read them.
-# ===========================================================================
-ARG DOTNET=true
-ARG NODE=true
-ARG BUN=false
-ARG PYTHON=false
-ARG NUGET=
-ARG NPM=
-RUN set -e; \
-    case "$NUGET" in true|false) ;; *) NUGET=$DOTNET ;; esac; \
-    case "$NPM"   in true|false) ;; *) NPM=$NODE   ;; esac; \
-    printf 'DOTNET=%s\nNODE=%s\nBUN=%s\nPYTHON=%s\nNUGET=%s\nNPM=%s\n' \
-        "$DOTNET" "$NODE" "$BUN" "$PYTHON" "$NUGET" "$NPM" > /etc/code-it-tech.env
-
-# --- .NET ------------------------------------------------------------------
-RUN . /etc/code-it-tech.env; if [ "$DOTNET" = true ]; then \
-        apk add --no-cache dotnet10-sdk dotnet8-sdk mono; \
-        dotnet workload update; \
-    fi
-
-# --- Node.js ---------------------------------------------------------------
-RUN . /etc/code-it-tech.env; if [ "$NODE" = true ]; then \
-        apk add --no-cache nodejs; \
-    fi
-
-# --- npm -------------------------------------------------------------------
-# Selecting npm without Node.js still works: the apk package pulls nodejs in.
-RUN . /etc/code-it-tech.env; if [ "$NPM" = true ]; then \
-        apk add --no-cache npm; \
-    fi
-
-# --- Bun -------------------------------------------------------------------
-# Bun ships musl builds and its installer already picks the right architecture
-# for Alpine. Install into /usr/local so every user finds it on PATH; unzip is
-# its only requirement.
-RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
-        apk add --no-cache unzip; \
-        curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash; \
-        /usr/local/bin/bun --version; \
-    fi
-
-# --- Python ----------------------------------------------------------------
-# Python 3 from Alpine's own repos. uv (installed for every image in the base
-# layer) is the package manager: the system Python is externally managed, so
-# never pip-install into it. uv fetches musl CPython builds on x86_64/aarch64.
-RUN . /etc/code-it-tech.env; if [ "$PYTHON" = true ]; then \
-        apk add --no-cache python3; \
-        python3 --version; \
-    fi
-
-# ===========================================================================
-# PowerShell
-# ===========================================================================
-# Microsoft only ships musl (Alpine) builds for x64, so on other architectures
-# install it as a dotnet tool instead, with gcompat plus a tiny shim for two
-# glibc-only symbols its native library needs (verified on aarch64). That path
-# needs the .NET SDK, so it is skipped when DOTNET is switched off.
-RUN set -e; \
-    if [ "$(uname -m)" = "x86_64" ]; then \
-        curl -L https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/powershell-7.6.6-linux-musl-x64.tar.gz -o /tmp/powershell.tar.gz && \
-        mkdir -p /opt/microsoft/powershell/7 && \
-        tar zxf /tmp/powershell.tar.gz -C /opt/microsoft/powershell/7 && \
-        chmod +x /opt/microsoft/powershell/7/pwsh && \
-        ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh && \
-        rm -rf /tmp/powershell*; \
-    elif . /etc/code-it-tech.env && [ "$DOTNET" = true ]; then \
-        apk add --no-cache gcompat && \
-        apk add --no-cache --virtual .pwsh-build build-base && \
-        dotnet tool install --tool-path /opt/microsoft/powershell PowerShell && \
-        echo '#include <stdlib.h>'  >  /tmp/chk_shim.c && \
-        echo '#include <limits.h>' >> /tmp/chk_shim.c && \
-        echo '#include <stdarg.h>' >> /tmp/chk_shim.c && \
-        echo '#include <syslog.h>' >> /tmp/chk_shim.c && \
-        echo 'char *__realpath_chk(const char *p, char *r, size_t l) { if (l < PATH_MAX) abort(); return realpath(p, r); }' >> /tmp/chk_shim.c && \
-        echo 'void __syslog_chk(int pri, int flag, const char *fmt, ...) { va_list ap; va_start(ap, fmt); vsyslog(pri, fmt, ap); va_end(ap); }' >> /tmp/chk_shim.c && \
-        gcc -shared -fPIC -o /usr/lib/libpsl-chk-shim.so /tmp/chk_shim.c && \
-        rm -f /tmp/chk_shim.c && \
-        apk del .pwsh-build && \
-        printf '#!/bin/sh\nLD_PRELOAD=/usr/lib/libpsl-chk-shim.so exec /opt/microsoft/powershell/pwsh "$@"\n' > /usr/bin/pwsh && \
-        chmod +x /usr/bin/pwsh; \
-    else \
-        echo "Skipping PowerShell: it needs the .NET SDK on non-x86_64"; \
-    fi
+# Passwordless doas lets the agent install further tools itself. apk is always
+# allowed; each selected tool chain and package cache appends its own permit
+# from its fragment, which code-it-build assembles above this line.
+RUN mkdir -p /etc/doas.d
+RUN printf '%s\n' 'permit nopass agent1 as root cmd apk' > /etc/doas.d/doas.conf
 
 # ===========================================================================
 # User and permissions
 # ===========================================================================
 RUN adduser -S agent1 -G wheel
 RUN sed -i 's#^\(agent1:[^:]*:[^:]*:[^:]*:[^:]*:[^:]*:\)/sbin/nologin$#\1/bin/zsh#' /etc/passwd
-# Passwordless doas lets the agent install further tools itself. apk is always
-# allowed; each enabled tech adds its own command(s), mirroring the switches in
-# the tech stack section above.
-RUN mkdir -p /etc/doas.d
-RUN . /etc/code-it-tech.env; { \
-        echo "permit nopass agent1 as root cmd apk"; \
-        if [ "$DOTNET" = true ]; then echo "permit nopass agent1 as root cmd dotnet"; fi; \
-        if [ "$NUGET" = true ]; then echo "permit nopass agent1 as root cmd nuget"; fi; \
-        if [ "$NODE" = true ] || [ "$NPM" = true ]; then echo "permit nopass agent1 as root cmd node"; fi; \
-        if [ "$NPM" = true ]; then echo "permit nopass agent1 as root cmd npm"; fi; \
-        if [ "$BUN" = true ]; then echo "permit nopass agent1 as root cmd bun"; fi; \
-        if [ "$PYTHON" = true ]; then echo "permit nopass agent1 as root cmd python3"; fi; \
-    } > /etc/doas.d/doas.conf
 
 # ===========================================================================
-# Package caches
-# ===========================================================================
-# The launcher bind-mounts the host package caches READ-ONLY at the "-host"
-# paths below, so the agent reuses downloads without ever writing to the host.
-# The container keeps its own writable cache alongside. /home/agent1/go.sh
-# seeds the writable cache from the read-only mount at startup.
+# Tool chains and package caches
 #
-# NuGet uses a fallbackPackageFolder, so dotnet restore reads the host cache
-# directly (packages not found there are downloaded into ~/.nuget/packages).
-USER agent1
-RUN . /etc/code-it-tech.env; if [ "$NUGET" = true ]; then \
-        mkdir -p ~/.nuget/packages-host ~/.nuget/NuGet; \
-        printf '%s\n' \
-            '<?xml version="1.0" encoding="utf-8"?>' \
-            '<configuration>' \
-            '  <fallbackPackageFolders>' \
-            '    <add key="host-nuget-cache" value="/home/agent1/.nuget/packages-host" />' \
-            '  </fallbackPackageFolders>' \
-            '  <packageSources>' \
-            '    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />' \
-            '    <add key="host-nuget-cache" value="/home/agent1/.nuget/packages-host" />' \
-            '  </packageSources>' \
-            '</configuration>' > ~/.nuget/NuGet/NuGet.Config; \
-    fi
-# npm and Bun use their default writable caches; create both them and the
-# read-only host mount points so the launcher always has somewhere to mount.
-RUN . /etc/code-it-tech.env; if [ "$NPM" = true ]; then \
-        mkdir -p ~/.npm ~/.npm-host; \
-    fi
-RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
-        mkdir -p ~/.bun/install/cache ~/.bun-host; \
-    fi
+# code-it-build replaces these markers with the selected toolchains/<name>/ and
+# package-caches/<name>/ fragments. Each fragment is a root-run layer that is
+# self-contained: its own packages, its own doas permits. Unselected tool chains
+# cost nothing in the assembled (size-limited) Dockerfile. Spec 11.
+# ===========================================================================
+# @@CODE_IT_TOOLCHAIN_INSTALLS@@
+# @@CODE_IT_PACKAGE_CACHE_INSTALLS@@
+
+# The fragments above run as root and may create directories under the agent's
+# home, so hand the whole home to agent1 before switching to it. Doing it here
+# (rather than per fragment) means every part of ~ is agent1-owned, including
+# intermediate directories that fragments did not anticipate: a root-owned
+# /home/agent1/.local/share, for instance, would stop the agent writing
+# .local/share/powershell and would also stop Docker binding a state dir below it.
+RUN chown -R agent1:wheel /home/agent1
 
 # ===========================================================================
 # Coding agents and user environment
 # ===========================================================================
-# The coding agents' install layers are assembled into this file at build time by
-# code-it-build from agents/<name>/install.dockerfile for the --agent list, which
-# also writes /etc/code-it-agents (name=binary per line) for go.sh to read. The
-# marker below is where that block goes; building this file directly would leave
-# the image without agents, so use code-it-build.
-RUN mkdir -p ~/.local/bin
+USER agent1
+RUN mkdir -p ~/.local/bin ~/.local/share
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
-# uv keeps its cache and tool installs inside the agent's home. It is never the
-# host cache, which the launcher does not mount (uv needs to write to its cache).
-RUN mkdir -p ~/.cache/uv
-RUN echo "export UV_CACHE_DIR=\"\$HOME/.cache/uv\"" >> ~/.zshrc
-ENV UV_CACHE_DIR=/home/agent1/.cache/uv
-# @@CODE_IT_AGENT_INSTALLS@@
+
+# The default agent: opencode. code-it-build replaces this whole marked region
+# with the selected agents' install fragments (agents/<name>/install.dockerfile)
+# plus the /etc/code-it-agents name=binary map go.sh reads, so an assembled image
+# contains exactly the agents it was asked for. Built directly, this region
+# installs the default agent and the map for it.
+# @@CODE_IT_AGENTS_BEGIN@@
+RUN curl -fsSL https://opencode.ai/install | bash # last changed 2026-09-26
+USER root
+RUN printf '%s\n' 'opencode=/home/agent1/.opencode/bin/opencode' > /etc/code-it-agents
+USER agent1
+# @@CODE_IT_AGENTS_END@@
+
 RUN git config --global rerere.enabled true
 RUN git config --global alias.root 'rev-parse --show-toplevel'
 RUN git config --global alias.lg  "log --color --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --graph"

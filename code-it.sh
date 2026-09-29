@@ -65,14 +65,15 @@
 #                            attribution and home directory naming. Must match the USER set in
 #                            the Dockerfile. Default: "Agent1"
 #
-# Tech stack (used as Docker --build-arg when --build-image is given, and to
-# decide which host package caches are mounted read-only). Passing a list
-# REPLACES the default set, so there are no on/off flags to clash with future
-# tech names:
+# Tool chain / package cache (used when --build-image is given, and to decide
+# which host package caches are mounted read-only). Passing a list REPLACES the
+# default set, so there are no on/off flags to clash with future tech names:
 #   --toolchain, -t LIST   Comma-separated toolchains to build. --stack is an alias.
 #                            Default: dotnet,node.
-#                            Known: dotnet, node (aliases js-node, ts-node), bun
-#                            (aliases js-bun, ts-bun), python (alias uv).
+#                            Known names and aliases live in toolchains/*/config:
+#                            dotnet, node (aliases js-node, ts-node), bun (aliases
+#                            js-bun, ts-bun), python (alias uv), powershell (alias
+#                            pwsh). code-it-build --list-toolchains lists them.
 #   --package-caches LIST    Comma-separated package repos whose host cache is mounted
 #                            read-only. 
 #                            Known: nuget, npm, bun.
@@ -210,6 +211,8 @@ package_caches=""
 package_caches_explicit=false
 
 agents_dir="$script_dir/agents"
+toolchains_dir="$script_dir/toolchains"
+package_caches_dir="$script_dir/package-caches"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -278,6 +281,11 @@ while [[ $# -gt 0 ]]; do
             package_caches_explicit=true
             shift 2
             ;;
+        --package-caches=*)
+            package_caches="${1#--package-caches=}"
+            package_caches_explicit=true
+            shift
+            ;;
         --prompt|-p)
             prompt="$2"
             prompt_set=true
@@ -341,12 +349,18 @@ fi
 # shellcheck disable=SC1090
 . "$agents_dir/$code_agent/config"
 
-# Resolve --toolchain / --package-caches into a set of known tech names (space-separated
-# in $enabled_toolchain) and known package repo names (in $enabled_package_caches).
-# --toolchain replaces the default {dotnet,node}; --package-caches replaces the set implied
-# by --toolchain (dotnet->nuget, node->npm). An unknown name is a hard error.
-enabled_toolchain=$(ci_resolve_toolchain "$toolchain") || exit 1
-enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_toolchain") || exit 1
+# Resolve --toolchain / --package-caches into a set of known tool-chain names
+# (space-separated in $enabled_toolchain) and known package repo names (in
+# $enabled_package_caches), reading the known names and aliases from the
+# toolchains/ and package-caches/ definitions. --toolchain replaces the default
+# {dotnet,node}; --package-caches replaces the set implied by --toolchain (an
+# explicit empty list means none). An unknown name is a hard error.
+enabled_toolchain=$(ci_resolve_toolchain "$toolchain" "$toolchains_dir") || exit 1
+if [[ "$package_caches_explicit" == true && -z "$package_caches" ]]; then
+    enabled_package_caches=""
+else
+    enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_toolchain" "$toolchains_dir" "$package_caches_dir") || exit 1
+fi
 
 toolchain_has()    { ci_has "$enabled_toolchain" "$1"; }
 package_cache_has() { ci_has "$enabled_package_caches" "$1"; }
@@ -403,7 +417,7 @@ if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then
     fi
     default_history="$save_dir/image-history"
     if [[ -f "$default_history" ]]; then
-        default_image=$(ci_history_choose_image "$runtime" "$default_history") || default_image=""
+        default_image=$(ci_history_choose_image "$runtime" "$default_history" "$toolchains_dir") || default_image=""
         [[ -n "$default_image" ]] && default_label="remembered image"
     fi
     if [[ -z "$default_image" ]]; then
@@ -414,9 +428,9 @@ if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then
     if [[ -z "$default_chains" ]]; then
         run_first_run
     else
-        enabled_toolchain=$(ci_resolve_toolchain "$default_chains") || exit 1
+        enabled_toolchain=$(ci_resolve_toolchain "$default_chains" "$toolchains_dir") || exit 1
         if [[ "$package_caches_explicit" == false ]]; then
-            enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain") || exit 1
+            enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain" "$toolchains_dir" "$package_caches_dir") || exit 1
         fi
         image="$default_image"
         echo "    Using $default_label: $image"

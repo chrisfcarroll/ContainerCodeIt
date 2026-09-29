@@ -4,20 +4,21 @@
 # functions and constants only, and runs nothing on its own.
 #
 #   ci_comma_list_add LIST ITEM                       append ITEM to a space list
-#   ci_toolchain_alias NAME                          canonical name for an alias
-#   ci_resolve_toolchain RAW                        -> space-separated canonical list
-#   ci_resolve_package_caches RAW TOOL_CHAINS         -> space-separated list
+#   ci_toolchain_alias DIR NAME                       canonical name for an alias
+#   ci_resolve_toolchain RAW DIR                     -> space-separated canonical list
+#   ci_resolve_package_caches RAW TOOL_CHAINS TC_DIR PC_DIR -> space-separated list
 #   ci_default_image_name TOOL_CHAINS                 -> code-it-alpine-<chains>
 #   ci_has LIST ITEM                                  return 0 if ITEM is in LIST
+#   ci_agent_state_mkdir_paths AGENTS_DIR AGENTS      home paths to pre-create for mounts
 #   ci_detect_runtime REQUESTED                       -> docker|container, or return 1
 #   ci_join COMMA LIST                                space list -> comma list
 #
-# Empty RAW means "use the defaults"; an unknown name prints a warning to stderr
-# and returns 1, so the caller can exit.
+# Tool chains, package caches and agents are data: each is a directory with a
+# config and an install.dockerfile. Known names come from the directory listing,
+# aliases and host detection from each config. Empty RAW means "use the defaults";
+# an unknown name prints a warning to stderr and returns 1, so the caller can exit.
 
 CI_DEFAULT_TOOLCHAIN="dotnet node"
-CI_KNOWN_TOOLCHAIN="dotnet node bun python"
-CI_KNOWN_PACKAGE_CACHES="nuget npm bun"
 CI_CONTAINER_PORT=3000
 CI_DEFAULT_AGENTS="opencode claude"
 
@@ -28,14 +29,29 @@ ci_comma_list_add() {
     esac
 }
 
+# ci_list_definitions DIR: print one definition name per line (DIR/<name>/config)
+ci_list_definitions() {
+    local d
+    for d in "$1"/*/; do
+        [[ -f "$d/config" ]] || continue
+        basename "$d"
+    done
+}
+
+# ci_toolchain_alias DIR NAME: canonical tool-chain name for NAME, resolving the
+# aliases declared in each toolchains/<name>/config. Unknown names pass through.
 ci_toolchain_alias() {
-    case "$1" in
-        js-node|ts-node) printf 'node' ;;
-        js-bun|ts-bun)   printf 'bun' ;;
-        # uv is Python's package manager here, so it selects the python tool chain
-        uv)              printf 'python' ;;
-        *)               printf '%s' "$1" ;;
-    esac
+    local dir="$1" name="$2" d a
+    [[ -f "$dir/$name/config" ]] && { printf '%s' "$name"; return 0; }
+    # uv is Python's package manager here, so its fragment aliases it to python.
+    for d in "$dir"/*/; do
+        [[ -f "$d/config" ]] || continue
+        a=$(ci_agent_config "$dir" "$(basename "$d")" TOOLCHAIN_ALIASES) || a=""
+        case " $a " in
+            *" $name "*) basename "$d"; return 0 ;;
+        esac
+    done
+    printf '%s' "$name"
 }
 
 # ci_has LIST ITEM: true if the space-separated LIST contains ITEM
@@ -49,7 +65,7 @@ ci_join() {
 }
 
 ci_resolve_toolchain() {
-    local raw="$1" out="" t
+    local raw="$1" dir="$2" out="" t resolved
     local -a requested
     if [[ -n "$raw" ]]; then
         IFS=',' read -r -a requested <<< "$raw"
@@ -57,38 +73,38 @@ ci_resolve_toolchain() {
         read -r -a requested <<< "$CI_DEFAULT_TOOLCHAIN"
     fi
     for t in ${requested[@]+"${requested[@]}"}; do
-        t=$(ci_toolchain_alias "$t")
-        case "$t" in
-            "") ;;
-            dotnet|node|bun|python) out=$(ci_comma_list_add "$out" "$t") ;;
-            *)
-                echo "Warning: Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv)." >&2
-                return 1
-                ;;
-        esac
+        [[ -n "$t" ]] || continue
+        resolved=$(ci_toolchain_alias "$dir" "$t")
+        if [[ -f "$dir/$resolved/config" ]]; then
+            out=$(ci_comma_list_add "$out" "$resolved")
+        else
+            echo "Warning: Unknown tool chain '$t'. Known: $(ci_list_definitions "$dir" | tr '\n' ' ')" >&2
+            return 1
+        fi
     done
     printf '%s' "$out"
 }
 
 ci_resolve_package_caches() {
-    local raw="$1" toolchain="$2" out="" p
+    local raw="$1" toolchain="$2" tc_dir="$3" pc_dir="$4" out="" p implied t
     local -a requested
     if [[ -n "$raw" ]]; then
         IFS=',' read -r -a requested <<< "$raw"
     else
         requested=()
-        ci_has "$toolchain" dotnet && requested+=(nuget)
-        ci_has "$toolchain" node   && requested+=(npm)
+        for t in $toolchain; do
+            implied=$(ci_agent_config "$tc_dir" "$t" TOOLCHAIN_PACKAGE_CACHE) || implied=""
+            [[ -n "$implied" ]] && requested+=("$implied")
+        done
     fi
     for p in ${requested[@]+"${requested[@]}"}; do
-        case "$p" in
-            "") ;;
-            nuget|npm|bun) out=$(ci_comma_list_add "$out" "$p") ;;
-            *)
-                echo "Warning: Unknown package repo '$p'. Known: nuget, npm, bun." >&2
-                return 1
-                ;;
-        esac
+        [[ -n "$p" ]] || continue
+        if [[ -f "$pc_dir/$p/config" ]]; then
+            out=$(ci_comma_list_add "$out" "$p")
+        else
+            echo "Warning: Unknown package repo '$p'. Known: $(ci_list_definitions "$pc_dir" | tr '\n' ' ')" >&2
+            return 1
+        fi
     done
     printf '%s' "$out"
 }
@@ -170,11 +186,12 @@ ci_image_exists() {
     esac
 }
 
-# ci_history_choose_image RUNTIME FILE: echo the most-recently remembered image that
-# still exists and whose toolchains cover >=70% of weighted usage, or nothing.
-# Weights run from 1 (oldest remembered) to 15 (most recent). Spec 09.
+# ci_history_choose_image RUNTIME FILE TOOLCHAINS_DIR: echo the most-recently
+# remembered image that still exists and whose toolchains cover >=70% of weighted
+# usage, or nothing. Weights run from 1 (oldest remembered) to 15 (most recent).
+# Only the tool chains known in TOOLCHAINS_DIR count. Spec 09.
 ci_history_choose_image() {
-    local runtime="$1" file="$2" l image i j c w cov
+    local runtime="$1" file="$2" tc_dir="$3" l image i j c w cov common known a b
     [[ -f "$file" ]] || return 1
     local -a lines=() chains=()
     while IFS= read -r l; do
@@ -191,32 +208,21 @@ ci_history_choose_image() {
         total=$(( total + 15 - n + 1 + i ))
     done
     (( total > 0 )) || return 1
-    local dotnet_w=0 node_w=0 bun_w=0 python_w=0
-    for ((i=0; i<n; i++)); do
-        w=$(( 15 - n + 1 + i ))
-        for c in $CI_KNOWN_TOOLCHAIN; do
-            if ci_has "${chains[i]//,/ }" "$c"; then
-                case "$c" in
-                    dotnet) dotnet_w=$((dotnet_w + w)) ;;
-                    node)   node_w=$((node_w + w)) ;;
-                    bun)    bun_w=$((bun_w + w)) ;;
-                    python) python_w=$((python_w + w)) ;;
-                esac
-            fi
-        done
-    done
-    # Newest first: the first image whose chains cover >=70% of the weight wins.
+    known=$(ci_list_definitions "$tc_dir" | tr '\n' ' ')
+    # Coverage of image j is sum over remembered i of w_i * |chains(i) ∩ chains(j)|.
+    # No associative arrays here: stock macOS bash 3.2 has none. Spec 09.
     for ((j=n-1; j>=0; j--)); do
         cov=0
-        for c in $CI_KNOWN_TOOLCHAIN; do
-            if ci_has "${chains[j]//,/ }" "$c"; then
-                case "$c" in
-                    dotnet) cov=$((cov + dotnet_w)) ;;
-                    node)   cov=$((cov + node_w)) ;;
-                    bun)    cov=$((cov + bun_w)) ;;
-                    python) cov=$((cov + python_w)) ;;
-                esac
-            fi
+        for ((i=0; i<n; i++)); do
+            w=$(( 15 - n + 1 + i ))
+            a="${chains[i]//,/ }"
+            b="${chains[j]//,/ }"
+            common=0
+            for c in $a; do
+                ci_has "$known" "$c" || continue
+                ci_has "$b" "$c" && common=$((common + 1))
+            done
+            cov=$(( cov + w * common ))
         done
         if (( cov * 10 >= total * 7 )); then
             image="${lines[j]#* }"
@@ -327,6 +333,31 @@ ci_resolve_agents() {
     printf '%s' "$out"
 }
 
+# ci_agent_state_mkdir_paths AGENTS_DIR AGENTS: print, space-separated, the home
+# paths (relative to ~) that the selected agents' state needs to exist, so the
+# launcher's bind mounts get an agent1-owned parent inside the image. A state dir
+# is used as is; for a state file, its parent directory is used instead.
+ci_agent_state_mkdir_paths() {
+    local agents_dir="$1" agents="$2" out="" a key state p
+    local -a paths
+    for a in $agents; do
+        for key in AGENT_STATE_DIRS AGENT_STATE_FILES; do
+            state=$(ci_agent_config "$agents_dir" "$a" "$key") || state=""
+            IFS=':' read -r -a paths <<< "$state"
+            for p in ${paths[@]+"${paths[@]}"}; do
+                [[ -n "$p" ]] || continue
+                if [[ "$key" == AGENT_STATE_FILES ]]; then
+                    # A file in the home's root needs no directory created for it.
+                    [[ "$p" == */* ]] || continue
+                    p="${p%/*}"
+                fi
+                ci_has "$out" "$p" || out="${out:+$out }$p"
+            done
+        done
+    done
+    printf '%s' "$out"
+}
+
 # ci_strip_dockerfile_comments: read a Dockerfile on stdin, write it on stdout with
 # Dockerfile-level comment and blank lines removed. Heredoc bodies (RUN cat <<'EOF'
 # ... EOF) are preserved verbatim. Apple's container builder sends the Dockerfile in
@@ -351,18 +382,16 @@ ci_strip_dockerfile_comments() {
     done
 }
 
-# ci_toolchain_commands NAME: the host commands that reveal NAME is installed,
-# one per line. A command in any line means "detected".
+# ci_toolchain_commands DIR NAME: the host commands that reveal NAME is installed,
+# one per line, from the tool chain's config (TOOLCHAIN_DETECT, colon-separated).
 ci_toolchain_commands() {
-    case "$1" in
-        dotnet) printf '%s\n' 'dotnet --version' ;;
-        node)   printf '%s\n' 'node --version' 'volta --version' ;;
-        bun)    printf '%s\n' 'bun --version' ;;
-        python) printf '%s\n' 'python3 --version' 'uv --version' ;;
-    esac
+    local cmds
+    cmds=$(ci_agent_config "$1" "$2" TOOLCHAIN_DETECT) || cmds=""
+    [[ -n "$cmds" ]] || return 0
+    printf '%s\n' "$cmds" | tr ':' '\n'
 }
 
-# ci_toolchain_detected NAME: true if any of the tool chain's host commands works.
+# ci_toolchain_detected DIR NAME: true if any of the tool chain's host commands works.
 ci_toolchain_detected() {
     local cmd
     while IFS= read -r cmd; do
@@ -371,7 +400,7 @@ ci_toolchain_detected() {
         if $cmd >/dev/null 2>&1; then
             return 0
         fi
-    done < <(ci_toolchain_commands "$1")
+    done < <(ci_toolchain_commands "$1" "$2")
     return 1
 }
 

@@ -84,7 +84,7 @@ _code_it() {
         --agent|-a)
             COMPREPLY=( $(compgen -W "$(ls "${BASH_SOURCE[0]%/*}/../agents" 2>/dev/null)" -- "$cur") ); return ;;
         --toolchain|-t|--stack)
-            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh" -- "$cur") ); return ;;
         --package-caches)
             COMPREPLY=( $(compgen -W "nuget npm bun" -- "$cur") ); return ;;
         --prompt|-p|--port)

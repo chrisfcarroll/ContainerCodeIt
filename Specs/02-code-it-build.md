@@ -3,7 +3,7 @@
 See 00-conventions.md.
 
 ## Goal
-Move `--build-image` / `--rebuild-image` (`-buildImage` / `-rebuildImage`) out of `code-it.sh` / `Code-It.ps1` into new `code-it-build.sh` / `Code-It-Build.ps1`. Keep the Dockerfile's `ARG`-switch design as is.
+Move `--build-image` / `--rebuild-image` (`-buildImage` / `-rebuildImage`) out of `code-it.sh` / `Code-It.ps1` into new `code-it-build.sh` / `Code-It-Build.ps1`. Keep the Dockerfile's `ARG`-switch design as is. (Superseded by Spec 11: tool chains and package caches are now fragments assembled at build time, with no ARG switches.)
 
 ## `code-it-build` parameters
 - `--tool-chains LIST`, `--package-caches LIST`: same names, aliases, defaults (`dotnet,node`; caches implied by tool chains) and unknown-name errors as code-it today. Emits the same `--build-arg`s (`DOTNET`, `NODE`, `BUN`, `NUGET`, `NPM`).
