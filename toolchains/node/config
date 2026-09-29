@@ -1,0 +1,4 @@
+TOOLCHAIN_INSTALL=install.dockerfile
+TOOLCHAIN_ALIASES=js-node ts-node
+TOOLCHAIN_DETECT=node --version:volta --version
+TOOLCHAIN_PACKAGE_CACHE=npm

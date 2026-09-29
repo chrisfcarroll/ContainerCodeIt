@@ -11,9 +11,11 @@
     locale defaults to the host's. With no toolchain, it interactively detects and
     asks which toolchains and agents to build. Code-It.ps1 runs the images this builds.
 
-    The agents' install layers live in agents/<name>/install.dockerfile. This script
-    assembles them into the Dockerfile (replacing the "# @@CODE_IT_AGENT_INSTALLS@@"
-    marker) and writes /etc/code-it-agents, the name=binary map go.sh reads.
+    Toolchains, package caches and agents are data: each is a directory with a config
+    and an install fragment. This script assembles only the selected fragments into
+    the Dockerfile (replacing the markers), so unselected ones cost nothing in the
+    size-limited buildable file. It also writes /etc/code-it-agents, the name=binary
+    map go.sh reads.
 
 .PARAMETER toolchain
     Comma-separated toolchains to build. Known: dotnet, node (aliases js-node,
@@ -33,6 +35,12 @@
 .PARAMETER listAgents
     List the available agents and exit.
 
+.PARAMETER listToolchains
+    List the available toolchains (and their aliases) and exit.
+
+.PARAMETER listPackageCaches
+    List the available package caches and exit.
+
 .PARAMETER rebuild
     Bump the "# last changed" dates in the Dockerfile and selected agent install
     fragments to today first, so the agent install layers rerun and the agents update.
@@ -48,7 +56,8 @@
     -toolchain list.
 
 .PARAMETER dockerfileDir
-    Directory containing the Dockerfile. Defaults to this script's own directory.
+    Directory containing the Dockerfile and definitions. Defaults to this script's
+    own directory.
 
 .PARAMETER runtime
     Container runtime to use: "docker" or "container". Default: auto-detected.
@@ -80,6 +89,8 @@ param (
     [Alias('agents')]
     [string]$agent         = "",
     [switch]$listAgents    = $false,
+    [switch]$listToolchains = $false,
+    [switch]$listPackageCaches = $false,
     [switch]$rebuild       = $false,
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('like-host', 'C.UTF-8') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$locale        = 'like-host',
@@ -101,16 +112,31 @@ if ($help) {
 
 . "$PSScriptRoot/lib/CodeItCommon.ps1"
 
-# The agent definitions live next to the Dockerfile when it ships them, else next
-# to this script.
+# The definitions live next to the Dockerfile when it ships them, else next to
+# this script.
 $agentsDir = Join-Path $dockerfileDir 'agents'
 if (-not (Test-Path -Path $agentsDir -PathType Container)) { $agentsDir = Join-Path $PSScriptRoot 'agents' }
+$toolchainsDir = Join-Path $dockerfileDir 'toolchains'
+if (-not (Test-Path -Path $toolchainsDir -PathType Container)) { $toolchainsDir = Join-Path $PSScriptRoot 'toolchains' }
+$packageCachesDir = Join-Path $dockerfileDir 'package-caches'
+if (-not (Test-Path -Path $packageCachesDir -PathType Container)) { $packageCachesDir = Join-Path $PSScriptRoot 'package-caches' }
 
 if ($listAgents) {
     foreach ($name in (Get-CodeItListAgents $agentsDir)) {
         $short = Get-CodeItAgentConfig $agentsDir $name 'AGENT_SHORT'
         if ($short) { "  {0,-10} -{1}" -f $name, $short } else { "  $name" }
     }
+    exit 0
+}
+if ($listToolchains) {
+    foreach ($name in (Get-CodeItListToolchains $toolchainsDir)) {
+        $aliases = Get-CodeItAgentConfig $toolchainsDir $name 'TOOLCHAIN_ALIASES'
+        if ($aliases) { "  {0,-12} (aliases: {1})" -f $name, ($aliases -replace ' ', ', ') } else { "  $name" }
+    }
+    exit 0
+}
+if ($listPackageCaches) {
+    foreach ($name in (Get-CodeItListPackageCaches $packageCachesDir)) { "  $name" }
     exit 0
 }
 
@@ -145,9 +171,9 @@ function Read-CodeItChoice([string]$label, [string[]]$default, [string[]]$detect
 }
 
 if ($interactive) {
-    $toolchainAvailable = @($script:CodeItKnownToolchain)
+    $toolchainAvailable = Get-CodeItListToolchains $toolchainsDir
     $agentsAvailable = @(Get-CodeItListAgents $agentsDir)
-    $detectedToolchain = @($toolchainAvailable | Where-Object { Test-CodeItToolchainDetected $_ })
+    $detectedToolchain = @($toolchainAvailable | Where-Object { Test-CodeItToolchainDetected $toolchainsDir $_ })
     $detectedAgents = @($agentsAvailable | Where-Object { Test-CodeItAgentDetected $agentsDir $_ })
 
     if (-not $toolchain) {
@@ -166,7 +192,7 @@ if ($interactive) {
 # An explicit, empty -packageCaches means "no package caches", not "use the implied ones".
 $enabledToolchain = @()
 if ($toolchain) {
-    $enabledToolchain = Resolve-CodeItToolchain $toolchain
+    $enabledToolchain = Resolve-CodeItToolchain $toolchain $toolchainsDir
     if ($null -eq $enabledToolchain) { exit 1 }
 }
 if ($enabledToolchain.Count -eq 0) {
@@ -174,9 +200,13 @@ if ($enabledToolchain.Count -eq 0) {
     exit 1
 }
 if ($PSBoundParameters.ContainsKey('packageCaches')) {
-    $enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolchain
+    if ($packageCaches) {
+        $enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolchain $toolchainsDir $packageCachesDir
+    } else {
+        $enabledPackageCaches = @()
+    }
 } else {
-    $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolchain
+    $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolchain $toolchainsDir $packageCachesDir
 }
 if ($null -eq $enabledPackageCaches) { exit 1 }
 $enabledAgents = Resolve-CodeItAgents $agent $agentsDir
@@ -202,22 +232,64 @@ function Update-CodeItLastChanged([string]$file) {
     [IO.File]::WriteAllText($file, $text)
 }
 
+# Get-CodeItFragmentPath DEFS_DIR NAME KEY: the install fragment path for a definition.
+function Get-CodeItFragmentPath([string]$defsDir, [string]$name, [string]$key) {
+    $fragment = Get-CodeItAgentConfig $defsDir $name $key
+    if (-not $fragment) { $fragment = 'install.dockerfile' }
+    return (Join-Path $defsDir (Join-Path $name $fragment))
+}
+
 if ($rebuild) {
     Update-CodeItLastChanged "$dockerfileDir/Dockerfile"
     foreach ($a in $enabledAgents) {
-        $install = Get-CodeItAgentConfig $agentsDir $a 'AGENT_INSTALL'
-        if ($install) { Update-CodeItLastChanged (Join-Path $agentsDir (Join-Path $a $install)) }
+        Update-CodeItLastChanged (Get-CodeItFragmentPath $agentsDir $a 'AGENT_INSTALL')
+    }
+    foreach ($t in $enabledToolchain) {
+        Update-CodeItLastChanged (Get-CodeItFragmentPath $toolchainsDir $t 'TOOLCHAIN_INSTALL')
+    }
+    foreach ($p in $enabledPackageCaches) {
+        Update-CodeItLastChanged (Get-CodeItFragmentPath $packageCachesDir $p 'PACKAGE_CACHE_INSTALL')
     }
     "    Updated '# last changed' dates to $([DateTime]::Today.ToString('yyyy-MM-dd'))"
 }
 
-# Assemble the Dockerfile: replace the agent-install marker with the selected
-# fragments plus the name=binary map go.sh reads.
-$marker = '# @@CODE_IT_AGENT_INSTALLS@@'
+# Assemble the blocks from the selected definitions, failing if one is missing.
+function Get-CodeItBlock([string]$defsDir, [string[]]$names, [string]$key) {
+    $block = ""
+    foreach ($name in $names) {
+        $path = Get-CodeItFragmentPath $defsDir $name $key
+        if (-not (Test-Path -Path $path -PathType Leaf)) {
+            Write-Warning "'$name' has no install fragment at $path"
+            exit 1
+        }
+        $block += (Get-Content $path -Raw)
+        if (-not $block.EndsWith("`n")) { $block += "`n" }
+    }
+    return $block
+}
+
+$toolchainBlock = Get-CodeItBlock $toolchainsDir $enabledToolchain 'TOOLCHAIN_INSTALL'
+$packageCacheBlock = Get-CodeItBlock $packageCachesDir $enabledPackageCaches 'PACKAGE_CACHE_INSTALL'
+
+# The launcher bind-mounts each agent's state paths into the container home, and
+# Docker creates a missing mount-point parent as root. A root-owned parent would
+# then block the agent from writing beside the mount (a root-owned
+# ~/.local/share stops the agent writing .local/share/powershell), so create each
+# selected agent's state path here as agent1, before any mounts exist.
+$statePaths = Get-CodeItAgentStateMkdirPaths $agentsDir $enabledAgents
+$mkdirBlock = ""
+if ($statePaths.Count) {
+    $stateArgs = ($statePaths | ForEach-Object { "~/$_" }) -join ' '
+    $mkdirBlock = "# Pre-create the selected agents' state paths, agent1-owned.`n"
+    $mkdirBlock += "RUN mkdir -p $stateArgs`n"
+}
+
+# Agents run as agent1, into its home. /etc/code-it-agents is root-owned, so write
+# the map as root and switch back for the rest of the file.
 $block = "# --- coding agents: $($enabledAgents -join ',') (assembled from agents/) ---`n"
+$block += $mkdirBlock
 foreach ($a in $enabledAgents) {
-    $install = Get-CodeItAgentConfig $agentsDir $a 'AGENT_INSTALL'
-    $fragmentPath = Join-Path $agentsDir (Join-Path $a $install)
+    $fragmentPath = Get-CodeItFragmentPath $agentsDir $a 'AGENT_INSTALL'
     if (-not (Test-Path -Path $fragmentPath -PathType Leaf)) {
         Write-Warning "Agent '$a' has no install fragment at $fragmentPath"
         exit 1
@@ -229,15 +301,50 @@ $entries = foreach ($a in $enabledAgents) {
     $bin = Get-CodeItAgentConfig $agentsDir $a 'AGENT_BINARY'
     "'$a=$bin'"
 }
-# The marker sits after "USER agent1" (rightly: the install fragments above run as
-# agent1, into its home). /etc is root-owned, so write the map as root and switch
-# back for the rest of the file.
 $block += "USER root`n"
 $block += "RUN printf '%s\n' $($entries -join ' ') > /etc/code-it-agents`n"
 $block += "USER agent1`n"
+$agentBlock = $block
+
+# The markers the Dockerfile declares. The agents' default region is replaced
+# wholesale, so the base file can carry the default agent (opencode) and still
+# assemble into an image with exactly the selected agents.
+$toolchainMarker = '# @@CODE_IT_TOOLCHAIN_INSTALLS@@'
+$packageCacheMarker = '# @@CODE_IT_PACKAGE_CACHE_INSTALLS@@'
+$agentsBegin = '# @@CODE_IT_AGENTS_BEGIN@@'
+$agentsEnd = '# @@CODE_IT_AGENTS_END@@'
 
 $base = ([IO.File]::ReadAllText("$dockerfileDir/Dockerfile")) -replace "`r`n", "`n"
-$assembled = if ($base.Contains($marker)) { $base.Replace($marker, $block.TrimEnd("`n")) } else { $base }
+function Assert-CodeItMarker([string]$marker, [string]$what) {
+    if (-not $base.Contains($marker)) {
+        Write-Warning "Dockerfile has no '$marker' marker, so $what cannot be selected."
+        exit 1
+    }
+}
+if ($enabledToolchain.Count) { Assert-CodeItMarker $toolchainMarker 'toolchains' }
+if ($enabledPackageCaches.Count) { Assert-CodeItMarker $packageCacheMarker 'package caches' }
+Assert-CodeItMarker $agentsBegin 'agents'
+
+$assembled = New-Object System.Collections.Generic.List[string]
+$inAgents = $false
+foreach ($line in ($base -split "`n")) {
+    if ($line -eq $toolchainMarker) {
+        if ($toolchainBlock) { $assembled.AddRange([string[]]($toolchainBlock.TrimEnd("`n") -split "`n")) }
+        continue
+    } elseif ($line -eq $packageCacheMarker) {
+        if ($packageCacheBlock) { $assembled.AddRange([string[]]($packageCacheBlock.TrimEnd("`n") -split "`n")) }
+        continue
+    } elseif ($line -eq $agentsBegin) {
+        $inAgents = $true
+        $assembled.AddRange([string[]]($agentBlock.TrimEnd("`n") -split "`n"))
+        continue
+    } elseif ($line -eq $agentsEnd) {
+        $inAgents = $false
+        continue
+    }
+    if (-not $inAgents) { $assembled.Add($line) }
+}
+$assembled = ($assembled -join "`n")
 # Keep the buildable Dockerfile small (Apple's builder fails above ~16 KB), without
 # touching heredoc bodies such as go.sh.
 $assembled = Remove-CodeItDockerfileComments $assembled
@@ -247,16 +354,9 @@ $null = New-Item -ItemType Directory -Force -Path $buildContext
 [IO.File]::WriteAllText((Join-Path $buildContext 'Dockerfile'), $assembled, [System.Text.UTF8Encoding]::new($false))
 
 try {
-    # Build args for the toolchains and package caches, spelled the way the
-    # Dockerfile's ARGs match them (uppercase), plus labels recording the resolution.
-    $buildArgs = @()
-    foreach ($tc in $script:CodeItKnownToolchain) {
-        $buildArgs += @('--build-arg', "$($tc.ToUpper())=$(Bool-Arg ($enabledToolchain -contains $tc))")
-    }
-    foreach ($pc in @('nuget', 'npm')) {
-        $buildArgs += @('--build-arg', "$($pc.ToUpper())=$(Bool-Arg ($enabledPackageCaches -contains $pc))")
-    }
-    $buildArgs += @('--build-arg', "LOCALE=$containerLocale")
+    # The fragments are the toolchain and package-cache selection, so the only build
+    # arg left is the locale; labels record the resolution.
+    $buildArgs = @('--build-arg', "LOCALE=$containerLocale")
     $buildArgs += @('--label', "code-it.tool-chains=$($enabledToolchain -join ',')")
     $buildArgs += @('--label', "code-it.package-caches=$($enabledPackageCaches -join ',')")
     $buildArgs += @('--label', "code-it.agents=$($enabledAgents -join ',')")

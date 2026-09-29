@@ -5,7 +5,7 @@ See 00-conventions.md.
 Amended 2026-10-17: `code-it-build` prompts when no toolchain is supplied; `code-it` keeps no build shims. See "Amendment" at the end.
 
 ## Goal
-Move `--build-image` / `--rebuild-image` (`-buildImage` / `-rebuildImage`) out of `code-it.sh` / `Code-It.ps1` into new `code-it-build.sh` / `Code-It-Build.ps1`. Keep the Dockerfile's `ARG`-switch design as is.
+Move `--build-image` / `--rebuild-image` (`-buildImage` / `-rebuildImage`) out of `code-it.sh` / `Code-It.ps1` into new `code-it-build.sh` / `Code-It-Build.ps1`. Keep the Dockerfile's `ARG`-switch design as is. (Superseded by Spec 13: toolchains and package caches are now fragments assembled at build time, with no ARG switches.)
 
 ## `code-it-build` parameters
 - `--tool-chains LIST` (now `--toolchain`): with none, enter interactive setup, preselecting detected host toolchains. An explicitly empty list remains an error.

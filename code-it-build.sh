@@ -3,10 +3,11 @@
 # Builds the code-it container image from the Dockerfile, selecting the toolchains,
 # package caches and coding agents to include. code-it.sh runs the images this builds.
 #
-# The coding agents' install layers live in agents/<name>/install.dockerfile. This
-# script assembles them into the Dockerfile (replacing the
-# "# @@CODE_IT_AGENT_INSTALLS@@" marker) and writes /etc/code-it-agents, the
-# name=binary map the container's go.sh reads. So agents are data, not branches.
+# Toolchains, package caches and agents are data, not branches: each is a directory
+# with a config and an install fragment, and this script assembles only the selected
+# fragments into the Dockerfile (replacing the markers), so unselected ones cost
+# nothing in the size-limited buildable file. It also writes /etc/code-it-agents, the
+# name=binary map the container's go.sh reads.
 #
 # Usage:
 #   ./code-it-build.sh [OPTIONS]
@@ -14,10 +15,9 @@
 # Options:
 #   --toolchain, -t LIST     Comma-separated toolchains to build. With none,
 #                            interactive selection is used.
-#                            Known: dotnet, node (aliases js-node, ts-node), bun
-#                            (aliases js-bun, ts-bun), python (alias uv),
-#                            powershell (alias pwsh).
-#                            --stack is an alias for --toolchain.
+#                            Known names and aliases come from toolchains/*/config
+#                            (today: dotnet, node/js-node/ts-node, bun/js-bun/ts-bun,
+#                            python/uv, powershell/pwsh). --stack is an alias.
 #   --package-caches LIST    Comma-separated package repos to support, independent of
 #                            --toolchain. Known: nuget, npm, bun.
 #                            Default: the repos implied by --toolchain
@@ -26,9 +26,11 @@
 #                            --agents is an alias. Interactive mode preselects detected
 #                            agents instead.
 #   --list-agents            List the available agents and exit.
+#   --list-toolchains        List the available toolchains (and their aliases) and exit.
+#   --list-package-caches    List the available package caches and exit.
 #   --rebuild                Bump the "# last changed" dates in the Dockerfile and the
-#                            selected agents' install fragments to today first, so the
-#                            agent install layers rerun and the agents update.
+#                            selected fragments to today first, so those layers rerun
+#                            and the agents and toolchains update.
 #   --locale, -l LOCALE      The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB.
 #                            Default: like-host, the host's own locale, read from
 #                            LC_ALL or LANG, else macOS's AppleLocale or the Windows
@@ -37,7 +39,7 @@
 #                            codeset is always UTF-8. C.UTF-8 if it cannot be told.
 #   --image, -i NAME         Image name to build. Default: "code-it-alpine-<chains>",
 #                            a slug of the resolved --toolchain list.
-#   --dockerfile-dir DIR     Directory containing the Dockerfile.
+#   --dockerfile-dir DIR     Directory containing the Dockerfile and definitions.
 #                            Defaults to this script's own directory.
 #   --runtime, -r NAME       Container runtime to use: "docker" or "container".
 #                            Default: auto-detected (Apple container on macOS, else docker).
@@ -66,6 +68,8 @@ package_caches=""
 package_caches_set=false
 agents_raw=""
 list_agents=false
+list_toolchains=false
+list_package_caches=false
 rebuild=false
 locale="$CI_LOCALE_LIKE_HOST"
 image=""
@@ -89,12 +93,25 @@ while [[ $# -gt 0 ]]; do
             package_caches_set=true
             shift 2
             ;;
+        --package-caches=*)
+            package_caches="${1#--package-caches=}"
+            package_caches_set=true
+            shift
+            ;;
         --agent|--agents|-a)
             agents_raw="$2"
             shift 2
             ;;
         --list-agents)
             list_agents=true
+            shift
+            ;;
+        --list-toolchains)
+            list_toolchains=true
+            shift
+            ;;
+        --list-package-caches)
+            list_package_caches=true
             shift
             ;;
         --rebuild)
@@ -150,10 +167,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# The agent definitions live next to the Dockerfile when it ships them, else next
-# to this script.
+# The definitions live next to the Dockerfile when it ships them, else next to
+# this script.
 agents_dir="$dockerfile_dir/agents"
 [[ -d "$agents_dir" ]] || agents_dir="$script_dir/agents"
+toolchains_dir="$dockerfile_dir/toolchains"
+[[ -d "$toolchains_dir" ]] || toolchains_dir="$script_dir/toolchains"
+package_caches_dir="$dockerfile_dir/package-caches"
+[[ -d "$package_caches_dir" ]] || package_caches_dir="$script_dir/package-caches"
 
 if [[ "$list_agents" == true ]]; then
     while IFS= read -r name; do
@@ -163,7 +184,22 @@ if [[ "$list_agents" == true ]]; then
         else
             printf '  %s\n' "$name"
         fi
-    done < <(ci_list_agents "$agents_dir")
+    done < <(ci_list_definitions "$agents_dir")
+    exit 0
+fi
+if [[ "$list_toolchains" == true ]]; then
+    while IFS= read -r name; do
+        aliases=$(ci_agent_config "$toolchains_dir" "$name" TOOLCHAIN_ALIASES) || aliases=""
+        if [[ -n "$aliases" ]]; then
+            printf '  %-12s (aliases: %s)\n' "$name" "${aliases// /, }"
+        else
+            printf '  %s\n' "$name"
+        fi
+    done < <(ci_list_definitions "$toolchains_dir")
+    exit 0
+fi
+if [[ "$list_package_caches" == true ]]; then
+    ci_list_definitions "$package_caches_dir" | sed 's/^/  /'
     exit 0
 fi
 
@@ -208,12 +244,12 @@ choose() {
 }
 
 if [[ "$interactive" == true ]]; then
-    toolchain_available=($CI_KNOWN_TOOLCHAIN)
+    toolchain_available=($(ci_list_definitions "$toolchains_dir"))
     agents_available=()
     while IFS= read -r a; do agents_available+=("$a"); done < <(ci_list_agents "$agents_dir")
     detected_toolchain=""
     for t in "${toolchain_available[@]}"; do
-        ci_toolchain_detected "$t" && detected_toolchain=$(ci_comma_list_add "$detected_toolchain" "$t")
+        ci_toolchain_detected "$toolchains_dir" "$t" && detected_toolchain=$(ci_comma_list_add "$detected_toolchain" "$t")
     done
     detected_agents=""
     for a in "${agents_available[@]}"; do
@@ -236,16 +272,18 @@ fi
 # The empty-list check also catches --toolchain ','.
 # An explicit, empty --package-caches means "no package caches", not "use the implied ones".
 enabled_toolchain=""
-[[ -n "$toolchain" ]] && { enabled_toolchain=$(ci_resolve_toolchain "$toolchain") || exit 1; }
+[[ -n "$toolchain" ]] && { enabled_toolchain=$(ci_resolve_toolchain "$toolchain" "$toolchains_dir") || exit 1; }
 if [[ -z "$enabled_toolchain" ]]; then
     echo "Warning: no toolchains selected. Choose at least one, or pass --toolchain." >&2
     show_help
     exit 1
 fi
-if [[ "$package_caches_set" == true ]]; then
-    enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_toolchain") || exit 1
+if [[ "$package_caches_set" == true && -z "$package_caches" ]]; then
+    enabled_package_caches=""
+elif [[ "$package_caches_set" == true ]]; then
+    enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_toolchain" "$toolchains_dir" "$package_caches_dir") || exit 1
 else
-    enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain") || exit 1
+    enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain" "$toolchains_dir" "$package_caches_dir") || exit 1
 fi
 enabled_agents=$(ci_resolve_agents "$agents_raw" "$agents_dir") || exit 1
 container_locale=$(ci_resolve_locale "$locale") || exit 1
@@ -264,8 +302,8 @@ fi
 dockerfile_dir=$(abs_dir "$dockerfile_dir")
 
 # --rebuild: bump the "# last changed" cache-bust dates to today in the Dockerfile
-# and in the selected agent install fragments, so those layers rebuild and update the
-# agents. (Write to a temp file and move: portable in-place edit for BSD and GNU sed.)
+# and in the selected fragments, so those layers rebuild and update the tools.
+# (Write to a temp file and move: portable in-place edit for BSD and GNU sed.)
 bump_last_changed() {
     local file="$1" today
     [[ -f "$file" ]] || return 0
@@ -273,71 +311,122 @@ bump_last_changed() {
     sed -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed $today/" "$file" > "$file.tmp" \
         && mv "$file.tmp" "$file"
 }
+# fragment_path DEFS_DIR NAME KEY: echo the install fragment path for a definition
+fragment_path() {
+    local defs_dir="$1" name="$2" key="$3" fragment
+    fragment=$(ci_agent_config "$defs_dir" "$name" "$key") || fragment=""
+    [[ -n "$fragment" ]] || fragment="install.dockerfile"
+    printf '%s/%s/%s' "$defs_dir" "$name" "$fragment"
+}
 if [[ "$rebuild" == true ]]; then
     bump_last_changed "$dockerfile_dir/Dockerfile"
     for a in $enabled_agents; do
-        install_fragment=$(ci_agent_config "$agents_dir" "$a" AGENT_INSTALL)
-        [[ -n "$install_fragment" ]] && bump_last_changed "$agents_dir/$a/$install_fragment"
+        bump_last_changed "$(fragment_path "$agents_dir" "$a" AGENT_INSTALL)"
+    done
+    for t in $enabled_toolchain; do
+        bump_last_changed "$(fragment_path "$toolchains_dir" "$t" TOOLCHAIN_INSTALL)"
+    done
+    for p in $enabled_package_caches; do
+        bump_last_changed "$(fragment_path "$package_caches_dir" "$p" PACKAGE_CACHE_INSTALL)"
     done
     echo "    Updated '# last changed' dates to $(date +%Y-%m-%d)"
 fi
 
-# Assemble the Dockerfile: replace the agent-install marker with the selected
-# fragments plus the name=binary map go.sh reads.
-marker='# @@CODE_IT_AGENT_INSTALLS@@'
+# Assemble the blocks from the selected definitions, failing if one is missing.
+definition_block() {
+    local defs_dir="$1" names="$2" key="$3" name path
+    for name in $names; do
+        path=$(fragment_path "$defs_dir" "$name" "$key")
+        if [[ ! -f "$path" ]]; then
+            echo "Warning: '$name' has no install fragment at $path" >&2
+            exit 1
+        fi
+        cat "$path"
+    done
+}
+
+toolchain_block=$(definition_block "$toolchains_dir" "$enabled_toolchain" TOOLCHAIN_INSTALL)
+package_cache_block=$(definition_block "$package_caches_dir" "$enabled_package_caches" PACKAGE_CACHE_INSTALL)
+
+# The launcher bind-mounts each agent's state paths into the container home, and
+# Docker creates a missing mount-point parent as root. A root-owned parent would
+# then block the agent from writing beside the mount (a root-owned
+# ~/.local/share stops the agent writing .local/share/powershell), so create each
+# selected agent's state path here as agent1, before any mounts exist.
+agent_state_paths=$(ci_agent_state_mkdir_paths "$agents_dir" "$enabled_agents")
+agent_mkdir_block=""
+if [[ -n "$agent_state_paths" ]]; then
+    agent_state_args=""
+    for p in $agent_state_paths; do
+        agent_state_args+=" ~/$p"
+    done
+    agent_mkdir_block="# Pre-create the selected agents' state paths, agent1-owned."
+    agent_mkdir_block+=$'\n'"RUN mkdir -p$agent_state_args"
+fi
+
+# Agents run as agent1, into its home. /etc/code-it-agents is root-owned, so write
+# the map as root and switch back for the rest of the file.
 agent_block="# --- coding agents: ${enabled_agents// /,} (assembled from agents/) ---"
+[[ -n "$agent_mkdir_block" ]] && agent_block+=$'\n'"$agent_mkdir_block"
 for a in $enabled_agents; do
     install_fragment=$(ci_agent_config "$agents_dir" "$a" AGENT_INSTALL)
-    fragment_path="$agents_dir/$a/$install_fragment"
-    if [[ ! -f "$fragment_path" ]]; then
-        echo "Warning: agent '$a' has no install fragment at $fragment_path" >&2
+    agent_fragment="$agents_dir/$a/${install_fragment:-install.dockerfile}"
+    if [[ ! -f "$agent_fragment" ]]; then
+        echo "Warning: agent '$a' has no install fragment at $agent_fragment" >&2
         exit 1
     fi
-    agent_block+=$'\n'"$(cat "$fragment_path")"
+    agent_block+=$'\n'"$(cat "$agent_fragment")"
 done
 agent_file_entries=""
 for a in $enabled_agents; do
     agent_binary=$(ci_agent_config "$agents_dir" "$a" AGENT_BINARY)
     agent_file_entries+=" '$a=$agent_binary'"
 done
-# The marker sits after "USER agent1" (rightly: the install fragments above run as
-# agent1, into its home). /etc is root-owned, so write the map as root and switch
-# back for the rest of the file.
 agent_block+=$'\n'"USER root"
 agent_block+=$'\n'"RUN printf '%s\\n'$agent_file_entries > /etc/code-it-agents"
 agent_block+=$'\n'"USER agent1"
 
+# The markers the Dockerfile declares. The agents' default region is replaced
+# wholesale, so the base file can carry the default agent (opencode) and still
+# assemble into an image with exactly the selected agents.
+toolchain_marker='# @@CODE_IT_TOOLCHAIN_INSTALLS@@'
+package_cache_marker='# @@CODE_IT_PACKAGE_CACHE_INSTALLS@@'
+agents_begin='# @@CODE_IT_AGENTS_BEGIN@@'
+agents_end='# @@CODE_IT_AGENTS_END@@'
+
+require_marker() {
+    local marker="$1" what="$2"
+    if ! grep -qF "$marker" "$dockerfile_dir/Dockerfile"; then
+        echo "Warning: Dockerfile has no '$marker' marker, so $what cannot be selected." >&2
+        exit 1
+    fi
+}
+[[ -n "$enabled_toolchain" ]] && require_marker "$toolchain_marker" "toolchains"
+[[ -n "$enabled_package_caches" ]] && require_marker "$package_cache_marker" "package caches"
+require_marker "$agents_begin" "agents"
+
 build_context=$(mktemp -d)
 trap 'rm -rf "$build_context"' EXIT
-if grep -qF "$marker" "$dockerfile_dir/Dockerfile"; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ "$line" == "$marker" ]]; then
-            printf '%s\n' "$agent_block"
-        else
-            printf '%s\n' "$line"
-        fi
-    done < "$dockerfile_dir/Dockerfile" > "$build_context/Dockerfile"
-else
-    cp "$dockerfile_dir/Dockerfile" "$build_context/Dockerfile"
-fi
+in_agents=false
+while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+        "$toolchain_marker")        printf '%s\n' "$toolchain_block"; continue ;;
+        "$package_cache_marker")    printf '%s\n' "$package_cache_block"; continue ;;
+        "$agents_begin")            in_agents=true; printf '%s\n' "$agent_block"; continue ;;
+        "$agents_end")              in_agents=false; continue ;;
+    esac
+    [[ "$in_agents" == true ]] && continue
+    printf '%s\n' "$line"
+done < "$dockerfile_dir/Dockerfile" > "$build_context/Dockerfile"
 
 # Keep the buildable Dockerfile small (Apple's builder fails above ~16 KB), without
 # touching heredoc bodies such as go.sh.
 ci_strip_dockerfile_comments < "$build_context/Dockerfile" > "$build_context/Dockerfile.stripped" \
     && mv "$build_context/Dockerfile.stripped" "$build_context/Dockerfile"
 
-# Build args for the toolchains and package caches, spelled the way the
-# Dockerfile's ARGs match them (uppercase).
-build_args=()
-for tc in $CI_KNOWN_TOOLCHAIN; do
-    if ci_has "$enabled_toolchain" "$tc"; then v=true; else v=false; fi
-    build_args+=(--build-arg "$(printf '%s' "$tc" | tr '[:lower:]' '[:upper:]')=$v")
-done
-for pc in nuget npm; do
-    if ci_has "$enabled_package_caches" "$pc"; then v=true; else v=false; fi
-    build_args+=(--build-arg "$(printf '%s' "$pc" | tr '[:lower:]' '[:upper:]')=$v")
-done
-build_args+=(--build-arg "LOCALE=$container_locale")
+# The fragments are the toolchain and package-cache selection, so the only build
+# arg left is the locale.
+build_args=(--build-arg "LOCALE=$container_locale")
 
 # Label the image with its resolution, so code-it.sh can check it rather than guess
 # from the image name.

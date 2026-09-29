@@ -285,11 +285,43 @@ for opt in --build-image -b --rebuild-image -B "--dockerfile-dir $tmp"; do
 done
 
 # ---------------------------------------------------------------------------
-echo "10c. code-it-build: dry-run, labels, --tech, --rebuild"
+echo "10c. code-it-build: assembles fragments, labels, --tech, --rebuild"
 build_it="$script_dir/code-it-build.sh"
 
+# A stub docker that also copies the assembled build-context Dockerfile, so the
+# tests can assert exactly which fragments were assembled.
+capture="$tmp/captured.Dockerfile"
+capturebin="$tmp/capturebin"; mkdir -p "$capturebin"
+cat > "$capturebin/docker" <<EOF
+#!/bin/sh
+case "\$1" in
+    build)
+        for a in "\$@"; do last="\$a"; done
+        cp "\$last/Dockerfile" "$capture"
+        echo "STUB-DOCKER-BUILD \$*" ;;
+    images) echo "code-it-alpine-dotnet-node:latest" ;;
+    image)  echo dotnet,node ;;
+    run)    echo "STUB-DOCKER-RUN \$*" ;;
+    *)      echo "stub docker: \$*" ;;
+esac
+EOF
+chmod +x "$capturebin/docker"
+# do_capture ARGS...: build with the capture stub; the assembled file lands in $capture
+do_capture() {
+    rm -f "$capture"
+    PATH="$capturebin:$PATH" "$build_it" "$@" >/dev/null 2>&1
+}
+assert_in_df() {
+    local desc="$1" needle="$2"
+    if grep -q -- "$needle" "$capture" 2>/dev/null; then assert "$desc" 0; else assert "$desc (missing: $needle)" 1; fi
+}
+assert_not_in_df() {
+    local desc="$1" needle="$2"
+    if grep -q -- "$needle" "$capture" 2>/dev/null; then assert "$desc (found: $needle)" 1; else assert "$desc" 0; fi
+}
+
 # With no toolchain, build asks interactively; menu numbers select the requested items.
-out=$(printf '1\n1\ny\n' | PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+out=$(printf '2\n1\ny\n' | PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
 assert "code-it-build without parameters offers interactive selection" "$?"
 assert_contains "interactive build asks about toolchains" "$out" "Toolchains to build"
 assert_contains "interactive build asks about agents" "$out" "Agents to install"
@@ -298,17 +330,14 @@ assert_contains "interactive build selects the numbered agent" "$out" "agents cl
 [[ "$out" != *STUB-DOCKER-BUILD* ]]; assert "interactive build dry-run does not build" "$?"
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain , >/dev/null 2>&1
 [[ "$?" == "1" ]]; assert "code-it-build with an empty --toolchain list exits 1" "$?"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet --dry-run --dockerfile-dir "$script_dir" 2>&1)
-assert_contains "code-it-build builds only the toolchain given" "$out" "--build-arg NODE=false"
+do_capture --toolchain dotnet --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "code-it-build assembles the toolchain given" "dotnet10-sdk"
+assert_not_in_df "code-it-build builds only the toolchain given" "apk add --no-cache nodejs"
 
 # --dry-run prints the build command (the same args code-it passes) without executing
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" 2>&1)
 assert "code-it-build --dry-run exit code" "$?"
 assert_contains "build dry-run prints the build command" "$out" "docker build"
-assert_contains "build dry-run passes DOTNET=true" "$out" "--build-arg DOTNET=true"
-assert_contains "build dry-run passes NODE=true" "$out" "--build-arg NODE=true"
-assert_contains "build dry-run passes NUGET=true (implied by dotnet)" "$out" "--build-arg NUGET=true"
-assert_contains "build dry-run passes NPM=true (implied by node)" "$out" "--build-arg NPM=true"
 assert_contains "build dry-run labels the toolchains" "$out" "--label code-it.tool-chains=dotnet,node"
 assert_contains "build dry-run labels the package caches" "$out" "--label code-it.package-caches=nuget,npm"
 assert_contains "build dry-run derives the default image name" "$out" "-t code-it-alpine-dotnet-node:latest"
@@ -317,15 +346,40 @@ case "$out" in
     *)                   assert "code-it-build --dry-run does not execute the build" 0 ;;
 esac
 
+# The build assembles the selected toolchains and their implied caches only
+do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
+assert "code-it-build capture exit code" "$?"
+assert_in_df "build assembles dotnet" "dotnet10-sdk"
+assert_in_df "build assembles node" "apk add --no-cache nodejs"
+assert_in_df "dotnet implies the nuget package cache" "fallbackPackageFolders"
+assert_in_df "node implies the npm package cache" "/home/agent1/.npm-host"
+assert_not_in_df "build leaves bun out" "bun.sh/install"
+assert_not_in_df "build leaves python out" "apk add --no-cache python3 uv"
+assert_not_in_df "build leaves powershell out" "PowerShell/releases/download"
+assert_not_in_df "build has no toolchain build switches" "ARG DOTNET"
+
 # --tech is the kept alias of --toolchain
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tech bun 2>&1)
-assert_contains "build --tech alias selects BUN" "$out" "--build-arg BUN=true"
 assert_contains "build --tech alias derives the image name" "$out" "-t code-it-alpine-bun:latest"
+do_capture --dockerfile-dir "$script_dir" --tech bun --runtime docker
+assert_in_df "build --tech alias assembles bun" "bun.sh/install"
+assert_not_in_df "build --tech bun leaves dotnet out" "dotnet10-sdk"
 
 # --package-caches replaces the implied set
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain bun --package-caches nuget 2>&1)
-assert_contains "build --package-caches nuget without dotnet" "$out" "--build-arg NUGET=true"
-assert_contains "build --package-caches nuget excludes NPM" "$out" "--build-arg NPM=false"
+do_capture --dockerfile-dir "$script_dir" --toolchain bun --package-caches nuget --runtime docker
+assert_in_df "build --package-caches nuget without dotnet assembles the cache" "fallbackPackageFolders"
+assert_in_df "build --package-caches nuget adds its doas permit" "cmd nuget"
+assert_not_in_df "build --package-caches nuget excludes npm" "/home/agent1/.npm-host"
+do_capture --dockerfile-dir "$script_dir" --toolchain node --package-caches= --runtime docker
+assert_in_df "empty --package-caches still assembles node" "apk add --no-cache nodejs"
+assert_not_in_df "empty --package-caches assembles no cache" "/home/agent1/.npm-host"
+
+# A Dockerfile without the assembly markers is a hard error
+nomarker="$tmp/nomarker"; mkdir -p "$nomarker"
+printf 'FROM alpine:3.24\n' > "$nomarker/Dockerfile"
+cp -R "$script_dir/agents" "$nomarker/agents"
+PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$nomarker" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "code-it-build without assembly markers fails" "$?"
 
 # Unknown names are hard errors
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain cobol >/dev/null 2>&1
@@ -337,8 +391,8 @@ PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --docker
 today=$(date +%Y-%m-%d)
 bdfdir="$tmp/build-dfdir"; mkdir -p "$bdfdir"
 cp "$script_dir/Dockerfile" "$bdfdir/Dockerfile"
-cp -R "$script_dir/agents" "$bdfdir/agents"
-sed -i -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$bdfdir/agents/"*/install.dockerfile
+cp -R "$script_dir/agents" "$script_dir/toolchains" "$script_dir/package-caches" "$bdfdir/"
+sed -i -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$bdfdir/agents/"*/install.dockerfile "$bdfdir/toolchains/"*/install.dockerfile
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
 assert_contains "code-it-build invokes docker build" "$out" "STUB-DOCKER-BUILD"
 grep -q "# last changed 2000-01-01" "$bdfdir/agents/opencode/install.dockerfile"
@@ -352,25 +406,29 @@ grep -q "# last changed $today" "$bdfdir/agents/opencode/install.dockerfile"
 assert "code-it-build --rebuild bumps the opencode fragment" "$?"
 grep -q "# last changed $today" "$bdfdir/agents/claude/install.dockerfile"
 assert "code-it-build --rebuild bumps the claude fragment" "$?"
+grep -q "# last changed $today" "$bdfdir/toolchains/dotnet/install.dockerfile"
+assert "code-it-build --rebuild bumps the selected toolchain fragment" "$?"
+grep -q "# last changed 2000-01-01" "$bdfdir/toolchains/bun/install.dockerfile"
+assert "code-it-build --rebuild leaves unselected toolchain fragments alone" "$?"
 # A missing Dockerfile is an error
 PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$tmp" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build without a Dockerfile fails" "$?"
 
-# The marker sits after "USER agent1"; /etc/code-it-agents is root-owned, so the
-# assembled Dockerfile must switch to root for that write (and back to agent1).
-capture="$tmp/captured.Dockerfile"
-capturebin="$tmp/capturebin"; mkdir -p "$capturebin"
-cat > "$capturebin/docker" <<EOF
-#!/bin/sh
-if [ "\$1" = build ]; then
-    for a in "\$@"; do last="\$a"; done
-    cp "\$last/Dockerfile" "$capture"
-fi
-echo "STUB-DOCKER-BUILD \$*"
-EOF
-chmod +x "$capturebin/docker"
-PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet,node --dockerfile-dir "$script_dir" >/dev/null 2>&1
+# The /etc/code-it-agents write happens after "USER agent1"; it is root-owned, so
+# the assembled Dockerfile must switch to root for that write (and back to agent1).
+do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
 assert "code-it-build captured the assembled Dockerfile" "$([[ -s "$capture" ]]; echo $?)"
+[[ "$(wc -c < "$capture")" -lt 16384 ]]
+assert "assembled Dockerfile is under Apple's 16KB limit" "$?"
+# Docker creates a missing bind-mount parent as root, so the selected agents' state
+# paths are pre-created agent-owned in the image before the launcher mounts them. A
+# state file is not created as a directory: its parent (the home) exists.
+assert_in_df "agent state dirs are pre-created for mounts" "~/.local/share/opencode"
+do_capture --toolchain dotnet --agent claude --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "claude state dir is pre-created for mounts" "~/.claude"
+assert_not_in_df "claude state file is not created as a directory" "~/.claude.json"
+assert_not_in_df "an assembled image has only the selected agents" "opencode.ai/install"
+do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
 [[ "$(awk '/^USER /{u=$2} /printf .* > \/etc\/code-it-agents/{print u; exit}' "$capture")" == "root" ]]
 assert "assembled Dockerfile writes /etc/code-it-agents as root" "$?"
 [[ "$(awk '/printf .* > \/etc\/code-it-agents/{found=1; next} found && /^USER /{print $2; exit}' "$capture")" == "agent1" ]]
@@ -404,6 +462,14 @@ out=$(PATH="$stub_docker:$PATH" "$build_it" --list-agents)
 assert "--list-agents exit code" "$?"
 assert_contains "code-it-build --list-agents lists claude" "$out" "claude"
 assert_contains "code-it-build --list-agents lists opencode" "$out" "opencode"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --list-toolchains)
+assert "--list-toolchains exit code" "$?"
+assert_contains "code-it-build --list-toolchains lists dotnet" "$out" "dotnet"
+assert_contains "code-it-build --list-toolchains lists powershell" "$out" "powershell"
+assert_contains "code-it-build --list-toolchains shows the pwsh alias" "$out" "aliases: pwsh"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --list-package-caches)
+assert "--list-package-caches exit code" "$?"
+assert_contains "code-it-build --list-package-caches lists nuget" "$out" "nuget"
 PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent nosuch >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build unknown agent fails" "$?"
 
@@ -417,38 +483,38 @@ assert "--image without --toolchain runs" "$?"
 [[ "$out" != *NuGet* ]]; assert "--image without --toolchain mounts the caches of the image's toolchains" "$?"
 PATH="$stub_docker:$PATH" "$code_it" --toolchain , "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "an empty --toolchain list fails" "$?"
-grep -qE '^ARG (DOTNET|NODE|BUN|PYTHON|POWERSHELL)=true' "$script_dir/Dockerfile"
-[[ "$?" != "0" ]]; assert "the Dockerfile switches every toolchain off by default" "$?"
+grep -qE '^ARG (DOTNET|NODE|BUN|PYTHON|POWERSHELL)=' "$script_dir/Dockerfile"
+[[ "$?" != "0" ]]; assert "the base Dockerfile has no toolchain switches" "$?"
+grep -q '^# @@CODE_IT_TOOLCHAIN_INSTALLS@@$' "$script_dir/Dockerfile"
+assert "the base Dockerfile has the toolchain marker" "$?"
 
 echo "10g. PowerShell toolchain (powershell / pwsh)"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain dotnet,node,powershell 2>&1)
-assert_contains "--toolchain powershell sets POWERSHELL=true" "$out" "--build-arg POWERSHELL=true"
 assert_contains "--toolchain powershell derives the image name" "$out" "-t code-it-alpine-dotnet-node-powershell:latest"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain pwsh 2>&1)
 assert_contains "pwsh aliases powershell" "$out" "-t code-it-alpine-powershell:latest"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain dotnet,node 2>&1)
-assert_contains "a build without powershell sets POWERSHELL=false" "$out" "--build-arg POWERSHELL=false"
-grep -q '^ARG POWERSHELL=false$' "$script_dir/Dockerfile"
-assert "Dockerfile switches PowerShell off by default" "$?"
-grep -q 'if \[ "\$POWERSHELL" != true \]; then' "$script_dir/Dockerfile"
-assert "Dockerfile gates PowerShell on POWERSHELL" "$?"
+do_capture --toolchain powershell,pwsh --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "powershell toolchain assembles pwsh" "PowerShell/releases/download"
+assert_not_in_df "powershell does not drag the dotnet toolchain in" "dotnet workload update"
+do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
+assert_not_in_df "a build without powershell leaves it out" "PowerShell/releases/download"
 
 echo "10e. Python toolchain (python / uv / --stack)"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --stack python 2>&1)
-assert_contains "--stack python sets PYTHON=true" "$out" "--build-arg PYTHON=true"
 assert_contains "--stack python derives the image name" "$out" "-t code-it-alpine-python:latest"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain uv 2>&1)
-assert_contains "uv aliases python (PYTHON=true)" "$out" "--build-arg PYTHON=true"
 assert_contains "uv canonical image name" "$out" "-t code-it-alpine-python:latest"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" 2>&1)
-assert_contains "a build without python sets PYTHON=false" "$out" "--build-arg PYTHON=false"
+do_capture --toolchain uv --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "uv aliases python and assembles both" "apk add --no-cache python3 uv"
+assert_in_df "python sets UV_CACHE_DIR in the agent home" "UV_CACHE_DIR=/home/agent1/.cache/uv"
+assert_in_df "python adds its doas permit" "cmd python3"
+do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
+assert_not_in_df "a build without python leaves it out" "python3"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --stack python "${common_args[@]}" 2>&1)
 assert_contains "code-it --stack python looks for the python image" "$out" "image 'code-it-alpine-python' does not exist"
-# Python and uv are installed together only when the Python toolchain is enabled.
-grep -q "apk add --no-cache python3 uv" "$script_dir/Dockerfile"
-assert "Dockerfile installs uv with the Python toolchain" "$?"
-grep -q 'if \[ "\$PYTHON" = true \]' "$script_dir/Dockerfile"
-assert "Dockerfile gates Python packages on PYTHON" "$?"
+# Python and uv are installed together, by the Python toolchain's fragment only.
+grep -q "apk add --no-cache python3 uv" "$script_dir/toolchains/python/install.dockerfile"
+assert "the python fragment installs uv with Python" "$?"
 ! grep -qE '^RUN apk add --no-cache uv[[:space:]]*$' "$script_dir/Dockerfile"
 assert "Dockerfile does not install uv in the base image" "$?"
 # The base layer installs tools only: no GUI packages, no Kerberos, no edge repo.
@@ -463,7 +529,7 @@ grep -q '^RUN git config --global feature.manyFiles true$' "$script_dir/Dockerfi
 assert "Dockerfile enables Git's many-files feature globally" "$?"
 grep -q '^RUN git config --global core.fsmonitor true$' "$script_dir/Dockerfile"
 assert "Dockerfile enables Git filesystem monitoring globally" "$?"
-grep -q 'apk add --no-cache libgcc libstdc++ icu-libs libssl3 && ' "$script_dir/Dockerfile"
+grep -q 'apk add --no-cache libgcc libstdc++ icu-libs libssl3 && ' "$script_dir/toolchains/powershell/install.dockerfile"
 assert "PowerShell tarball layer adds the libraries it needs" "$?"
 for a in opencode opencode-v2; do
     grep -q '^RUN apk add --no-cache libgcc libstdc++$' "$script_dir/agents/$a/install.dockerfile"
@@ -539,6 +605,14 @@ grep -q "# Arguments given to the container" "$stripped_df"
 assert "stripping preserves heredoc bodies" "$?"
 grep -q "apk add --no-cache git" "$stripped_df"
 assert "stripping keeps RUN lines" "$?"
+# The base file builds, with no args, into zsh/vim/tmux/git plus the default agent
+grep -q "opencode.ai/install" "$script_dir/Dockerfile"
+assert "base Dockerfile carries the default opencode agent" "$?"
+# Keep the default region in sync with the opencode definition (no drift)
+grep -qF "$(grep -m1 'opencode.ai/install' "$script_dir/agents/opencode/install.dockerfile")" "$script_dir/Dockerfile"
+assert "base default agent region matches the opencode fragment" "$?"
+grep -qF "'opencode=/home/agent1/.opencode/bin/opencode'" "$script_dir/Dockerfile"
+assert "base default agent region writes the opencode map" "$?"
 
 # ---------------------------------------------------------------------------
 echo "11. Custom options"
@@ -630,38 +704,39 @@ case "$out" in
 esac
 
 # ---------------------------------------------------------------------------
-echo "12b. Toolchain: --toolchain / --package-caches build args and read-only caches"
+echo "12b. Toolchain: --toolchain / --package-caches fragment assembly and read-only caches"
 npm_cache="$tmp/npm-cache"; mkdir -p "$npm_cache"
 bun_cache="$tmp/bun-cache"; mkdir -p "$bun_cache"
 
 # dotnet,node and the package repos they imply (nuget, npm)
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain dotnet,node)
-assert_contains "default build passes DOTNET=true" "$out" "--build-arg DOTNET=true"
-assert_contains "default build passes NODE=true" "$out" "--build-arg NODE=true"
-assert_contains "default build passes BUN=false" "$out" "--build-arg BUN=false"
-assert_contains "dotnet implies NUGET=true" "$out" "--build-arg NUGET=true"
-assert_contains "node implies NPM=true" "$out" "--build-arg NPM=true"
+do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "dotnet,node assembles dotnet" "dotnet10-sdk"
+assert_in_df "dotnet,node assembles node" "apk add --no-cache nodejs"
+assert_not_in_df "dotnet,node leaves bun out" "bun.sh/install"
+assert_in_df "dotnet implies the nuget cache" "fallbackPackageFolders"
+assert_in_df "node implies the npm cache" "/home/agent1/.npm-host"
 assert_contains "reports the resolved toolchains" "$out" "toolchains dotnet,node; package repos nuget,npm"
 
 # --toolchain replaces the default set
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain node,bun)
-assert_contains "--toolchain node,bun drops DOTNET" "$out" "--build-arg DOTNET=false"
-assert_contains "--toolchain node,bun keeps NODE" "$out" "--build-arg NODE=true"
-assert_contains "--toolchain node,bun keeps BUN" "$out" "--build-arg BUN=true"
-assert_contains "--toolchain node,bun drops NUGET (dotnet gone)" "$out" "--build-arg NUGET=false"
-assert_contains "--toolchain node,bun keeps NPM (node present)" "$out" "--build-arg NPM=true"
+do_capture --toolchain node,bun --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "--toolchain node,bun assembles node" "apk add --no-cache nodejs"
+assert_in_df "--toolchain node,bun assembles bun" "bun.sh/install"
+assert_not_in_df "--toolchain node,bun drops dotnet" "dotnet10-sdk"
+assert_not_in_df "--toolchain node,bun drops nuget (dotnet gone)" "fallbackPackageFolders"
+assert_in_df "--toolchain node,bun keeps npm (node present)" "/home/agent1/.npm-host"
 
 # --package-caches replaces the implied set, independently of --toolchain
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain node,bun --package-caches npm)
-assert_contains "--package-caches npm keeps NPM" "$out" "--build-arg NPM=true"
-assert_contains "--package-caches npm excludes BUN cache" "$out" "--build-arg NUGET=false"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain node,bun --package-caches bun)
-assert_contains "--package-caches bun selects the BUN package cache" "$out" "--build-arg NPM=false"
-assert_contains "--package-caches bun excludes NPM" "$out" "--build-arg NUGET=false"
+do_capture --toolchain node,bun --package-caches npm --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "--package-caches npm keeps npm" "/home/agent1/.npm-host"
+assert_not_in_df "--package-caches npm excludes the bun cache" "/home/agent1/.bun-host"
+do_capture --toolchain node,bun --package-caches bun --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "--package-caches bun assembles the bun cache" "/home/agent1/.bun-host"
+assert_not_in_df "--package-caches bun excludes npm" "/home/agent1/.npm-host"
 
-# --package-caches nuget with no dotnet still selects the NuGet cache (nuget without dotnet)
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain bun --package-caches nuget)
-assert_contains "nuget package cache without dotnet" "$out" "--build-arg NUGET=true"
+# --package-caches nuget with no dotnet still assembles the NuGet cache
+do_capture --toolchain bun --package-caches nuget --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "nuget package cache without dotnet" "fallbackPackageFolders"
 
 # The default image name follows --toolchain, so the built and run images agree
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain node,bun)
@@ -669,18 +744,15 @@ assert_contains "image name derives from --toolchain" "$out" "-t code-it-alpine-
 
 # The old --tech spelling is kept as a hidden alias
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tech bun)
-assert_contains "--tech alias selects BUN" "$out" "--build-arg BUN=true"
+assert_contains "--tech alias derives the bun image" "$out" "-t code-it-alpine-bun:latest"
 
 # Toolchain aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain js-node)
-assert_contains "js-node aliases node (NODE=true)" "$out" "--build-arg NODE=true"
 assert_contains "js-node canonical image name" "$out" "-t code-it-alpine-node:latest"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain ts-node)
-assert_contains "ts-node aliases node (NODE=true)" "$out" "--build-arg NODE=true"
 assert_contains "ts-node canonical image name" "$out" "-t code-it-alpine-node:latest"
-assert_contains "ts-node implies the npm package cache" "$out" "--build-arg NPM=true"
+assert_contains "ts-node implies the npm package cache" "$out" "package repos npm"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain js-bun)
-assert_contains "js-bun aliases bun (BUN=true)" "$out" "--build-arg BUN=true"
 assert_contains "js-bun canonical image name" "$out" "-t code-it-alpine-bun:latest"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain ts-bun,bun)
 assert_contains "ts-bun aliases bun and dedupes with bun" "$out" "-t code-it-alpine-bun:latest"

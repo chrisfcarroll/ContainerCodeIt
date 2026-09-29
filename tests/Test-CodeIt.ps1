@@ -166,6 +166,58 @@ function Invoke-ScenarioCommand([string]$command, [string]$path) {
 $stubPath   = "$stubDocker$sep$origPath"
 $commonArgs = @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $save)
 
+# A stub docker that also copies the assembled build-context Dockerfile, so the
+# tests can assert exactly which fragments were assembled.
+$capture = Join-Path $tmp 'captured.Dockerfile'
+$env:CAPTURE = $capture
+$captureBin = Join-Path $tmp 'capture-bin'
+$null = New-Item -ItemType Directory -Force -Path $captureBin
+if ($onWindows) {
+    Set-Content -Path (Join-Path $captureBin 'docker.cmd') -Value @'
+@echo off
+if "%~1"=="build" (
+    for %%a in (%*) do set "ctx=%%~a"
+    copy /Y "%ctx%\Dockerfile" "%CAPTURE%" >nul 2>nul
+    echo STUB-DOCKER-BUILD %*
+    goto :eof
+)
+if "%~1"=="images" echo code-it-alpine-dotnet-node:latest& goto :eof
+if "%~1"=="image" (echo dotnet,node& goto :eof)
+if "%~1"=="run" (echo STUB-DOCKER-RUN %*& goto :eof)
+echo stub docker: %*
+'@
+} else {
+    Set-Content -Path (Join-Path $captureBin 'docker') -Value @'
+#!/bin/sh
+case "$1" in
+    build)
+        for a in "$@"; do last="$a"; done
+        cp "$last/Dockerfile" "$CAPTURE"
+        echo "STUB-DOCKER-BUILD $*" ;;
+    images) echo "code-it-alpine-dotnet-node:latest" ;;
+    image)  echo dotnet,node ;;
+    run)    echo "STUB-DOCKER-RUN $*" ;;
+    *)      echo "stub docker: $*" ;;
+esac
+'@
+    chmod +x (Join-Path $captureBin 'docker')
+}
+$capturePath = "$captureBin$sep$origPath"
+function Invoke-Capture([string]$scriptPath, [string[]]$scenarioArgs) {
+    Remove-Item $capture -Force -EA Silent
+    $null = Invoke-Scenario $scriptPath $scenarioArgs $capturePath
+}
+function Get-CaptureText {
+    if (Test-Path $capture) { return [IO.File]::ReadAllText($capture) }
+    return ''
+}
+function Assert-InCapture([string]$desc, [string]$needle) {
+    Assert-Contains $desc (Get-CaptureText) $needle
+}
+function Assert-NotInCapture([string]$desc, [string]$needle) {
+    Assert $desc (-not (Get-CaptureText).Contains($needle))
+}
+
 # ---------------------------------------------------------------------------
 "1. Parse checks"
 foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
@@ -324,31 +376,64 @@ Assert-Contains "interactive build resolves a toolchain" $r.out 'Building with t
 Assert "interactive build does not invoke docker" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', ',') $stubPath
 Assert "Code-It-Build with an empty -toolchain list exits 1" ($r.code -eq 1)
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet') $stubPath
-Assert-Contains "Code-It-Build builds only the toolchain given" $r.out '--build-arg NODE=false'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet', '-runtime', 'docker')
+Assert-InCapture "Code-It-Build assembles the toolchain given" 'dotnet10-sdk'
+Assert-NotInCapture "Code-It-Build builds only the toolchain given" 'apk add --no-cache nodejs'
 
 # -dryRun prints the build command without executing it
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
 Assert "Code-It-Build -dryRun exit code 0" ($r.code -eq 0)
 Assert-Contains "build dry-run prints the build command" $r.out 'docker build'
-Assert-Contains "build dry-run passes DOTNET=true" $r.out '--build-arg DOTNET=true'
-Assert-Contains "build dry-run passes NODE=true" $r.out '--build-arg NODE=true'
-Assert-Contains "build dry-run passes NUGET=true (implied by dotnet)" $r.out '--build-arg NUGET=true'
-Assert-Contains "build dry-run passes NPM=true (implied by node)" $r.out '--build-arg NPM=true'
 Assert-Contains "build dry-run labels the toolchains" $r.out '--label code-it.tool-chains=dotnet,node'
 Assert-Contains "build dry-run labels the package caches" $r.out '--label code-it.package-caches=nuget,npm'
 Assert-Contains "build dry-run derives the default image name" $r.out '-t code-it-alpine-dotnet-node:latest'
 Assert "build dry-run does not execute the build" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
 
+# The build assembles the selected toolchains and their implied caches only
+Invoke-Capture $codeItBuild @('-toolchain', 'dotnet,node', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
+Assert-InCapture "build assembles dotnet" 'dotnet10-sdk'
+Assert-InCapture "build assembles node" 'apk add --no-cache nodejs'
+Assert-InCapture "dotnet implies the nuget package cache" 'fallbackPackageFolders'
+Assert-InCapture "node implies the npm package cache" '/home/agent1/.npm-host'
+Assert-NotInCapture "build leaves bun out" 'bun.sh/install'
+Assert-NotInCapture "build leaves python out" 'apk add --no-cache python3 uv'
+Assert-NotInCapture "build leaves powershell out" 'PowerShell/releases/download'
+Assert "assembled Dockerfile is under Apple's 16KB limit" ((Get-CaptureText).Length -lt 16384)
+Assert-InCapture "agent state dirs are pre-created for mounts" '~/.local/share/opencode'
+Invoke-Capture $codeItBuild @('-toolchain', 'dotnet', '-agent', 'claude', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
+Assert-InCapture "claude state dir is pre-created for mounts" '~/.claude'
+Assert-NotInCapture "claude state file is not created as a directory" '~/.claude.json'
+Assert-NotInCapture "an assembled image has only the selected agents" 'opencode.ai/install'
+
 # -tech is the kept alias of -toolchain
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath
-Assert-Contains "build -tech alias selects BUN" $r.out '--build-arg BUN=true'
 Assert-Contains "build -tech alias derives the image name" $r.out '-t code-it-alpine-bun:latest'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-tech', 'bun', '-runtime', 'docker')
+Assert-InCapture "build -tech alias assembles bun" 'bun.sh/install'
 
 # -packageCaches replaces the implied set
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'bun', '-packageCaches', 'nuget') $stubPath
-Assert-Contains "build -packageCaches nuget without dotnet" $r.out '--build-arg NUGET=true'
-Assert-Contains "build -packageCaches nuget excludes NPM" $r.out '--build-arg NPM=false'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'bun', '-packageCaches', 'nuget', '-runtime', 'docker')
+Assert-InCapture "build -packageCaches nuget without dotnet assembles the cache" 'fallbackPackageFolders'
+Assert-InCapture "build -packageCaches nuget adds its doas permit" 'cmd nuget'
+Assert-NotInCapture "build -packageCaches nuget excludes npm" '/home/agent1/.npm-host'
+$r = Invoke-ScenarioCommand "Remove-Item '$capture' -Force -EA Silent; & '$codeItBuild' -dockerfileDir '$scriptDir' -toolchain node -packageCaches '' -runtime docker" $capturePath
+Assert-InCapture "empty -packageCaches still assembles node" 'apk add --no-cache nodejs'
+Assert-NotInCapture "empty -packageCaches assembles no cache" '/home/agent1/.npm-host'
+
+# A Dockerfile without the assembly markers is a hard error
+$noMarker = Join-Path $tmp 'nomarker'
+$null = New-Item -ItemType Directory -Force -Path $noMarker
+Set-Content -Path (Join-Path $noMarker 'Dockerfile') -Value 'FROM alpine:3.24'
+Copy-Item (Join-Path $scriptDir 'agents') (Join-Path $noMarker 'agents') -Recurse -Force
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $noMarker, '-runtime', 'docker') $capturePath
+Assert "Code-It-Build without assembly markers fails" ($r.code -ne 0)
+
+# -listToolchains and -listPackageCaches read the definitions
+$r = Invoke-ScenarioCommand "& '$codeItBuild' -listToolchains" $stubPath
+Assert-Contains "Code-It-Build -listToolchains lists powershell" $r.out 'powershell'
+Assert-Contains "Code-It-Build -listToolchains shows the pwsh alias" $r.out 'aliases: pwsh'
+$r = Invoke-ScenarioCommand "& '$codeItBuild' -listPackageCaches" $stubPath
+Assert-Contains "Code-It-Build -listPackageCaches lists nuget" $r.out 'nuget'
 
 # Unknown names are hard errors
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'cobol') $stubPath
@@ -360,7 +445,13 @@ Assert "Code-It-Build unknown package cache fails" ($r.code -ne 0)
 $bDfDir = Join-Path $tmp 'build-dfdir'
 $null = New-Item -ItemType Directory -Force -Path $bDfDir
 Copy-Item (Join-Path $scriptDir 'Dockerfile') (Join-Path $bDfDir 'Dockerfile')
-Copy-Item (Join-Path $scriptDir 'agents') (Join-Path $bDfDir 'agents') -Recurse -Force
+foreach ($d in @('agents', 'toolchains', 'package-caches')) {
+    Copy-Item (Join-Path $scriptDir $d) (Join-Path $bDfDir $d) -Recurse -Force
+}
+foreach ($t in @('dotnet', 'bun')) {
+    $p = Join-Path $bDfDir "toolchains/$t/install.dockerfile"
+    [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'))
+}
 foreach ($a in @('opencode', 'claude', 'opencode-v2')) {
     $p = Join-Path $bDfDir "agents/$a/install.dockerfile"
     [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'))
@@ -371,6 +462,8 @@ Assert-Contains "Code-It-Build -rebuild invokes docker build" $r.out 'STUB-DOCKE
 Assert "Code-It-Build -rebuild bumps the opencode fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the claude fragment" ((Get-Content (Join-Path $bDfDir 'agents/claude/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the opencode-v2 fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode-v2/install.dockerfile') -Raw).Contains("# last changed $today"))
+Assert "Code-It-Build -rebuild bumps the selected toolchain fragment" ((Get-Content (Join-Path $bDfDir 'toolchains/dotnet/install.dockerfile') -Raw).Contains("# last changed $today"))
+Assert "Code-It-Build -rebuild leaves unselected toolchain fragments alone" ((Get-Content (Join-Path $bDfDir 'toolchains/bun/install.dockerfile') -Raw).Contains('# last changed 2000-01-01'))
 # A missing Dockerfile is an error
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $tmp) $stubPath
 Assert "Code-It-Build without a Dockerfile fails" ($r.code -ne 0)
@@ -418,34 +511,37 @@ Assert "an empty -toolchain list fails" ($r.code -ne 0)
 
 "9g. PowerShell toolchain (powershell / pwsh)"
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node,powershell') $stubPath
-Assert-Contains "-toolchain powershell sets POWERSHELL=true" $r.out '--build-arg POWERSHELL=true'
 Assert-Contains "-toolchain powershell derives the image name" $r.out '-t code-it-alpine-dotnet-node-powershell:latest'
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'pwsh') $stubPath
 Assert-Contains "pwsh aliases powershell" $r.out '-t code-it-alpine-powershell:latest'
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node') $stubPath
-Assert-Contains "a build without powershell sets POWERSHELL=false" $r.out '--build-arg POWERSHELL=false'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'powershell,pwsh', '-runtime', 'docker')
+Assert-InCapture "powershell toolchain assembles pwsh" 'PowerShell/releases/download'
+Assert-NotInCapture "powershell does not drag the dotnet toolchain in" 'dotnet workload update'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node', '-runtime', 'docker')
+Assert-NotInCapture "a build without powershell leaves it out" 'PowerShell/releases/download'
 
 "9e. Python toolchain (python / uv / -stack)"
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-stack', 'python') $stubPath
-Assert-Contains "-stack python sets PYTHON=true" $r.out '--build-arg PYTHON=true'
 Assert-Contains "-stack python derives the image name" $r.out '-t code-it-alpine-python:latest'
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'uv') $stubPath
-Assert-Contains "uv aliases python (PYTHON=true)" $r.out '--build-arg PYTHON=true'
 Assert-Contains "uv canonical image name" $r.out '-t code-it-alpine-python:latest'
-$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
-Assert-Contains "a build without python sets PYTHON=false" $r.out '--build-arg PYTHON=false'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'uv', '-runtime', 'docker')
+Assert-InCapture "uv aliases python and assembles both" 'apk add --no-cache python3 uv'
+Assert-InCapture "python sets UV_CACHE_DIR in the agent home" 'UV_CACHE_DIR=/home/agent1/.cache/uv'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node', '-runtime', 'docker')
+Assert-NotInCapture "a build without python leaves it out" 'python3'
 $r = Invoke-Scenario $codeIt (@('-stack', 'python') + $commonArgs) $stubPath
 Assert-Contains "code-it -stack python looks for the python image" $r.out "image 'code-it-alpine-python' does not exist"
 $dfText = Get-Content (Join-Path $scriptDir 'Dockerfile') -Raw
-Assert "Dockerfile installs uv with the Python toolchain" ($dfText.Contains('apk add --no-cache python3 uv'))
-Assert "Dockerfile gates Python packages on PYTHON" ($dfText.Contains('if [ "$PYTHON" = true ]'))
+Assert "the python fragment installs uv with Python" ((Get-Content (Join-Path $scriptDir 'toolchains/python/install.dockerfile') -Raw).Contains('apk add --no-cache python3 uv'))
+Assert "the base Dockerfile has no toolchain switches" (-not ($dfText -match '(?m)^ARG (DOTNET|NODE|BUN|PYTHON|POWERSHELL)='))
 Assert "Dockerfile does not install uv in the base image" (-not ($dfText -match '(?m)^RUN apk add --no-cache uv\s*$'))
 # The base layer installs tools only: no GUI packages, no Kerberos, no edge repo.
 # Libraries come with the toolchain or agent that needs them.
 Assert "Dockerfile base installs no GUI, Kerberos or docs packages" (-not ($dfText -match 'apk .*(chromium|ttf-freefont|freetype-dev|krb5|\sdocs\s)'))
 Assert "Dockerfile does not mix in the edge repository" (-not $dfText.Contains('edge/main'))
 Assert "Dockerfile base keeps musl-locales for international text" ($dfText -match 'apk add --no-cache .*musl-locales')
-Assert "PowerShell tarball layer adds the libraries it needs" ($dfText.Contains('apk add --no-cache libgcc libstdc++ icu-libs libssl3 && '))
+Assert "PowerShell tarball layer adds the libraries it needs" ((Get-Content (Join-Path $scriptDir 'toolchains/powershell/install.dockerfile') -Raw).Contains('apk add --no-cache libgcc libstdc++ icu-libs libssl3 && '))
 foreach ($a in @('opencode', 'opencode-v2')) {
     $fragment = Get-Content (Join-Path $scriptDir "agents/$a/install.dockerfile") -Raw
     Assert "$a install fragment adds libgcc and libstdc++" ($fragment -match '(?m)^RUN apk add --no-cache libgcc libstdc\+\+\r?$')
@@ -633,32 +729,33 @@ try {
 }
 
 # ---------------------------------------------------------------------------
-"11b. Toolchain: -toolchain / -packageCaches build args and read-only caches"
+"11b. Toolchain: -toolchain / -packageCaches fragment assembly and read-only caches"
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node') $stubPath
-Assert-Contains "default build passes DOTNET=true" $r.out '--build-arg DOTNET=true'
-Assert-Contains "default build passes NODE=true" $r.out '--build-arg NODE=true'
-Assert-Contains "default build passes BUN=false" $r.out '--build-arg BUN=false'
-Assert-Contains "dotnet implies NUGET=true" $r.out '--build-arg NUGET=true'
-Assert-Contains "node implies NPM=true" $r.out '--build-arg NPM=true'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node', '-runtime', 'docker')
+Assert-InCapture "dotnet,node assembles dotnet" 'dotnet10-sdk'
+Assert-InCapture "dotnet,node assembles node" 'apk add --no-cache nodejs'
+Assert-NotInCapture "dotnet,node leaves bun out" 'bun.sh/install'
+Assert-InCapture "dotnet implies the nuget cache" 'fallbackPackageFolders'
+Assert-InCapture "node implies the npm cache" '/home/agent1/.npm-host'
 Assert-Contains "reports the resolved toolchains" $r.out 'toolchains dotnet,node; package repos nuget,npm'
 
 # -toolchain replaces the default set
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'node,bun') $stubPath
-Assert-Contains "-toolchain node,bun drops DOTNET" $r.out '--build-arg DOTNET=false'
-Assert-Contains "-toolchain node,bun keeps NODE" $r.out '--build-arg NODE=true'
-Assert-Contains "-toolchain node,bun keeps BUN" $r.out '--build-arg BUN=true'
-Assert-Contains "-toolchain node,bun drops NUGET (dotnet gone)" $r.out '--build-arg NUGET=false'
-Assert-Contains "-toolchain node,bun keeps NPM (node present)" $r.out '--build-arg NPM=true'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'node,bun', '-runtime', 'docker')
+Assert-InCapture "-toolchain node,bun assembles node" 'apk add --no-cache nodejs'
+Assert-InCapture "-toolchain node,bun assembles bun" 'bun.sh/install'
+Assert-NotInCapture "-toolchain node,bun drops dotnet" 'dotnet10-sdk'
+Assert-NotInCapture "-toolchain node,bun drops nuget (dotnet gone)" 'fallbackPackageFolders'
+Assert-InCapture "-toolchain node,bun keeps npm (node present)" '/home/agent1/.npm-host'
 
 # -packageCaches replaces the implied set, independently of -toolchain
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'node,bun', '-packageCaches', 'npm') $stubPath
-Assert-Contains "-packageCaches npm keeps NPM" $r.out '--build-arg NPM=true'
-Assert-Contains "-packageCaches npm excludes NUGET" $r.out '--build-arg NUGET=false'
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'node,bun', '-packageCaches', 'bun') $stubPath
-Assert-Contains "-packageCaches bun selects the BUN package cache" $r.out '--build-arg NPM=false'
-Assert-Contains "-packageCaches bun excludes NUGET" $r.out '--build-arg NUGET=false'
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'bun', '-packageCaches', 'nuget') $stubPath
-Assert-Contains "nuget package cache without dotnet" $r.out '--build-arg NUGET=true'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'node,bun', '-packageCaches', 'npm', '-runtime', 'docker')
+Assert-InCapture "-packageCaches npm keeps npm" '/home/agent1/.npm-host'
+Assert-NotInCapture "-packageCaches npm excludes the bun cache" '/home/agent1/.bun-host'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'node,bun', '-packageCaches', 'bun', '-runtime', 'docker')
+Assert-InCapture "-packageCaches bun assembles the bun cache" '/home/agent1/.bun-host'
+Assert-NotInCapture "-packageCaches bun excludes npm" '/home/agent1/.npm-host'
+Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'bun', '-packageCaches', 'nuget', '-runtime', 'docker')
+Assert-InCapture "nuget package cache without dotnet" 'fallbackPackageFolders'
 
 # The default image name follows -toolchain
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'node,bun') $stubPath
@@ -666,18 +763,15 @@ Assert-Contains "image name derives from -toolchain" $r.out '-t code-it-alpine-n
 
 # The old -tech spelling is kept as a hidden alias
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath
-Assert-Contains "-tech alias selects BUN" $r.out '--build-arg BUN=true'
+Assert-Contains "-tech alias derives the bun image" $r.out '-t code-it-alpine-bun:latest'
 
 # Toolchain aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'js-node') $stubPath
-Assert-Contains "js-node aliases node (NODE=true)" $r.out '--build-arg NODE=true'
 Assert-Contains "js-node canonical image name" $r.out '-t code-it-alpine-node:latest'
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'ts-node') $stubPath
-Assert-Contains "ts-node aliases node (NODE=true)" $r.out '--build-arg NODE=true'
 Assert-Contains "ts-node canonical image name" $r.out '-t code-it-alpine-node:latest'
-Assert-Contains "ts-node implies the npm package cache" $r.out '--build-arg NPM=true'
+Assert-Contains "ts-node implies the npm package cache" $r.out 'package repos npm'
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'js-bun') $stubPath
-Assert-Contains "js-bun aliases bun (BUN=true)" $r.out '--build-arg BUN=true'
 Assert-Contains "js-bun canonical image name" $r.out '-t code-it-alpine-bun:latest'
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'ts-bun,bun') $stubPath
 Assert-Contains "ts-bun aliases bun and dedupes with bun" $r.out '-t code-it-alpine-bun:latest'

@@ -78,8 +78,10 @@ The in-container agent gates on: NAME being a well-known language/runtime whose
 toolchain installs securely (Alpine repos or the vendor's HTTPS distribution with checksum
 or signature verification where published, musl builds for x86_64 and aarch64, actively
 maintained).
-It generates an `ARG`-guarded Dockerfile layer, the name and aliases in the shared library, completions and README, an optional read-only
-package cache, tests, and a commit.
+It adds a `toolchains/NAME/` definition (`config` and `install.dockerfile`) exactly like
+the existing ones, an optional `package-caches/NAME/` read-only cache, completions and
+README, tests, and a commit. No Dockerfile or script edits: definitions are discovered
+from their directories.
 
 ```bash
 ./code-it-add-tool-chain.sh java --url https://openjdk.org/install/
@@ -111,7 +113,7 @@ package cache, tests, and a commit.
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none: those of `--image`, else of the remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`) |
+| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none: those of `--image`, else of the remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`; see `code-it-build --list-toolchains`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
@@ -137,7 +139,9 @@ toolchains and package caches). They accept the same logical parameters:
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Package repos to support; an explicit empty list means none |
 | `--agent`, `--agents`, `-a LIST` | `-agent`, `-agents LIST` | `opencode,claude` for parameterized builds | Agents to install; interactive setup preselects detected agents |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
-| `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today, to force agent curl-install refreshes. |
+| `--list-toolchains` | `-listToolchains` | - | List the available toolchains and their aliases, then exit |
+| `--list-package-caches` | `-listPackageCaches` | - | List the available package caches and exit |
+| `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today, to force the agent and toolchain install layers to refresh. |
 | `--locale`, `-l` | `-locale` | `like-host` | The image's locale (`LANG`). See [Locale](#locale) |
 | `--image`, `-i` | `-image` | `code-it-alpine-<chains>` | Image name to build |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
@@ -187,9 +191,23 @@ collation.
 
 ## Toolchains
 
-The Dockerfile takes build-time switches for the toolchains to include, and the
-launchers expose them as two comma-separated lists, passed to `docker build` as
-`--build-arg`s:
+Toolchains, package caches and agents are **data, not branches**. Each toolchain is
+one directory, `toolchains/<name>/`:
+
+| File | Purpose |
+|---|---|
+| `config` | `key=value`: the install fragment name, host detect command(s), aliases, and any package cache it implies |
+| `install.dockerfile` | a root-run, self-contained install layer (its packages, its `doas` permits) with a `# last changed YYYY-MM-DD` cache-bust line |
+
+Package caches are the same, in `package-caches/<name>/`. `code-it-build` assembles
+only the selected fragments into the Dockerfile, replacing the
+`@@CODE_IT_TOOLCHAIN_INSTALLS@@` / `@@CODE_IT_PACKAGE_CACHE_INSTALLS@@` markers.
+Unselected toolchains cost **nothing** in the assembled Dockerfile, which matters
+because Apple's `container` builder sends it in a gRPC header and fails above ~16 KB
+(`apple/container#735`): adding a toolchain does not grow every build.
+`code-it-build --list-toolchains` and `--list-package-caches` show what is defined.
+
+The launchers expose them as two comma-separated lists:
 
 - `--toolchain` / `-toolchain` (alias `--stack` / `-stack`) — toolchains to build:
   `dotnet`, `node`, `bun`, `python`, `powershell`. There is no default list: without it,
@@ -199,12 +217,17 @@ launchers expose them as two comma-separated lists, passed to `docker build` as
   `bun`; `uv` is an alias for `python`; `pwsh` is an alias for `powershell`. Aliases resolve to the canonical name, so
   `--toolchain ts-node` is `--toolchain node` and produces the same image name.
 - `--package-caches` / `-packageCaches` — package repos whose host cache is mounted
-  read-only: `nuget`, `npm`, `bun`. Default: the repos implied by `--toolchain`
-  (`dotnet`->`nuget`, `node`->`npm`). Python has no host cache mount: uv must write its
-  own cache, so the container keeps it in the agent's home (`UV_CACHE_DIR`).
+  read-only: `nuget`, `npm`, `bun` (`package-caches/<name>/`). Default: the repos
+  implied by `--toolchain`, from each toolchain's `config`
+  (`dotnet`->`nuget`, `node`->`npm`). Python has no host cache mount: uv must write
+  its own cache, so the container keeps it in the agent's home (`UV_CACHE_DIR`).
 
 Each enabled toolchain also adds a passwordless `doas` rule to the container, so you (or your
 agent) can install further related tools.
+
+Adding a toolchain means adding one `toolchains/<name>/` directory (and optionally a
+`package-caches/<name>/` one): no script edits. Versioned variants (`dotnet8`,
+`node22`, ...) can be added the same way later.
 
 Subsequent calls to `code-it` with no --toolchain specified will reuse your most-used recent toolchain.
 
@@ -294,6 +317,13 @@ Each agent is a directory, `agents/<name>/`, so adding one needs no script chang
 - `install.dockerfile`: the layers that install it, run as `agent1`. `code-it-build`
   splices the selected agents' fragments into the Dockerfile. Keep a `# last changed
   yyyy-mm-dd` comment on the install line, so `--rebuild` can bump it.
+
+  The base Dockerfile carries the default agent (opencode) in a region marked
+  `@@CODE_IT_AGENTS_BEGIN@@` ... `@@CODE_IT_AGENTS_END@@`, so building it directly,
+  with no args, gives a working image with no toolchains. `code-it-build` replaces that
+  whole region, so an assembled image contains exactly the agents it was asked for, and
+  pre-creates each selected agent's state directories agent1-owned, so the bind mounts
+  have a writable parent.
 - `default-config/` (optional): files copied into the agent's save dir on first run,
   if not already there, keeping their layout.
 
