@@ -1,14 +1,12 @@
 FROM alpine:3.24
-
 # ===========================================================================
-# Base image: the tools every sandbox needs, whatever the tech stack.
-#
-# Tool chains and package caches are not here: code-it-build assembles the
-# selected ones from toolchains/<name>/ and package-caches/<name>/ into the
-# markers below. Coding agents work the same way (agents/<name>/), except that
+# Base image
+# Tool chains and package caches are assembled from the selected
+# toolchains/<name>/ and package-caches/<name>/ into the markers below. 
+# Coding agents work the same way (agents/<name>/), except that
 # this file carries the default agent (opencode) in a marked region that
 # code-it-build replaces. Built directly, with no args, this file yields a base
-# image with zsh, vim, tmux, git, the default agent, and no tool chains.
+# image with zsh, vim, tmux, git, the default agent, and no toolchains.
 # ===========================================================================
 RUN apk add --no-cache zsh curl doas vim tmux git docs oh-my-zsh
 RUN apk add --no-cache ca-certificates less ripgrep bash
