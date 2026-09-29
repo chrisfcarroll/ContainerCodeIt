@@ -339,6 +339,26 @@ assert "code-it-build --rebuild bumps the claude fragment" "$?"
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$tmp" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build without a Dockerfile fails" "$?"
 
+# The marker sits after "USER agent1"; /etc/code-it-agents is root-owned, so the
+# assembled Dockerfile must switch to root for that write (and back to agent1).
+capture="$tmp/captured.Dockerfile"
+capturebin="$tmp/capturebin"; mkdir -p "$capturebin"
+cat > "$capturebin/docker" <<EOF
+#!/bin/sh
+if [ "\$1" = build ]; then
+    for a in "\$@"; do last="\$a"; done
+    cp "\$last/Dockerfile" "$capture"
+fi
+echo "STUB-DOCKER-BUILD \$*"
+EOF
+chmod +x "$capturebin/docker"
+PATH="$capturebin:$PATH" "$build_it" --dockerfile-dir "$script_dir" >/dev/null 2>&1
+assert "code-it-build captured the assembled Dockerfile" "$([[ -s "$capture" ]]; echo $?)"
+[[ "$(awk '/^USER /{u=$2} /printf .* > \/etc\/code-it-agents/{print u; exit}' "$capture")" == "root" ]]
+assert "assembled Dockerfile writes /etc/code-it-agents as root" "$?"
+[[ "$(awk '/printf .* > \/etc\/code-it-agents/{found=1; next} found && /^USER /{print $2; exit}' "$capture")" == "agent1" ]]
+assert "assembled Dockerfile drops back to agent1 after the root write" "$?"
+
 echo "10f. code-it-build agents"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
 assert_contains "default build installs opencode and claude" "$out" "agents opencode,claude"

@@ -148,7 +148,12 @@ $entries = foreach ($a in $enabledAgents) {
     $bin = Get-CodeItAgentConfig $agentsDir $a 'AGENT_BINARY'
     "'$a=$bin'"
 }
+# The marker sits after "USER agent1" (rightly: the install fragments above run as
+# agent1, into its home). /etc is root-owned, so write the map as root and switch
+# back for the rest of the file.
+$block += "USER root`n"
 $block += "RUN printf '%s\n' $($entries -join ' ') > /etc/code-it-agents`n"
+$block += "USER agent1`n"
 
 $base = ([IO.File]::ReadAllText("$dockerfileDir/Dockerfile")) -replace "`r`n", "`n"
 $assembled = if ($base.Contains($marker)) { $base.Replace($marker, $block.TrimEnd("`n")) } else { $base }

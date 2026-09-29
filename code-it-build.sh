@@ -192,7 +192,12 @@ for a in $enabled_agents; do
     agent_binary=$(ci_agent_config "$agents_dir" "$a" AGENT_BINARY)
     agent_file_entries+=" '$a=$agent_binary'"
 done
+# The marker sits after "USER agent1" (rightly: the install fragments above run as
+# agent1, into its home). /etc is root-owned, so write the map as root and switch
+# back for the rest of the file.
+agent_block+=$'\n'"USER root"
 agent_block+=$'\n'"RUN printf '%s\\n'$agent_file_entries > /etc/code-it-agents"
+agent_block+=$'\n'"USER agent1"
 
 build_context=$(mktemp -d)
 trap 'rm -rf "$build_context"' EXIT
