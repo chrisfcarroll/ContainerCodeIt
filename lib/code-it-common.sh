@@ -285,6 +285,7 @@ ci_agent_config() {
     line=$(grep -m1 "^$3=" "$file" 2>/dev/null) || return 1
     [[ -n "$line" ]] || return 1
     line=${line#*=}
+    line=${line%$'\r'}
     case "$line" in
         \'*\') line=${line#\'}; line=${line%\'} ;;
         \"*\") line=${line#\"}; line=${line%\"} ;;

@@ -158,6 +158,18 @@ echo "4. Save dir structure is created for first run"
 [[ -d "$save/.local/share/opencode" ]];   assert "save/.local/share/opencode created" "$?"
 [[ "$(tr -d '[:space:]' < "$save/.config/opencode/config.json")" == '{"$schema":"https://opencode.ai/config.json","permission":"allow"}' ]]
 assert "OpenCode config permits all actions" "$?"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}")
+assert_contains "reports OpenCode v2 config creation" "$out" "Created OpenCode v2 configuration"
+[[ -d "$save/.local/state/opencode" ]]; assert "save/.local/state/opencode created" "$?"
+[[ "$(tr -d '[:space:]' < "$save/.config/opencode/opencode.json")" == '{"$schema":"https://opencode.ai/config.json","permissions":[{"action":"*","resource":"*","effect":"allow"}]}' ]]
+assert "OpenCode v2 config allows actions without prompts" "$?"
+assert_contains "opencode-v2 mounts config" "$out" "/.config/opencode:/home/agent1/.config/opencode"
+assert_contains "opencode-v2 mounts data and auth" "$out" "/.local/share/opencode:/home/agent1/.local/share/opencode"
+assert_contains "opencode-v2 mounts shared-service state" "$out" "/.local/state/opencode:/home/agent1/.local/state/opencode"
+case "$out" in
+    *"/home/agent1/.claude"*) assert "opencode-v2 mounts no claude state" 1 ;;
+    *)                        assert "opencode-v2 mounts no claude state" 0 ;;
+esac
 [[ ! -e "$save/.claude" ]];               assert "opencode run creates no claude state" "$?"
 
 # ---------------------------------------------------------------------------
@@ -184,10 +196,13 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" --agent claude "${common_args[@]}")
 assert_contains "--agent claude selects claude" "$out" 'CODE_AGENT="claude"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode "${common_args[@]}")
 assert_contains "--agent opencode selects opencode" "$out" 'CODE_AGENT="opencode"'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}")
+assert_contains "--agent opencode-v2 selects v2" "$out" 'CODE_AGENT="opencode-v2"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --list-agents)
 assert "--list-agents exit code" "$?"
 assert_contains "--list-agents lists claude" "$out" "claude"
 assert_contains "--list-agents lists opencode" "$out" "opencode"
+assert_contains "--list-agents lists opencode-v2" "$out" "opencode-v2"
 assert_contains "--list-agents shows the short flag" "$out" "-o"
 PATH="$stub_docker:$PATH" "$code_it" --agent nosuchagent "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "unknown --agent fails" "$?"
@@ -369,6 +384,11 @@ case "$out" in
     *"agents opencode,claude"*) assert "--agent opencode excludes claude" 1 ;;
     *)                         assert "--agent opencode excludes claude" 0 ;;
 esac
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent opencode-v2 2>&1)
+assert_contains "--agent opencode-v2 selects the v2 installer" "$out" "agents opencode-v2"
+assert_contains "opencode-v2 image label records the agent" "$out" "--label code-it.agents=opencode-v2"
+grep -q 'https://opencode.ai/v2/install.*--version 2.0.6' "$script_dir/agents/opencode-v2/install.dockerfile"
+assert "opencode-v2 uses the official installer with a pinned version" "$?"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
 assert_contains "--agent accepts a list" "$out" "agents claude,opencode"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --list-agents)
@@ -667,6 +687,12 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -c --prompt "explain this repo" "${co
 assert_contains "claude: --prompt is the same as a bare prompt" "$out" 'code-it-alpine-dotnet-node:latest explain\ this\ repo'
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o "explain this repo" "${common_args[@]}")
 assert_contains "opencode: prompt becomes --prompt" "$out" 'code-it-alpine-dotnet-node:latest --prompt explain\ this\ repo'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "explain this repo" "${common_args[@]}")
+assert_contains "opencode-v2: interactive prompt uses mini --prompt" "$out" 'code-it-alpine-dotnet-node:latest mini --prompt explain\ this\ repo'
+# No prompt and no agent args: nothing is appended, and the run stays interactive
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}")
+[[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "opencode-v2: no prompt appends nothing" "$?"
+assert_contains "opencode-v2: no-prompt run remains interactive" "$out" "docker run -it"
 # No prompt and no agent args: nothing is appended, and the run stays interactive
 out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 [[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "no prompt appends nothing" "$?"
@@ -680,6 +706,10 @@ assert_contains "--headless passes CODE_AGENT_HEADLESS" "$out" "-e CODE_AGENT_HE
 assert_contains "--headless allocates no TTY" "$out" "docker run -i --rm"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "fix the build" "${common_args[@]}")
 assert_contains "opencode --headless uses run" "$out" 'code-it-alpine-dotnet-node:latest run fix\ the\ build'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --headless "fix the build" "${common_args[@]}")
+assert_contains "opencode-v2 --headless uses standalone run" "$out" 'code-it-alpine-dotnet-node:latest run --standalone fix\ the\ build'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --headless "${common_args[@]}" -- --session abc)
+assert_contains "opencode-v2 headless no-prompt still runs headless" "$out" 'code-it-alpine-dotnet-node:latest run --standalone --session abc'
 
 # -- passes the rest to the agent verbatim
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c "${common_args[@]}" -- --continue --model opus)
@@ -688,6 +718,8 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless --prompt "tidy" "${comm
 assert_contains "agent flags precede the prompt for claude" "$out" "code-it-alpine-dotnet-node:latest -p --max-turns 5 tidy"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless --prompt "tidy" "${common_args[@]}" -- --model opus)
 assert_contains "agent flags follow run for opencode" "$out" "code-it-alpine-dotnet-node:latest run --model opus tidy"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --headless --prompt "tidy" "${common_args[@]}" -- --model example/coder)
+assert_contains "opencode-v2 headless flags precede the prompt" "$out" "code-it-alpine-dotnet-node:latest run --standalone --model example/coder tidy"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "${common_args[@]}" -- --session abc)
 assert_contains "opencode headless with no prompt still uses run" "$out" "code-it-alpine-dotnet-node:latest run --session abc"
 # --headless without a prompt leaves the agent command to the caller
@@ -725,6 +757,7 @@ completions_out=$(
     echo "CLAUDEMODE:$(comp ./code-it.sh -c -- --permission-mode '' | tr '\n' ' ')"
     echo "OPENCODEDEF:$(comp ./code-it.sh -- --se | tr '\n' ' ')"
     echo "OPENCODEALIAS:$(comp ./opencode-it.sh -- --th | tr '\n' ' ')"
+    echo "OPENCODEV2:$(comp ./code-it.sh --agent opencode-v2 -- --sta | tr '\n' ' ')"
 )
 assert_contains "completes launcher options" "$completions_out" "OPTS:--headless"
 assert_contains "completes --runtime values" "$completions_out" "RUNTIME:docker container"
@@ -735,6 +768,7 @@ assert_contains "-c completes claude flags after --" "$completions_out" "CLAUDEF
 assert_contains "completes claude --permission-mode values" "$completions_out" "CLAUDEMODE:default acceptEdits"
 assert_contains "defaults to opencode flags after --" "$completions_out" "OPENCODEDEF:--session"
 assert_contains "opencode-it.sh completes opencode flags after --" "$completions_out" "OPENCODEALIAS:--thinking"
+assert_contains "opencode-v2 completes v2 flags after --" "$completions_out" "OPENCODEV2:--standalone"
 
 # ---------------------------------------------------------------------------
 echo "15. Container entrypoint (go.sh) passes its arguments to the agent"
@@ -750,7 +784,7 @@ if command -v zsh &>/dev/null; then
     chmod +x "$tmp/go.sh"
     [[ -s "$tmp/go.sh" ]]; assert "go.sh extracted from the Dockerfile" "$?"
 
-    for agent in claude opencode; do
+    for agent in claude opencode opencode-v2; do
         cat > "$gobin/$agent" <<EOF
 #!/bin/sh
 printf 'AGENT-$agent'
@@ -760,7 +794,7 @@ EOF
         chmod +x "$gobin/$agent"
     done
     # go.sh resolves the agent binary from the build-time name=binary map
-    printf 'opencode=%s/opencode\nclaude=%s/claude\n' "$gobin" "$gobin" > "$gobin/agents"
+    printf 'opencode=%s/opencode\nclaude=%s/claude\nopencode-v2=%s/opencode-v2\n' "$gobin" "$gobin" "$gobin" > "$gobin/agents"
     # tmux takes the command as one string: run it, so what the agent receives is visible
     cat > "$gobin/tmux" <<'EOF'
 #!/bin/sh
@@ -775,6 +809,8 @@ EOF
     assert_contains "go.sh runs the chosen agent in tmux" "$out" "AGENT-claude"
     out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "explain this repo" 2>&1)
     assert_contains "go.sh forwards arguments through tmux, unsplit" "$out" "AGENT-opencode[--prompt][explain this repo]"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode-v2 CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" run --standalone "fix the build" 2>&1)
+    assert_contains "go.sh runs opencode-v2 with translated arguments" "$out" "AGENT-opencode-v2[run][--standalone][fix the build]"
     out=$(PATH="$gobin:$PATH" CODE_AGENT=claude CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" -p "fix it; rm -rf /" 2>&1)
     assert_contains "headless go.sh runs the agent directly" "$out" "AGENT-claude[-p][fix it; rm -rf /]"
     [[ "$out" != *AGENT-claude*AGENT-claude* ]]; assert "headless go.sh does not also start tmux" "$?"

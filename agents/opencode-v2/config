@@ -1,0 +1,16 @@
+# OpenCode v2 agent definition. Readable from bash (it is sourced) and PowerShell
+# (parsed as key=value). Keep one key per line.
+AGENT_NAME=opencode-v2
+AGENT_SHORT=
+AGENT_COMMAND=opencode
+AGENT_BINARY=/home/agent1/.opencode/bin/opencode
+AGENT_INSTALL=install.dockerfile
+AGENT_CONFIG_LABEL='OpenCode v2 configuration'
+# V2 stores global config, session/auth data, and the shared-service record here.
+AGENT_STATE_DIRS='.config/opencode:.local/share/opencode:.local/state/opencode'
+AGENT_STATE_FILES=''
+# Prompt translation: {args} is the agent arguments, {prompt} the opening prompt
+AGENT_CMD_INTERACTIVE_PROMPT='mini --prompt {prompt} {args}'
+AGENT_CMD_INTERACTIVE_NO_PROMPT='{args}'
+AGENT_CMD_HEADLESS_PROMPT='run --standalone {args} {prompt}'
+AGENT_CMD_HEADLESS_NO_PROMPT='run --standalone {args}'

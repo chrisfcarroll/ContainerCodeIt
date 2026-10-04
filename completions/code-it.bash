@@ -5,7 +5,8 @@
 #
 # Completes the launcher's own options, and, after `--`, the flags of whichever
 # coding agent the command line selects: claude-it.sh (or -c) completes Claude Code
-# flags, opencode-it.sh (or -o, the default) completes OpenCode flags.
+# flags, opencode-it.sh (or -o, the default) completes OpenCode v1 flags; select
+# opencode-v2 with --agent to complete v2 flags.
 #     https://code.claude.com/docs/en/cli-reference
 #     https://opencode.ai/docs/cli/
 
@@ -25,6 +26,8 @@ _code_it_claude_permission_modes='default acceptEdits plan auto dontAsk bypassPe
 _code_it_opencode_opts='run --continue -c --session -s --fork --prompt --model -m
     --agent --auto --port --hostname --share --file -f --format --title --thinking
     --variant --dir'
+_code_it_opencode_v2_opts='run mini --standalone --server --model --agent --prompt
+    --continue -c --session --format --file --help'
 
 _code_it() {
     local cur prev agent seen_dashdash=0 i
@@ -61,6 +64,12 @@ _code_it() {
                     COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
             esac
             COMPREPLY=( $(compgen -W "$_code_it_claude_opts" -- "$cur") )
+        elif [[ "$agent" == opencode-v2 ]]; then
+            case "$prev" in
+                --format) COMPREPLY=( $(compgen -W "text json" -- "$cur") ); return ;;
+                --file) COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
+            esac
+            COMPREPLY=( $(compgen -W "$_code_it_opencode_v2_opts" -- "$cur") )
         else
             case "$prev" in
                 --format)     COMPREPLY=( $(compgen -W "default json" -- "$cur") ); return ;;

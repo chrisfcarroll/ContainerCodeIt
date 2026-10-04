@@ -177,8 +177,13 @@ Subsequent calls to `code-it` with no --toolchain specified will reuse your most
 ```bash
 ./code-it-build.sh --agent opencode          # a leaner image, OpenCode only
 ./code-it.sh --agent opencode                # run it
+./code-it-build.sh --agent opencode-v2       # OpenCode v2, pinned separately
+./code-it.sh --agent opencode-v2 --headless "summarise this repo"
 ./code-it.sh --list-agents                   # what is available
 ```
+
+OpenCode v1 and v2 use the same `opencode` executable path and are not installed
+side-by-side by the official installer. Build an image with one version at a time.
 
 ## Agent-specific Prompts, parameters and flags
 
@@ -210,12 +215,14 @@ Anything you want the coding agent itself to see can be passed through the launc
 
 The launcher translates the prompt into each agent's own command line
 ([Claude Code](https://code.claude.com/docs/en/cli-reference),
-[OpenCode](https://opencode.ai/docs/cli/)):
+[OpenCode v1](https://opencode.ai/docs/cli/),
+[OpenCode v2](https://opencode.ai/v2/docs/cli/)):
 
 | | interactive | `--headless` |
 |---|---|---|
 | Claude Code | `claude PROMPT` | `claude -p PROMPT` |
 | OpenCode | `opencode --prompt PROMPT` | `opencode run PROMPT` |
+| OpenCode v2 | `opencode mini --prompt PROMPT` | `opencode run --standalone PROMPT` |
 
 Interactively the agent still runs inside tmux. With `--headless` it runs in the
 foreground with no TTY allocated (`docker run -i`), so output can be piped or redirected
@@ -299,8 +306,9 @@ The launcher scripts keep the chosen agent's state under one save dir (default `
 | `/work` | Host directory containing git repos for the agent to work on |
 | `/home/agent1/.claude` | Claude only: credentials, settings, permissions, memory |
 | `/home/agent1/.claude.json` | Claude only: OAuth session data, MCP configs, preferences |
-| `/home/agent1/.config/opencode` | OpenCode only: configuration, including `opencode.json` |
-| `/home/agent1/.local/share/opencode` | OpenCode only: data and auth |
+| `/home/agent1/.config/opencode` | OpenCode v1/v2: configuration, including `opencode.json` and `cli.json` |
+| `/home/agent1/.local/share/opencode` | OpenCode v1/v2: session data and provider auth database |
+| `/home/agent1/.local/state/opencode` | OpenCode v2 only: shared-service state |
 | `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache (a `fallbackPackageFolder`), if `nuget` is enabled and a cache is found |
 | `/home/agent1/.npm-host` | **Read-only.** Host npm cache, if `npm` is enabled and a cache is found; seeded into `~/.npm` at startup |
 | `/home/agent1/.bun-host` | **Read-only.** Host Bun cache, if `bun` is enabled and a cache is found; seeded into `~/.bun/install/cache` at startup |

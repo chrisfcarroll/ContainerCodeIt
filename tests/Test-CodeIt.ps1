@@ -179,6 +179,15 @@ Assert "save/.config/opencode created" (Test-Path "$save/.config/opencode" -Path
 Assert "save/.local/share/opencode created" (Test-Path "$save/.local/share/opencode" -PathType Container)
 $opencodeConfig = Get-Content "$save/.config/opencode/config.json" -Raw | ConvertFrom-Json
 Assert "OpenCode config permits all actions" ($opencodeConfig.permission -eq 'allow')
+$r = Invoke-Scenario $codeIt (@('-agent','opencode-v2') + $commonArgs) $stubPath
+Assert-Contains "reports OpenCode v2 config creation" $r.out 'Created OpenCode v2 configuration'
+Assert "save/.local/state/opencode created" (Test-Path "$save/.local/state/opencode" -PathType Container)
+$opencodeV2Config = Get-Content "$save/.config/opencode/opencode.json" -Raw | ConvertFrom-Json
+Assert "OpenCode v2 default config permits all actions" ($opencodeV2Config.permissions[0].action -eq '*' -and $opencodeV2Config.permissions[0].effect -eq 'allow')
+Assert-Contains "opencode-v2 mounts config" $r.out '/.config/opencode:/home/agent1/.config/opencode'
+Assert-Contains "opencode-v2 mounts data and auth" $r.out '/.local/share/opencode:/home/agent1/.local/share/opencode'
+Assert-Contains "opencode-v2 mounts shared-service state" $r.out '/.local/state/opencode:/home/agent1/.local/state/opencode'
+Assert "opencode-v2 mounts no claude state" (-not $r.out.Contains('/home/agent1/.claude'))
 Assert "opencode run creates no claude state" (-not (Test-Path "$save/.claude"))
 
 # ---------------------------------------------------------------------------
@@ -203,10 +212,13 @@ $r = Invoke-Scenario $codeIt (@('-agent','claude') + $commonArgs) $stubPath
 Assert-Contains "-agent claude selects claude" $r.out 'CODE_AGENT="claude"'
 $r = Invoke-Scenario $codeIt (@('-agent','opencode') + $commonArgs) $stubPath
 Assert-Contains "-agent opencode selects opencode" $r.out 'CODE_AGENT="opencode"'
+$r = Invoke-Scenario $codeIt (@('-agent','opencode-v2') + $commonArgs) $stubPath
+Assert-Contains "-agent opencode-v2 selects v2" $r.out 'CODE_AGENT="opencode-v2"'
 $r = Invoke-ScenarioCommand "& '$codeIt' -listAgents" $stubPath
 Assert "listAgents exit code 0" ($r.code -eq 0)
 Assert-Contains "-listAgents lists claude" $r.out 'claude'
 Assert-Contains "-listAgents lists opencode" $r.out 'opencode'
+Assert-Contains "-listAgents lists opencode-v2" $r.out 'opencode-v2'
 $r = Invoke-Scenario $codeIt (@('-agent','nosuchagent') + $commonArgs) $stubPath
 Assert "unknown -agent fails" ($r.code -ne 0)
 $r = Invoke-Scenario $codeIt (@('-c','-o') + $commonArgs) $stubPath
@@ -333,15 +345,16 @@ $bDfDir = Join-Path $tmp 'build-dfdir'
 $null = New-Item -ItemType Directory -Force -Path $bDfDir
 Copy-Item (Join-Path $scriptDir 'Dockerfile') (Join-Path $bDfDir 'Dockerfile')
 Copy-Item (Join-Path $scriptDir 'agents') (Join-Path $bDfDir 'agents') -Recurse -Force
-foreach ($a in @('opencode', 'claude')) {
+foreach ($a in @('opencode', 'claude', 'opencode-v2')) {
     $p = Join-Path $bDfDir "agents/$a/install.dockerfile"
     [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'))
 }
-$r = Invoke-Scenario $codeItBuild @('-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker', '-agent', 'opencode,claude,opencode-v2') $stubPath
 Assert "Code-It-Build -rebuild exit code 0" ($r.code -eq 0)
 Assert-Contains "Code-It-Build -rebuild invokes docker build" $r.out 'STUB-DOCKER-BUILD'
 Assert "Code-It-Build -rebuild bumps the opencode fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the claude fragment" ((Get-Content (Join-Path $bDfDir 'agents/claude/install.dockerfile') -Raw).Contains("# last changed $today"))
+Assert "Code-It-Build -rebuild bumps the opencode-v2 fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode-v2/install.dockerfile') -Raw).Contains("# last changed $today"))
 # A missing Dockerfile is an error
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $tmp) $stubPath
 Assert "Code-It-Build without a Dockerfile fails" ($r.code -ne 0)
@@ -355,6 +368,10 @@ Assert-Contains "-agent opencode selects only opencode" $r.out 'agents opencode'
 Assert "default -agent excludes claude" (-not $r.out.Contains('agents opencode,claude'))
 $r = Invoke-ScenarioCommand "& '$codeItBuild' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
 Assert-Contains "-agent accepts a list" $r.out 'agents claude,opencode'
+$r = Invoke-Scenario $codeItBuild @('-dryRun','-dockerfileDir',$scriptDir,'-agent','opencode-v2') $stubPath
+Assert-Contains "-agent opencode-v2 selects the v2 installer" $r.out 'agents opencode-v2'
+Assert-Contains "opencode-v2 image label records the agent" $r.out '--label code-it.agents=opencode-v2'
+Assert "opencode-v2 uses the pinned official installer" ((Get-Content (Join-Path $scriptDir 'agents/opencode-v2/install.dockerfile') -Raw).Contains('https://opencode.ai/v2/install | bash -s -- --version 2.0.6'))
 $r = Invoke-ScenarioCommand "& '$codeItBuild' -listAgents" $stubPath
 Assert "Code-It-Build -listAgents exit code 0" ($r.code -eq 0)
 Assert-Contains "Code-It-Build -listAgents lists claude" $r.out 'claude'
@@ -673,6 +690,11 @@ $r = Invoke-Scenario $codeIt (@('-c','-prompt','explain this repo') + $commonArg
 Assert-Contains "claude: -prompt is the same as a bare prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-o','explain this repo') + $commonArgs) $stubPath
 Assert-Contains "opencode: prompt becomes --prompt" $r.out 'code-it-alpine-dotnet-node:latest --prompt "explain this repo"'
+$r = Invoke-Scenario $codeIt (@('-agent','opencode-v2','explain this repo') + $commonArgs) $stubPath
+Assert-Contains "opencode-v2 interactive prompt uses mini --prompt" $r.out 'code-it-alpine-dotnet-node:latest mini --prompt "explain this repo"'
+$r = Invoke-Scenario $codeIt (@('-agent','opencode-v2') + $commonArgs) $stubPath
+Assert "opencode-v2 interactive no-prompt appends nothing" ($r.out.TrimEnd().EndsWith('code-it-alpine-dotnet-node:latest'))
+Assert-Contains "opencode-v2 interactive no-prompt allocates a TTY" $r.out 'docker run -it'
 
 # No prompt and no agent args: nothing is appended, and the run stays interactive
 $r = Invoke-Scenario $codeIt $commonArgs $stubPath
@@ -687,6 +709,11 @@ Assert-Contains "-headless passes CODE_AGENT_HEADLESS" $r.out '-e CODE_AGENT_HEA
 Assert-Contains "-headless allocates no TTY" $r.out 'docker run -i --rm'
 $r = Invoke-Scenario $codeIt (@('-o','-headless','fix the build') + $commonArgs) $stubPath
 Assert-Contains "opencode -headless uses run" $r.out 'code-it-alpine-dotnet-node:latest run "fix the build"'
+$r = Invoke-Scenario $codeIt (@('-agent','opencode-v2','-headless','fix the build') + $commonArgs) $stubPath
+Assert-Contains "opencode-v2 headless prompt uses standalone run" $r.out 'code-it-alpine-dotnet-node:latest run --standalone "fix the build"'
+$r = Invoke-Scenario $codeIt (@('-agent','opencode-v2','-headless') + $commonArgs) $stubPath
+Assert-Contains "opencode-v2 headless no-prompt still runs standalone" $r.out 'code-it-alpine-dotnet-node:latest run --standalone'
+Assert-Contains "opencode-v2 headless no-prompt has no TTY" $r.out 'docker run -i --rm'
 
 # Unrecognised arguments go to the agent verbatim: PowerShell has no usable `--`
 $r = Invoke-Scenario $codeIt (@('-c') + $commonArgs + @('--continue','--model','opus')) $stubPath
@@ -695,6 +722,8 @@ $r = Invoke-Scenario $codeIt (@('-c','-headless','-prompt','tidy') + $commonArgs
 Assert-Contains "agent flags precede the prompt for claude" $r.out 'code-it-alpine-dotnet-node:latest -p --max-turns 5 tidy'
 $r = Invoke-Scenario $codeIt (@('-o','-headless','-prompt','tidy') + $commonArgs + @('--model','opus')) $stubPath
 Assert-Contains "agent flags follow run for opencode" $r.out 'code-it-alpine-dotnet-node:latest run --model opus tidy'
+$r = Invoke-Scenario $codeIt (@('-agent','opencode-v2','-headless','-prompt','tidy') + $commonArgs + @('--model','example/coder')) $stubPath
+Assert-Contains "opencode-v2 headless flags precede prompt" $r.out 'code-it-alpine-dotnet-node:latest run --standalone --model example/coder tidy'
 # -headless without a prompt leaves the agent command to the caller. Short agent flags
 # that PowerShell reads as one of this script's own parameters (-p) have to be spelled out.
 $r = Invoke-Scenario $codeIt (@('-c','-headless') + $commonArgs + @('--print','count the files')) $stubPath
@@ -1025,12 +1054,14 @@ function Complete([string]`$line) {
 }
 "CLAUDE:"   + (Complete "& '$codeIt' -claude -agentArgs --mod")
 "OPENCODE:" + (Complete "& '$codeIt' -agentArgs --se")
+"OPENCODEV2:" + (Complete "& '$codeIt' -agent opencode-v2 -agentArgs --sta")
 "RUNTIME:"  + (Complete "& '$codeIt' -runtime ")
 "@
 $r = Invoke-ScenarioCommand $completerTest $stubPath
 Assert "completion script loads" ($r.code -eq 0 -or $null -eq $r.code)
 Assert-Contains "-agentArgs completes claude flags" $r.out 'CLAUDE:--model'
 Assert-Contains "-agentArgs completes opencode flags" $r.out 'OPENCODE:--session'
+Assert-Contains "-agent opencode-v2 completes v2 flags" $r.out 'OPENCODEV2:--standalone'
 Assert-Contains "-runtime completes its values" $r.out 'RUNTIME:docker container'
 
 # ---------------------------------------------------------------------------
