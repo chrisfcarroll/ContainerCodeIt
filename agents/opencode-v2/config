@@ -3,9 +3,12 @@
 AGENT_NAME=opencode-v2
 AGENT_SHORT=
 AGENT_COMMAND=opencode
-AGENT_BINARY=/home/agent1/.opencode/bin/opencode
+AGENT_BINARY=/home/agent1/.opencode-v2/bin/opencode
 AGENT_INSTALL=install.dockerfile
 AGENT_CONFIG_LABEL='OpenCode v2 configuration'
+# V1 reads the same paths and refuses V2's config, so keep V2's state under its own
+# subdirectory of --save-dir.
+AGENT_SAVE_SUBDIR=opencode-v2
 # V2 stores global config, session/auth data, and the shared-service record here.
 AGENT_STATE_DIRS='.config/opencode:.local/share/opencode:.local/state/opencode'
 AGENT_STATE_FILES=''

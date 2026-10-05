@@ -194,9 +194,11 @@ foreach ($a in $chosenAgents) {
         }
     }
     if (-not $hostPaths) { continue }
+    $subdir = Get-CodeItAgentConfig $agentsDir $a 'AGENT_SAVE_SUBDIR'
+    $agentSaveDir = if ($subdir) { Join-Path $saveDir $subdir } else { $saveDir }
 
     Write-Host ""
-    Write-Host "Agent '$a' has host configuration that can be copied into $saveDir`:"
+    Write-Host "Agent '$a' has host configuration that can be copied into $agentSaveDir`:"
     foreach ($p in $hostPaths) { Write-Host "  ~/$p" }
     Write-Host "This copies credentials, which will be readable by the agent in the container."
 
@@ -208,7 +210,7 @@ foreach ($a in $chosenAgents) {
     if ($doCopy) {
         foreach ($p in $hostPaths) {
             $src = Join-Path $HOME $p
-            $dest = Join-Path $saveDir $p
+            $dest = Join-Path $agentSaveDir $p
             if ($dryRun) {
                 Write-Host "      would copy ~/$p -> $dest (existing files kept)"
             } elseif (Test-Path -Path $src -PathType Container) {

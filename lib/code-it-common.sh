@@ -130,6 +130,25 @@ ci_image_toolchain() {
     printf '%s' "$chains"
 }
 
+# ci_image_agents RUNTIME IMAGE AGENTS_DIR: echo the comma-separated agents recorded on
+# IMAGE (its code-it.agents label), or nothing if it cannot be told. Only names of
+# known agents count, so an unlabelled image or a runtime's own error text gives nothing.
+ci_image_agents() {
+    local runtime="$1" image="$2" agents_dir="$3" raw="" a agents=""
+    case "$runtime" in
+        docker)    raw=$(docker image inspect --format '{{ index .Config.Labels "code-it.agents" }}' "$image" 2>/dev/null || true) ;;
+        container) raw=$(container image inspect --format '{{ index .Config.Labels "code-it.agents" }}' "$image" 2>/dev/null || true) ;;
+    esac
+    case "$raw" in
+        *[!a-z0-9,-]*|"") return 0 ;;
+    esac
+    for a in ${raw//,/ }; do
+        ci_agent_exists "$agents_dir" "$a" || return 0
+        agents=$(ci_comma_list_add "$agents" "$a")
+    done
+    ci_join , "$agents"
+}
+
 # ci_image_list RUNTIME: existing image "repo:tag" names, most-recently built first.
 ci_image_list() {
     local runtime="$1"

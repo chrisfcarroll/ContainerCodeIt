@@ -121,6 +121,8 @@ If it passes the gate:
    - config (key=value): AGENT_NAME, AGENT_SHORT, AGENT_COMMAND, AGENT_BINARY,
      AGENT_INSTALL, AGENT_CONFIG_LABEL, AGENT_STATE_DIRS, AGENT_STATE_FILES and the
      four AGENT_CMD_* prompt-translation templates.
+     If its state paths are the same as another agent's (as opencode-v2 shares
+     opencode's), also set AGENT_SAVE_SUBDIR so its state is kept separately.
    - install.dockerfile: install from the official channel only, as user agent1,
      pinning versions where possible, keeping a "# last changed YYYY-MM-DD"
      cache-bust line. If the agent binary needs shared libraries the base image

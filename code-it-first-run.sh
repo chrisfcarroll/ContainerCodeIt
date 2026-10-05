@@ -214,7 +214,7 @@ copy_tree_no_clobber() {
 }
 
 copy_state_path() {
-    local rel="$1" src="$HOME/$1" dest="$save_dir/$1"
+    local rel="$1" src="$HOME/$1" dest="$2/$1"
     if [[ "$dry_run" == true ]]; then
         echo "      would copy ~/$rel -> $dest (existing files kept)"
         return 0
@@ -235,6 +235,8 @@ for a in $chosen_agents; do
     host_paths=""
     dirs=$(ci_agent_config "$agents_dir" "$a" AGENT_STATE_DIRS)
     files=$(ci_agent_config "$agents_dir" "$a" AGENT_STATE_FILES)
+    subdir=$(ci_agent_config "$agents_dir" "$a" AGENT_SAVE_SUBDIR) || subdir=""
+    agent_save_dir="$save_dir${subdir:+/$subdir}"
     local_ifs_save="$IFS"; IFS=':'
     for p in $dirs $files; do
         [[ -n "$p" && -e "$HOME/$p" ]] && host_paths+=" $p"
@@ -243,7 +245,7 @@ for a in $chosen_agents; do
     [[ -z "$host_paths" ]] && continue
 
     echo
-    echo "Agent '$a' has host configuration that can be copied into $save_dir:"
+    echo "Agent '$a' has host configuration that can be copied into $agent_save_dir:"
     for p in $host_paths; do echo "  ~/$p"; done
     echo "This copies credentials, which will be readable by the agent in the container."
 
@@ -257,7 +259,7 @@ for a in $chosen_agents; do
         esac
     fi
     if [[ "$do_copy" == true ]]; then
-        for p in $host_paths; do copy_state_path "$p"; done
+        for p in $host_paths; do copy_state_path "$p" "$agent_save_dir"; done
     fi
 done
 

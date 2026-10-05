@@ -182,8 +182,11 @@ Subsequent calls to `code-it` with no --toolchain specified will reuse your most
 ./code-it.sh --list-agents                   # what is available
 ```
 
-OpenCode v1 and v2 use the same `opencode` executable path and are not installed
-side-by-side by the official installer. Build an image with one version at a time.
+OpenCode v1 and v2 can be built into the same image: v2's binary is moved to
+`~/.opencode-v2/bin` so it does not overwrite v1's. They read the same config and
+data paths, and v1 exits at once on v2's `opencode.json`, so v2 sets
+`AGENT_SAVE_SUBDIR=opencode-v2` in its config and keeps its state under
+`<save dir>/opencode-v2/` instead of the save dir itself.
 
 ## Agent-specific Prompts, parameters and flags
 
@@ -306,7 +309,7 @@ The launcher scripts keep the chosen agent's state under one save dir (default `
 | `/work` | Host directory containing git repos for the agent to work on |
 | `/home/agent1/.claude` | Claude only: credentials, settings, permissions, memory |
 | `/home/agent1/.claude.json` | Claude only: OAuth session data, MCP configs, preferences |
-| `/home/agent1/.config/opencode` | OpenCode v1/v2: configuration, including `opencode.json` and `cli.json` |
+| `/home/agent1/.config/opencode` | OpenCode v1/v2: configuration, including `opencode.json` and `cli.json` (v2's from `<save dir>/opencode-v2/`) |
 | `/home/agent1/.local/share/opencode` | OpenCode v1/v2: session data and provider auth database |
 | `/home/agent1/.local/state/opencode` | OpenCode v2 only: shared-service state |
 | `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache (a `fallbackPackageFolder`), if `nuget` is enabled and a cache is found |

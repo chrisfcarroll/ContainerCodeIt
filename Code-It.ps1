@@ -249,6 +249,7 @@ if (-not (Test-CodeItAgentExists $agentsDir $codeAgent)) {
 $agentBinary      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_BINARY'
 $agentStateDirs   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_DIRS'
 $agentStateFiles  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_FILES'
+$agentSaveSubdir  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_SAVE_SUBDIR'
 $agentConfigLabel = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CONFIG_LABEL'
 $agentCmdInteractivePrompt   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_PROMPT'
 $agentCmdInteractiveNoPrompt = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_NO_PROMPT'
@@ -383,14 +384,18 @@ $WorkDirToMount = (Resolve-Path $WorkDirToMount).Path
 # Create the save dir structure so mounts always work, even on first run. State
 # paths come from the agent definition: directories are created; single files are
 # pre-created so the runtime does not make a directory in their place.
+# An agent whose state would clash with another's (opencode-v2 reads the same
+# paths as opencode, but rejects its config) keeps it under AGENT_SAVE_SUBDIR.
+$agentSaveDir = if ($agentSaveSubdir) { "$saveDir/$agentSaveSubdir" } else { $saveDir }
+$null = New-Item -ItemType Directory -Force -Path $agentSaveDir
 $agentStateDirList   = Split-CodeItList ($agentStateDirs -replace ':', ',')
 $agentStateFileList  = Split-CodeItList ($agentStateFiles -replace ':', ',')
 foreach ($d in $agentStateDirList) {
-    $null = New-Item -ItemType Directory -Force -Path "$saveDir/$d"
+    $null = New-Item -ItemType Directory -Force -Path "$agentSaveDir/$d"
 }
 foreach ($f in $agentStateFileList) {
-    if (-not (Test-Path -Path "$saveDir/$f")) {
-        Set-Content -Path "$saveDir/$f" -Value '{}'
+    if (-not (Test-Path -Path "$agentSaveDir/$f")) {
+        Set-Content -Path "$agentSaveDir/$f" -Value '{}'
     }
 }
 
@@ -400,7 +405,7 @@ if (Test-Path -Path $defaultConfigDir -PathType Container) {
     $defaultConfigDir = (Resolve-Path $defaultConfigDir).Path
     foreach ($src in (Get-ChildItem -Force -Recurse -File -Path $defaultConfigDir | Sort-Object FullName)) {
         $rel = $src.FullName.Substring($defaultConfigDir.Length).TrimStart('/', '\')
-        $dest = Join-Path $saveDir $rel
+        $dest = Join-Path $agentSaveDir $rel
         if (-not (Test-Path -Path $dest)) {
             $null = New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent)
             Copy-Item -Path $src.FullName -Destination $dest
@@ -409,6 +414,7 @@ if (Test-Path -Path $defaultConfigDir -PathType Container) {
     }
 }
 $saveDir = (Resolve-Path $saveDir).Path
+$agentSaveDir = (Resolve-Path $agentSaveDir).Path
 $historyFile = Join-Path $saveDir 'image-history'
 
 "    Checking $image ..."
@@ -449,6 +455,17 @@ if ($imageToolchain -and -not (Test-CodeItToolchainInclude $imageToolchain $enab
 } elseif ($imageToolchain -and $imageToolchain -ne ($enabledToolchain -join ',')) {
     $extras = @($imageToolchain -split ',' | Where-Object { $enabledToolchain -notcontains $_ })
     "    Note: image '$image' also contains $($extras -join ',')"
+}
+
+# The image must contain the chosen agent: go.sh cannot run one it lacks. Check here,
+# where the error is readable, rather than in the container.
+if (-not $buildImage) {
+    $imageAgents = Get-CodeItImageAgents $runtime $image $agentsDir
+    if ($imageAgents -and (($imageAgents -split ',') -notcontains $codeAgent)) {
+        Write-Warning "Image '$image' does not contain agent '$codeAgent'; it has: $imageAgents."
+        Write-Warning "Choose one of those with -agent, or rebuild with Code-It-Build.ps1 -agent $codeAgent,$imageAgents"
+        exit 1
+    }
 }
 
 # Git author info
@@ -576,12 +593,12 @@ foreach ($token in ($template -split '\s+' | Where-Object { $_ })) {
 $agentMountArgs = @()
 $agentMountPrint = ""
 foreach ($d in $agentStateDirList) {
-    $agentMountArgs += @('-v', "$saveDir/${d}:$containerHome/${d}")
-    $agentMountPrint += "`n                -v `"$saveDir/${d}:$containerHome/${d}`""
+    $agentMountArgs += @('-v', "$agentSaveDir/${d}:$containerHome/${d}")
+    $agentMountPrint += "`n                -v `"$agentSaveDir/${d}:$containerHome/${d}`""
 }
 foreach ($f in $agentStateFileList) {
-    $agentMountArgs += @('-v', "$saveDir/${f}:$containerHome/${f}")
-    $agentMountPrint += "`n                -v `"$saveDir/${f}:$containerHome/${f}`""
+    $agentMountArgs += @('-v', "$agentSaveDir/${f}:$containerHome/${f}")
+    $agentMountPrint += "`n                -v `"$agentSaveDir/${f}:$containerHome/${f}`""
 }
 
 # Headless runs are one-shot: no tmux and no TTY, so the container exits when the

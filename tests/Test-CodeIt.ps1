@@ -48,6 +48,10 @@ if ($onWindows) {
 if "%~1"=="images" if defined STUB_IMAGES_FAIL exit /b 1
 if "%~1"=="build" if defined STUB_BUILD_FAIL exit /b 3
 if "%~1"=="images" echo code-it-alpine-dotnet-node:latest& goto :eof
+if "%~1"=="image" if "%~2"=="inspect" echo %* | findstr /c:"code-it.agents" >nul && (
+    if defined STUB_IMAGE_AGENTS (echo %STUB_IMAGE_AGENTS%) else (echo.)
+    goto :eof
+)
 if "%~1"=="image" if "%~2"=="inspect" (
     if defined STUB_IMAGE_TOOL_CHAINS (echo %STUB_IMAGE_TOOL_CHAINS%) else (echo dotnet,node)
     goto :eof
@@ -61,7 +65,7 @@ echo stub docker: %*
 #!/bin/sh
 case "$1" in
     images) [ -n "$STUB_IMAGES_FAIL" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
-    image)  case "$2" in inspect) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; *) echo "stub docker: $*" ;; esac ;;
+    image)  case "$2" in inspect) case "$*" in *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
     build)  [ -n "$STUB_BUILD_FAIL" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -77,6 +81,10 @@ if ($onWindows) {
     Set-Content -Path (Join-Path $stubContainer 'container.cmd') -Value @'
 @echo off
 if "%~1"=="image" if "%~2"=="ls" echo code-it-alpine-dotnet-node  latest& goto :eof
+if "%~1"=="image" if "%~2"=="inspect" echo %* | findstr /c:"code-it.agents" >nul && (
+    if defined STUB_IMAGE_AGENTS (echo %STUB_IMAGE_AGENTS%) else (echo.)
+    goto :eof
+)
 if "%~1"=="image" if "%~2"=="inspect" (
     if defined STUB_IMAGE_TOOL_CHAINS (echo %STUB_IMAGE_TOOL_CHAINS%) else (echo dotnet,node)
     goto :eof
@@ -91,7 +99,7 @@ echo stub container: %*
 case "$1" in
     image)  case "$2" in
                 ls)      echo "code-it-alpine-dotnet-node  latest" ;;
-                inspect) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;;
+                inspect) case "$*" in *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;;
                 *)       echo "stub container: $*" ;;
             esac ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
@@ -181,12 +189,14 @@ $opencodeConfig = Get-Content "$save/.config/opencode/config.json" -Raw | Conver
 Assert "OpenCode config permits all actions" ($opencodeConfig.permission -eq 'allow')
 $r = Invoke-Scenario $codeIt (@('-agent','opencode-v2') + $commonArgs) $stubPath
 Assert-Contains "reports OpenCode v2 config creation" $r.out 'Created OpenCode v2 configuration'
-Assert "save/.local/state/opencode created" (Test-Path "$save/.local/state/opencode" -PathType Container)
-$opencodeV2Config = Get-Content "$save/.config/opencode/opencode.json" -Raw | ConvertFrom-Json
+Assert "save/opencode-v2/.local/state/opencode created" (Test-Path "$save/opencode-v2/.local/state/opencode" -PathType Container)
+$opencodeV2Config = Get-Content "$save/opencode-v2/.config/opencode/opencode.json" -Raw | ConvertFrom-Json
 Assert "OpenCode v2 default config permits all actions" ($opencodeV2Config.permissions[0].action -eq '*' -and $opencodeV2Config.permissions[0].effect -eq 'allow')
-Assert-Contains "opencode-v2 mounts config" $r.out '/.config/opencode:/home/agent1/.config/opencode'
-Assert-Contains "opencode-v2 mounts data and auth" $r.out '/.local/share/opencode:/home/agent1/.local/share/opencode'
-Assert-Contains "opencode-v2 mounts shared-service state" $r.out '/.local/state/opencode:/home/agent1/.local/state/opencode'
+# opencode (v1) reads the same paths and exits on V2's config, so v2 keeps its own
+Assert "opencode-v2 config is not written where opencode reads it" (-not (Test-Path "$save/.config/opencode/opencode.json"))
+Assert-Contains "opencode-v2 mounts config" $r.out '/opencode-v2/.config/opencode:/home/agent1/.config/opencode'
+Assert-Contains "opencode-v2 mounts data and auth" $r.out '/opencode-v2/.local/share/opencode:/home/agent1/.local/share/opencode'
+Assert-Contains "opencode-v2 mounts shared-service state" $r.out '/opencode-v2/.local/state/opencode:/home/agent1/.local/state/opencode'
 Assert "opencode-v2 mounts no claude state" (-not $r.out.Contains('/home/agent1/.claude'))
 Assert "opencode run creates no claude state" (-not (Test-Path "$save/.claude"))
 
@@ -371,7 +381,10 @@ Assert-Contains "-agent accepts a list" $r.out 'agents claude,opencode'
 $r = Invoke-Scenario $codeItBuild @('-dryRun','-dockerfileDir',$scriptDir,'-agent','opencode-v2') $stubPath
 Assert-Contains "-agent opencode-v2 selects the v2 installer" $r.out 'agents opencode-v2'
 Assert-Contains "opencode-v2 image label records the agent" $r.out '--label code-it.agents=opencode-v2'
-Assert "opencode-v2 uses the pinned official installer" ((Get-Content (Join-Path $scriptDir 'agents/opencode-v2/install.dockerfile') -Raw).Contains('https://opencode.ai/v2/install | bash -s -- --version 2.0.6'))
+$v2Install = Get-Content (Join-Path $scriptDir 'agents/opencode-v2/install.dockerfile') -Raw
+Assert "opencode-v2 uses the pinned official installer" ($v2Install.Contains('https://opencode.ai/v2/install -o') -and $v2Install -match 'HOME=\S+ bash \S+ --version 2\.0\.6')
+Assert "opencode and opencode-v2 binaries do not overwrite each other" ((Select-String -Path (Join-Path $scriptDir 'agents/opencode/config') -Pattern '^AGENT_BINARY=').Line -ne (Select-String -Path (Join-Path $scriptDir 'agents/opencode-v2/config') -Pattern '^AGENT_BINARY=').Line)
+Assert "opencode-v2 installs to its own AGENT_BINARY path" ($v2Install -match 'mv \S+/\.opencode/bin/opencode ~/\.opencode-v2/bin/opencode')
 $r = Invoke-ScenarioCommand "& '$codeItBuild' -listAgents" $stubPath
 Assert "Code-It-Build -listAgents exit code 0" ($r.code -eq 0)
 Assert-Contains "Code-It-Build -listAgents lists claude" $r.out 'claude'
@@ -652,6 +665,18 @@ $env:STUB_IMAGE_TOOL_CHAINS = 'dotnet'
 try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
 Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for tech 'dotnet'"
+# An image whose agents label lacks the chosen agent stops before docker run, readably
+# (the stub answers the agents label lookup with STUB_IMAGE_AGENTS)
+$env:STUB_IMAGE_AGENTS = 'claude'
+try { $r = Invoke-Scenario $codeIt (@('-agent','opencode') + $commonArgs) $stubPath }
+finally { $env:STUB_IMAGE_AGENTS = $null }
+Assert "image without the chosen agent fails" ($r.code -ne 0)
+Assert-Contains "names the agents the image has" $r.out "does not contain agent 'opencode'; it has: claude"
+Assert "image without the chosen agent is not run" (-not $r.out.Contains('STUB-DOCKER-RUN'))
+$env:STUB_IMAGE_AGENTS = 'claude'
+try { $r = Invoke-Scenario $codeIt (@('-agent','claude') + $commonArgs) $stubPath }
+finally { $env:STUB_IMAGE_AGENTS = $null }
+Assert "image with the chosen agent runs" ($r.code -eq 0)
 # Without a label (older images), fall back to the name-based guess
 $env:STUB_IMAGE_TOOL_CHAINS = ''
 try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
@@ -898,6 +923,13 @@ Assert "first-run never overwrites existing state" ((Get-Content "$fs/.config/op
 Assert "first-run copies missing state" ((Get-Content "$fs/.config/opencode/new.json" -Raw).Trim() -eq 'NEW')
 Assert-Contains "first-run warns that credentials are copied" $r.out 'credentials'
 Assert-Contains "first-run prints the start command" $r.out 'Code-It.ps1 -agent opencode'
+# an agent with AGENT_SAVE_SUBDIR gets its copy in that subdirectory
+$env:HOME = $fh; $env:USERPROFILE = $fh
+try {
+    $r = Invoke-Scenario $firstRun @('-yes', '-toolchain', 'node', '-agents', 'opencode-v2',
+        '-saveDir', $fs, '-codeItBuild', $stubFirst) $stubPath
+} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
+Assert "first-run copies opencode-v2 state into its save subdir" ((Get-Content "$fs/opencode-v2/.config/opencode/new.json" -Raw).Trim() -eq 'NEW')
 
 # ---------------------------------------------------------------------------
 "12e. Image memory and default toolchains"

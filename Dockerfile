@@ -241,17 +241,28 @@ if [ -d "$HOME/.bun-host" ] ; then
     cp -a -n "$HOME/.bun-host/." "$HOME/.bun/install/cache/" 2>/dev/null || true
 fi
 # The build wrote the selected agents to /etc/code-it-agents as name=binary lines,
-# so the binary is data, not a hardcoded case. Fall back to the first one listed.
+# so the binary is data, not a hardcoded case. With no CODE_AGENT, use the first one
+# listed. A CODE_AGENT the image lacks is an error, not a fallback: another agent
+# would get this agent's arguments and exit, and tmux would hide why.
 agent_file=/etc/code-it-agents
 agent_bin=""
 if [ -f "$agent_file" ] && [ -n "${CODE_AGENT:-}" ] ; then
     agent_bin=$(sed -n "s/^${CODE_AGENT}=//p" "$agent_file" | head -n 1)
+    if [ -z "$agent_bin" ] ; then
+        echo "Agent '$CODE_AGENT' is not installed in this image. It has: $(cut -d= -f1 "$agent_file" | tr '\n' ' ')" >&2
+        echo "Rebuild the image with code-it-build --agent including $CODE_AGENT, or choose an installed agent." >&2
+        exit 1
+    fi
 fi
 if [ -z "$agent_bin" ] && [ -f "$agent_file" ] ; then
     agent_bin=$(head -n 1 "$agent_file" | cut -d= -f2-)
 fi
 if [ -z "$agent_bin" ] ; then
     echo "No coding agent configured in $agent_file" >&2
+    exit 1
+fi
+if [ ! -x "$agent_bin" ] ; then
+    echo "Agent binary $agent_bin is missing from this image: its install step failed. Rebuild with code-it-build --rebuild." >&2
     exit 1
 fi
 if [ "${CODE_AGENT_HEADLESS:-}" = "1" ] ; then

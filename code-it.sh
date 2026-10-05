@@ -338,6 +338,7 @@ if ! ci_agent_exists "$agents_dir" "$code_agent"; then
     echo "Run $0 --list-agents to see them." >&2
     exit 1
 fi
+AGENT_SAVE_SUBDIR=""
 # shellcheck disable=SC1090
 . "$agents_dir/$code_agent/config"
 
@@ -468,12 +469,16 @@ work_dir_to_mount=$(abs_dir "$work_dir_to_mount")
 # Create the save dir structure so mounts always work, even on first run. State
 # paths come from the agent definition: directories are created; single files are
 # pre-created so the runtime does not make a directory in their place.
+# An agent whose state would clash with another's (opencode-v2 reads the same
+# paths as opencode, but rejects its config) keeps it under AGENT_SAVE_SUBDIR.
+agent_save_dir="$save_dir${AGENT_SAVE_SUBDIR:+/$AGENT_SAVE_SUBDIR}"
+mkdir -p "$agent_save_dir"
 agent_state_dirs=()
 if [[ -n "${AGENT_STATE_DIRS:-}" ]]; then
     IFS=':' read -r -a agent_state_dirs <<< "$AGENT_STATE_DIRS"
 fi
 for d in ${agent_state_dirs[@]+"${agent_state_dirs[@]}"}; do
-    [[ -n "$d" ]] && mkdir -p "$save_dir/$d"
+    [[ -n "$d" ]] && mkdir -p "$agent_save_dir/$d"
 done
 agent_state_files=()
 if [[ -n "${AGENT_STATE_FILES:-}" ]]; then
@@ -481,7 +486,7 @@ if [[ -n "${AGENT_STATE_FILES:-}" ]]; then
 fi
 for f in ${agent_state_files[@]+"${agent_state_files[@]}"}; do
     [[ -n "$f" ]] || continue
-    [[ -e "$save_dir/$f" ]] || echo '{}' > "$save_dir/$f"
+    [[ -e "$agent_save_dir/$f" ]] || echo '{}' > "$agent_save_dir/$f"
 done
 
 # Write the agent's default configuration file(s) on first run, preserving layout.
@@ -489,7 +494,7 @@ default_config_dir="$agents_dir/$code_agent/default-config"
 if [[ -d "$default_config_dir" ]]; then
     while IFS= read -r src; do
         rel=${src#"$default_config_dir"/}
-        dest="$save_dir/$rel"
+        dest="$agent_save_dir/$rel"
         if [[ ! -e "$dest" ]]; then
             mkdir -p "$(dirname "$dest")"
             cp "$src" "$dest"
@@ -498,6 +503,7 @@ if [[ -d "$default_config_dir" ]]; then
     done < <(find "$default_config_dir" -type f | sort)
 fi
 save_dir=$(abs_dir "$save_dir")
+agent_save_dir=$(abs_dir "$agent_save_dir")
 history_file="$save_dir/image-history"
 
 echo "    Checking $image ..."
@@ -538,6 +544,17 @@ elif [[ -n "$image_toolchain" && "$image_toolchain" != "$(ci_join , "$enabled_to
         ci_has "$enabled_toolchain" "$c" || extras=$(ci_comma_list_add "$extras" "$c")
     done
     echo "    Note: image '$image' also contains ${extras// /,}."
+fi
+
+# The image must contain the chosen agent: go.sh cannot run one it lacks. Check here,
+# where the error is readable, rather than in the container.
+if [[ "$build_image" == false ]]; then
+    image_agents=$(ci_image_agents "$runtime" "$image" "$agents_dir")
+    if [[ -n "$image_agents" ]] && ! ci_has "${image_agents//,/ }" "$code_agent"; then
+        echo "Warning: image '$image' does not contain agent '$code_agent'; it has: $image_agents." >&2
+        echo "    Choose one of those with --agent, or rebuild with code-it-build.sh --agent $code_agent,$image_agents" >&2
+        exit 1
+    fi
 fi
 
 # Git author info
@@ -700,15 +717,15 @@ agent_mounts=()
 agent_mounts_print=""
 for d in ${agent_state_dirs[@]+"${agent_state_dirs[@]}"}; do
     [[ -n "$d" ]] || continue
-    agent_mounts+=(-v "$save_dir/$d:$container_home/$d")
+    agent_mounts+=(-v "$agent_save_dir/$d:$container_home/$d")
     agent_mounts_print+="
-                -v \"$save_dir/$d:$container_home/$d\" \\"
+                -v \"$agent_save_dir/$d:$container_home/$d\" \\"
 done
 for f in ${agent_state_files[@]+"${agent_state_files[@]}"}; do
     [[ -n "$f" ]] || continue
-    agent_mounts+=(-v "$save_dir/$f:$container_home/$f")
+    agent_mounts+=(-v "$agent_save_dir/$f:$container_home/$f")
     agent_mounts_print+="
-                -v \"$save_dir/$f:$container_home/$f\" \\"
+                -v \"$agent_save_dir/$f:$container_home/$f\" \\"
 done
 
 # Print the command

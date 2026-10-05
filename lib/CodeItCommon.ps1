@@ -114,6 +114,24 @@ function Find-CodeItSupersetImage([string]$runtime, [string[]]$requested) {
     return ""
 }
 
+# Get-CodeItImageAgents RUNTIME IMAGE AGENTSDIR: the comma-separated agents recorded on
+# IMAGE (its code-it.agents label), or "" if it cannot be told. Only names of known
+# agents count, so an unlabelled image or a runtime's own error text gives "".
+function Get-CodeItImageAgents([string]$runtime, [string]$image, [string]$agentsDir) {
+    $raw = if ($runtime -eq 'docker') {
+        (docker image inspect --format '{{ index .Config.Labels "code-it.agents" }}' $image 2>$null)
+    } else {
+        (container image inspect --format '{{ index .Config.Labels "code-it.agents" }}' $image 2>$null)
+    }
+    $raw = "$raw".Trim()
+    if (-not $raw -or $raw -notmatch '^[a-z0-9,-]+$') { return "" }
+    $agents = @($raw -split ',' | Where-Object { $_ })
+    foreach ($a in $agents) {
+        if (-not (Test-CodeItAgentExists $agentsDir $a)) { return "" }
+    }
+    return ($agents -join ',')
+}
+
 # Test-CodeItImageExists RUNTIME IMAGE: true if the runtime has the image.
 function Test-CodeItImageExists([string]$runtime, [string]$image) {
     try {

@@ -4,4 +4,9 @@
 USER root
 RUN apk add --no-cache libgcc libstdc++
 USER agent1
-RUN curl -fsSL https://opencode.ai/install | bash # last changed 2026-09-26
+# Download the installer before running it: with "curl | bash" a failed download
+# runs an empty script and the layer succeeds without the agent. The final test
+# fails the build if the binary still is not there.
+RUN curl -fsSL https://opencode.ai/install -o /tmp/opencode-install.sh \
+    && bash /tmp/opencode-install.sh && rm -f /tmp/opencode-install.sh \
+    && test -x ~/.opencode/bin/opencode # last changed 2026-09-26

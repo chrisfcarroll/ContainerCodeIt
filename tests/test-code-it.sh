@@ -48,7 +48,7 @@ cat > "$stub_docker/docker" <<'EOF'
 #!/bin/sh
 case "$1" in
     images) [ -n "${STUB_IMAGES_FAIL:-}" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
-    image)  case "$2" in inspect) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; *) echo "stub docker: $*" ;; esac ;;
+    image)  case "$2" in inspect) case "$*" in *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
     build)  [ -n "${STUB_BUILD_FAIL:-}" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -63,7 +63,7 @@ cat > "$stub_container/container" <<'EOF'
 case "$1" in
     image)  case "$2" in
                 ls)      echo "code-it-alpine-dotnet-node  latest" ;;
-                inspect) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;;
+                inspect) case "$*" in *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;;
                 *)       echo "stub container: $*" ;;
             esac ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
@@ -160,12 +160,14 @@ echo "4. Save dir structure is created for first run"
 assert "OpenCode config permits all actions" "$?"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}")
 assert_contains "reports OpenCode v2 config creation" "$out" "Created OpenCode v2 configuration"
-[[ -d "$save/.local/state/opencode" ]]; assert "save/.local/state/opencode created" "$?"
-[[ "$(tr -d '[:space:]' < "$save/.config/opencode/opencode.json")" == '{"$schema":"https://opencode.ai/config.json","permissions":[{"action":"*","resource":"*","effect":"allow"}]}' ]]
+[[ -d "$save/opencode-v2/.local/state/opencode" ]]; assert "save/opencode-v2/.local/state/opencode created" "$?"
+[[ "$(tr -d '[:space:]' < "$save/opencode-v2/.config/opencode/opencode.json")" == '{"$schema":"https://opencode.ai/config.json","permissions":[{"action":"*","resource":"*","effect":"allow"}]}' ]]
 assert "OpenCode v2 config allows actions without prompts" "$?"
-assert_contains "opencode-v2 mounts config" "$out" "/.config/opencode:/home/agent1/.config/opencode"
-assert_contains "opencode-v2 mounts data and auth" "$out" "/.local/share/opencode:/home/agent1/.local/share/opencode"
-assert_contains "opencode-v2 mounts shared-service state" "$out" "/.local/state/opencode:/home/agent1/.local/state/opencode"
+# opencode (v1) reads the same paths and exits on V2's config, so v2 keeps its own
+[[ ! -e "$save/.config/opencode/opencode.json" ]]; assert "opencode-v2 config is not written where opencode reads it" "$?"
+assert_contains "opencode-v2 mounts config" "$out" "/opencode-v2/.config/opencode:/home/agent1/.config/opencode"
+assert_contains "opencode-v2 mounts data and auth" "$out" "/opencode-v2/.local/share/opencode:/home/agent1/.local/share/opencode"
+assert_contains "opencode-v2 mounts shared-service state" "$out" "/opencode-v2/.local/state/opencode:/home/agent1/.local/state/opencode"
 case "$out" in
     *"/home/agent1/.claude"*) assert "opencode-v2 mounts no claude state" 1 ;;
     *)                        assert "opencode-v2 mounts no claude state" 0 ;;
@@ -387,8 +389,12 @@ esac
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent opencode-v2 2>&1)
 assert_contains "--agent opencode-v2 selects the v2 installer" "$out" "agents opencode-v2"
 assert_contains "opencode-v2 image label records the agent" "$out" "--label code-it.agents=opencode-v2"
-grep -q 'https://opencode.ai/v2/install.*--version 2.0.6' "$script_dir/agents/opencode-v2/install.dockerfile"
+grep -q 'bash /tmp/opencode-v2-install.sh --version 2.0.6' "$script_dir/agents/opencode-v2/install.dockerfile"
 assert "opencode-v2 uses the official installer with a pinned version" "$?"
+[[ "$(grep '^AGENT_BINARY=' "$script_dir/agents/opencode/config")" != "$(grep '^AGENT_BINARY=' "$script_dir/agents/opencode-v2/config")" ]]
+assert "opencode and opencode-v2 binaries do not overwrite each other" "$?"
+grep -q 'mv .*/\.opencode/bin/opencode ~/\.opencode-v2/bin/opencode' "$script_dir/agents/opencode-v2/install.dockerfile"
+assert "opencode-v2 installs to its own AGENT_BINARY path" "$?"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
 assert_contains "--agent accepts a list" "$out" "agents claude,opencode"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --list-agents)
@@ -664,6 +670,14 @@ PATH="$stub_docker:$PATH" "$code_it" --build-image --packages npm "${common_args
 # An image label that disagrees with --toolchain is called out
 out=$(STUB_IMAGE_TOOL_CHAINS=dotnet PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for tech 'dotnet'"
+# An image whose agents label lacks the chosen agent stops before docker run, readably
+# (the stub answers the agents label lookup with STUB_IMAGE_AGENTS)
+out=$(STUB_IMAGE_AGENTS=claude PATH="$stub_docker:$PATH" "$code_it" --agent opencode "${common_args[@]}" 2>&1)
+[[ "$?" != "0" ]]; assert "image without the chosen agent fails" "$?"
+assert_contains "names the agents the image has" "$out" "does not contain agent 'opencode'; it has: claude"
+[[ "$out" != *STUB-DOCKER-RUN* ]]; assert "image without the chosen agent is not run" "$?"
+out=$(STUB_IMAGE_AGENTS=claude PATH="$stub_docker:$PATH" "$code_it" --agent claude "${common_args[@]}" 2>&1)
+assert "image with the chosen agent runs" "$?"
 # Without a label (older images), fall back to the name-based guess
 out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "falls back to the image-name guess without a label" "$out" "looks built for tech 'dotnet,node'"
@@ -828,6 +842,16 @@ EOF
     out=$(PATH="$gobin:$PATH" CODE_AGENT=claude CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" -p "fix it; rm -rf /" 2>&1)
     assert_contains "headless go.sh runs the agent directly" "$out" "AGENT-claude[-p][fix it; rm -rf /]"
     [[ "$out" != *AGENT-claude*AGENT-claude* ]]; assert "headless go.sh does not also start tmux" "$?"
+    # an agent missing from the image is an error, never another agent given its arguments
+    printf 'claude=%s/claude\n' "$gobin" > "$gobin/agents"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "hi" 2>&1)
+    [[ "$?" != "0" ]]; assert "go.sh fails for an agent the image lacks" "$?"
+    assert_contains "go.sh names the missing agent" "$out" "Agent 'opencode' is not installed in this image. It has: claude"
+    [[ "$out" != *AGENT-claude* ]]; assert "go.sh does not fall back to another agent" "$?"
+    printf 'claude=%s/no-such-claude\n' "$gobin" > "$gobin/agents"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
+    [[ "$?" != "0" ]]; assert "go.sh fails when the agent binary is missing" "$?"
+    assert_contains "go.sh reports the missing binary" "$out" "no-such-claude is missing from this image"
 else
     echo "  skip: go.sh tests (no zsh)"
 fi
@@ -990,6 +1014,11 @@ assert_contains "first-run invoked the build" "$out" "STUB-FIRST-BUILD"
 [[ "$(cat "$fs/.config/opencode/new.json")" == "NEW" ]]; assert "first-run copies missing state" "$?"
 assert_contains "first-run warns that credentials are copied" "$out" "credentials"
 assert_contains "first-run prints the start command" "$out" "code-it.sh --agent opencode"
+# an agent with AGENT_SAVE_SUBDIR gets its copy in that subdirectory
+out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode-v2 \
+        --save-dir "$fs" --code-it-build "$stub_first_build" 2>&1)
+[[ "$(cat "$fs/opencode-v2/.config/opencode/config.json")" == "ORIGINAL" ]]
+assert "first-run copies opencode-v2 state into its save subdir" "$?"
 
 # (e) --dry-run makes no changes and copies nothing
 rm -f "$tmp/first-build-ran"
