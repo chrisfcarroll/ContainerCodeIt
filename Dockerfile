@@ -9,7 +9,6 @@ FROM alpine:3.24
 # agents do not, so their layers add theirs.
 RUN apk add --no-cache zsh bash curl doas
 RUN apk add --no-cache git openssh-client ripgrep
-RUN apk add --no-cache uv
 RUN apk add --no-cache vim less tmux oh-my-zsh ncurses-terminfo tzdata musl-locales
 
 # ===========================================================================
@@ -24,7 +23,7 @@ RUN apk add --no-cache vim less tmux oh-my-zsh ncurses-terminfo tzdata musl-loca
 #   BUN      Bun, the all-in-one JS runtime  (implies nothing: it bundles its
 #                                             own runtime, bundler and package
 #                                             manager)
-#   PYTHON   Python 3 (uv is installed for every image, see the base layer)
+#   PYTHON   Python 3 + uv
 #   NUGET    NuGet package cache support      (may be selected without DOTNET)
 #   NPM      npm package cache support        (may be selected without NODE)
 #
@@ -72,12 +71,13 @@ RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
     fi
 
 # --- Python ----------------------------------------------------------------
-# Python 3 from Alpine's own repos. uv (installed for every image in the base
-# layer) is the package manager: the system Python is externally managed, so
-# never pip-install into it. uv fetches musl CPython builds on x86_64/aarch64.
+# Python 3 and uv from Alpine's own repos. The system Python is externally
+# managed, so never pip-install into it. uv fetches musl CPython builds on
+# x86_64/aarch64.
 RUN . /etc/code-it-tech.env; if [ "$PYTHON" = true ]; then \
-        apk add --no-cache python3; \
+        apk add --no-cache python3 uv; \
         python3 --version; \
+        uv --version; \
     fi
 
 # ===========================================================================

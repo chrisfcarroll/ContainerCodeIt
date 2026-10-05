@@ -412,8 +412,9 @@ Assert-Contains "default build sets PYTHON=false" $r.out '--build-arg PYTHON=fal
 $r = Invoke-Scenario $codeIt (@('-stack', 'python', '-buildImage') + $commonArgs) $stubPath
 Assert-Contains "code-it -stack python delegates a PYTHON=true build" $r.out '--build-arg PYTHON=true'
 $dfText = Get-Content (Join-Path $scriptDir 'Dockerfile') -Raw
-Assert "Dockerfile installs uv for every image" ($dfText.Contains('apk add --no-cache uv'))
-Assert "Dockerfile gates python3 on PYTHON" ($dfText.Contains('if [ "$PYTHON" = true ]'))
+Assert "Dockerfile installs uv with the Python toolchain" ($dfText.Contains('apk add --no-cache python3 uv'))
+Assert "Dockerfile gates Python packages on PYTHON" ($dfText.Contains('if [ "$PYTHON" = true ]'))
+Assert "Dockerfile does not install uv in the base image" (-not ($dfText -match '(?m)^RUN apk add --no-cache uv\s*$'))
 # The base layer installs tools only: no GUI packages, no Kerberos, no edge repo.
 # Libraries come with the toolchain or agent that needs them.
 Assert "Dockerfile base installs no GUI, Kerberos or docs packages" (-not ($dfText -match 'apk .*(chromium|ttf-freefont|freetype-dev|krb5|\sdocs\s)'))

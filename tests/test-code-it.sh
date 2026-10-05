@@ -421,12 +421,13 @@ out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_
 assert_contains "default build sets PYTHON=false" "$out" "--build-arg PYTHON=false"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --stack python -b "${common_args[@]}" 2>&1)
 assert_contains "code-it --stack python delegates a PYTHON=true build" "$out" "--build-arg PYTHON=true"
-# uv is installed for every image (base layer), so the default image still has it;
-# python3 is gated on the tool chain
-grep -q "apk add --no-cache uv" "$script_dir/Dockerfile"
-assert "Dockerfile installs uv for every image" "$?"
+# Python and uv are installed together only when the Python toolchain is enabled.
+grep -q "apk add --no-cache python3 uv" "$script_dir/Dockerfile"
+assert "Dockerfile installs uv with the Python toolchain" "$?"
 grep -q 'if \[ "\$PYTHON" = true \]' "$script_dir/Dockerfile"
-assert "Dockerfile gates python3 on PYTHON" "$?"
+assert "Dockerfile gates Python packages on PYTHON" "$?"
+! grep -qE '^RUN apk add --no-cache uv[[:space:]]*$' "$script_dir/Dockerfile"
+assert "Dockerfile does not install uv in the base image" "$?"
 # The base layer installs tools only: no GUI packages, no Kerberos, no edge repo.
 # Libraries come with the toolchain or agent that needs them.
 ! grep -qE 'apk .*(chromium|ttf-freefont|freetype-dev|krb5|[[:space:]]docs[[:space:]])' "$script_dir/Dockerfile"

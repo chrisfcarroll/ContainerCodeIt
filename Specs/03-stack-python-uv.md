@@ -14,4 +14,4 @@ See 00-conventions.md. Depends on 01.
 
 ## Done when
 - In a built image (headless run): `python3 --version`, `uv --version`, `uv run --with requests python -c "import requests"` succeed.
-- Tests cover `--stack python`, the `uv` alias, and the default image still having `uv`.
+- Tests cover `--stack python`, the `uv` alias, and confirm `uv` is absent unless Python is enabled.
