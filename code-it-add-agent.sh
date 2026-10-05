@@ -123,7 +123,9 @@ If it passes the gate:
      four AGENT_CMD_* prompt-translation templates.
    - install.dockerfile: install from the official channel only, as user agent1,
      pinning versions where possible, keeping a "# last changed YYYY-MM-DD"
-     cache-bust line.
+     cache-bust line. If the agent binary needs shared libraries the base image
+     lacks, add them here (USER root, RUN apk add --no-cache ..., USER agent1):
+     the base image installs tools only, not libraries.
    - default-config/: any configuration written on first run, with the layout the
      agent expects under the container home.
 3. Add tests to tests/test-code-it.sh and tests/Test-CodeIt.ps1 (prompt translation

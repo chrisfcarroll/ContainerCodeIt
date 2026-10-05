@@ -3,19 +3,14 @@ FROM alpine:3.24
 # ===========================================================================
 # Base image: tools every sandbox needs, whatever the tech stack
 # ===========================================================================
-RUN apk add --no-cache zsh curl doas
-RUN apk add --no-cache vim chromium ttf-freefont freetype-dev
+# Only tools here: each toolchain and agent brings its own libraries. The apk
+# toolchain packages (dotnet*, nodejs, python3, ...) declare their library
+# dependencies, so apk pulls them in; the PowerShell tarball and the opencode
+# agents do not, so their layers add theirs.
+RUN apk add --no-cache zsh bash curl doas
+RUN apk add --no-cache git openssh-client ripgrep
 RUN apk add --no-cache uv
-RUN apk add --no-cache ca-certificates less ncurses-terminfo-base krb5-libs libgcc libintl libssl3 libstdc++
-RUN apk add --no-cache tzdata userspace-rcu zlib icu-libs
-RUN apk -X https://dl-cdn.alpinelinux.org/alpine/edge/main add --no-cache lttng-ust openssh-client
-RUN apk add --no-cache docs oh-my-zsh tmux
-RUN apk add --no-cache libgcc libstdc++ ripgrep bash # Claude.AI & opencode dependencies
-RUN apk add --no-cache musl-locales ncurses-terminfo
-RUN apk add --no-cache krb5
-RUN apk add --no-cache git
-RUN touch /etc/rc.conf
-RUN sed -i 's/#unicode="NO"/#unicode="NO"\nunicode="YES"/' /etc/rc.conf
+RUN apk add --no-cache vim less tmux oh-my-zsh ncurses-terminfo tzdata musl-locales
 
 # ===========================================================================
 # Tech stack selection
@@ -92,8 +87,12 @@ RUN . /etc/code-it-tech.env; if [ "$PYTHON" = true ]; then \
 # install it as a dotnet tool instead, with gcompat plus a tiny shim for two
 # glibc-only symbols its native library needs (verified on aarch64). That path
 # needs the .NET SDK, so it is skipped when DOTNET is switched off.
+# The x64 tarball is not an apk package, so add the libraries it links
+# (libgcc, libstdc++) and loads at runtime (icu-libs for globalization, libssl3
+# for TLS) ourselves.
 RUN set -e; \
     if [ "$(uname -m)" = "x86_64" ]; then \
+        apk add --no-cache libgcc libstdc++ icu-libs libssl3 && \
         curl -L https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/powershell-7.6.6-linux-musl-x64.tar.gz -o /tmp/powershell.tar.gz && \
         mkdir -p /opt/microsoft/powershell/7 && \
         tar zxf /tmp/powershell.tar.gz -C /opt/microsoft/powershell/7 && \

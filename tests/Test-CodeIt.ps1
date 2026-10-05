@@ -401,6 +401,16 @@ Assert-Contains "code-it -stack python delegates a PYTHON=true build" $r.out '--
 $dfText = Get-Content (Join-Path $scriptDir 'Dockerfile') -Raw
 Assert "Dockerfile installs uv for every image" ($dfText.Contains('apk add --no-cache uv'))
 Assert "Dockerfile gates python3 on PYTHON" ($dfText.Contains('if [ "$PYTHON" = true ]'))
+# The base layer installs tools only: no GUI packages, no Kerberos, no edge repo.
+# Libraries come with the toolchain or agent that needs them.
+Assert "Dockerfile base installs no GUI, Kerberos or docs packages" (-not ($dfText -match 'apk .*(chromium|ttf-freefont|freetype-dev|krb5|\sdocs\s)'))
+Assert "Dockerfile does not mix in the edge repository" (-not $dfText.Contains('edge/main'))
+Assert "Dockerfile base keeps musl-locales for international text" ($dfText -match 'apk add --no-cache .*musl-locales')
+Assert "PowerShell tarball layer adds the libraries it needs" ($dfText.Contains('apk add --no-cache libgcc libstdc++ icu-libs libssl3 && '))
+foreach ($a in @('opencode', 'opencode-v2')) {
+    $fragment = Get-Content (Join-Path $scriptDir "agents/$a/install.dockerfile") -Raw
+    Assert "$a install fragment adds libgcc and libstdc++" ($fragment -match '(?m)^RUN apk add --no-cache libgcc libstdc\+\+\r?$')
+}
 
 "9g. Choosing an existing image that contains the requested toolchains"
 $superDocker = Join-Path $tmp 'super-docker'

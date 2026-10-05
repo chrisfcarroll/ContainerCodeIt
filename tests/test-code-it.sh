@@ -421,6 +421,20 @@ grep -q "apk add --no-cache uv" "$script_dir/Dockerfile"
 assert "Dockerfile installs uv for every image" "$?"
 grep -q 'if \[ "\$PYTHON" = true \]' "$script_dir/Dockerfile"
 assert "Dockerfile gates python3 on PYTHON" "$?"
+# The base layer installs tools only: no GUI packages, no Kerberos, no edge repo.
+# Libraries come with the toolchain or agent that needs them.
+! grep -qE 'apk .*(chromium|ttf-freefont|freetype-dev|krb5|[[:space:]]docs[[:space:]])' "$script_dir/Dockerfile"
+assert "Dockerfile base installs no GUI, Kerberos or docs packages" "$?"
+! grep -q 'edge/main' "$script_dir/Dockerfile"
+assert "Dockerfile does not mix in the edge repository" "$?"
+grep -qE 'apk add --no-cache .*musl-locales' "$script_dir/Dockerfile"
+assert "Dockerfile base keeps musl-locales for international text" "$?"
+grep -q 'apk add --no-cache libgcc libstdc++ icu-libs libssl3 && ' "$script_dir/Dockerfile"
+assert "PowerShell tarball layer adds the libraries it needs" "$?"
+for a in opencode opencode-v2; do
+    grep -q '^RUN apk add --no-cache libgcc libstdc++$' "$script_dir/agents/$a/install.dockerfile"
+    assert "$a install fragment adds libgcc and libstdc++" "$?"
+done
 
 # ---------------------------------------------------------------------------
 echo "10g. Choosing an existing image that contains the requested toolchains"
