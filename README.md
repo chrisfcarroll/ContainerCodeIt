@@ -124,6 +124,11 @@ The image is labelled `code-it.tool-chains=<chains>` and
 `code-it.package-caches=<caches>`; `code-it` reads that label to warn if the image was
 built for a different tool-chain set, falling back to the image-name guess for images
 that predate the label.
+It is also labelled `code-it.agents=<agents>` and
+`code-it.agent-binaries=<agent>=<path>,...`. `code-it` refuses to run an agent the image
+lacks, or one the image installed at a different path from the one its
+`agents/<name>/config` now names, because the image is out of date and would run the
+wrong binary. Images that predate the binaries label get a warning instead.
 
 The included Dockerfile is based on alpine3.24, which uses musl, and the architecture (amd64 or aarch64)
 of your host machine.

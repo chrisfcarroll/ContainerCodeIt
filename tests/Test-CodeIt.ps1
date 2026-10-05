@@ -48,6 +48,10 @@ if ($onWindows) {
 if "%~1"=="images" if defined STUB_IMAGES_FAIL exit /b 1
 if "%~1"=="build" if defined STUB_BUILD_FAIL exit /b 3
 if "%~1"=="images" echo code-it-alpine-dotnet-node:latest& goto :eof
+if "%~1"=="image" if "%~2"=="inspect" echo %* | findstr /c:"code-it.agent-binaries" >nul && (
+    if defined STUB_IMAGE_AGENT_BINARIES (echo %STUB_IMAGE_AGENT_BINARIES%) else (echo.)
+    goto :eof
+)
 if "%~1"=="image" if "%~2"=="inspect" echo %* | findstr /c:"code-it.agents" >nul && (
     if defined STUB_IMAGE_AGENTS (echo %STUB_IMAGE_AGENTS%) else (echo.)
     goto :eof
@@ -65,7 +69,7 @@ echo stub docker: %*
 #!/bin/sh
 case "$1" in
     images) [ -n "$STUB_IMAGES_FAIL" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
-    image)  case "$2" in inspect) case "$*" in *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
+    image)  case "$2" in inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
     build)  [ -n "$STUB_BUILD_FAIL" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -81,6 +85,10 @@ if ($onWindows) {
     Set-Content -Path (Join-Path $stubContainer 'container.cmd') -Value @'
 @echo off
 if "%~1"=="image" if "%~2"=="ls" echo code-it-alpine-dotnet-node  latest& goto :eof
+if "%~1"=="image" if "%~2"=="inspect" echo %* | findstr /c:"code-it.agent-binaries" >nul && (
+    if defined STUB_IMAGE_AGENT_BINARIES (echo %STUB_IMAGE_AGENT_BINARIES%) else (echo.)
+    goto :eof
+)
 if "%~1"=="image" if "%~2"=="inspect" echo %* | findstr /c:"code-it.agents" >nul && (
     if defined STUB_IMAGE_AGENTS (echo %STUB_IMAGE_AGENTS%) else (echo.)
     goto :eof
@@ -99,7 +107,7 @@ echo stub container: %*
 case "$1" in
     image)  case "$2" in
                 ls)      echo "code-it-alpine-dotnet-node  latest" ;;
-                inspect) case "$*" in *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;;
+                inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;;
                 *)       echo "stub container: $*" ;;
             esac ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
@@ -165,6 +173,18 @@ foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-
     $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptDir $f), [ref]$null, [ref]$parseErrors)
     Assert "parses: $f" ($parseErrors.Count -eq 0)
 }
+# Comment-based help needs a blank line after the shebang: with the shebang directly
+# above it, Get-Help finds no help and prints only the one-line syntax.
+foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1')) {
+    $path = Join-Path $scriptDir $f
+    Assert "keeps its shebang: $f" ((Get-Content $path -TotalCount 1) -eq '#! /usr/bin/env pwsh')
+    $help = Get-Help $path -Full | Out-String
+    Assert "full help has a description: $f" ($help.Contains('DESCRIPTION') -and $help.Contains('PARAMETERS') -and ($help -split "`n").Count -gt 80)
+}
+$r = Invoke-ScenarioCommand "& '$codeIt' -help" $stubPath
+Assert "-help exit code 0" ($r.code -eq 0)
+Assert-Contains "-help shows the synopsis" $r.out 'Launches an Alpine Linux container'
+Assert-Contains "-help documents -agent" $r.out 'Run the agent defined in agents/<name>'
 
 # ---------------------------------------------------------------------------
 "2. Default dry-run: opencode agent, only its state mounted"
@@ -381,6 +401,9 @@ Assert-Contains "-agent accepts a list" $r.out 'agents claude,opencode'
 $r = Invoke-Scenario $codeItBuild @('-dryRun','-dockerfileDir',$scriptDir,'-agent','opencode-v2') $stubPath
 Assert-Contains "-agent opencode-v2 selects the v2 installer" $r.out 'agents opencode-v2'
 Assert-Contains "opencode-v2 image label records the agent" $r.out '--label code-it.agents=opencode-v2'
+Assert-Contains "opencode-v2 image label records its binary" $r.out '--label code-it.agent-binaries=opencode-v2=/home/agent1/.opencode-v2/bin/opencode'
+$r = Invoke-ScenarioCommand "& '$codeItBuild' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
+Assert-Contains "agent-binaries label lists every agent" $r.out '--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode/bin/opencode'
 $v2Install = Get-Content (Join-Path $scriptDir 'agents/opencode-v2/install.dockerfile') -Raw
 Assert "opencode-v2 uses the pinned official installer" ($v2Install.Contains('https://opencode.ai/v2/install -o') -and $v2Install -match 'HOME=\S+ bash \S+ --version 2\.0\.6')
 Assert "opencode and opencode-v2 binaries do not overwrite each other" ((Select-String -Path (Join-Path $scriptDir 'agents/opencode/config') -Pattern '^AGENT_BINARY=').Line -ne (Select-String -Path (Join-Path $scriptDir 'agents/opencode-v2/config') -Pattern '^AGENT_BINARY=').Line)
@@ -678,6 +701,27 @@ $env:STUB_IMAGE_AGENTS = 'claude'
 try { $r = Invoke-Scenario $codeIt (@('-agent','claude') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_AGENTS = $null }
 Assert "image with the chosen agent runs" ($r.code -eq 0)
+# An image whose recorded agent binary differs from the agent's definition is out of
+# date (e.g. opencode-v2 built when it shared opencode's path): stop before docker run
+$env:STUB_IMAGE_AGENTS = 'opencode,opencode-v2'
+$env:STUB_IMAGE_AGENT_BINARIES = 'opencode=/home/agent1/.opencode/bin/opencode,opencode-v2=/home/agent1/.opencode/bin/opencode'
+try { $r = Invoke-Scenario $codeIt (@('-agent','opencode-v2') + $commonArgs) $stubPath }
+finally { $env:STUB_IMAGE_AGENTS = $null; $env:STUB_IMAGE_AGENT_BINARIES = $null }
+Assert "image with an out-of-date agent binary fails" ($r.code -ne 0)
+Assert-Contains "names the recorded and expected binaries" $r.out "runs agent 'opencode-v2' from /home/agent1/.opencode/bin/opencode, but agents/opencode-v2/config now names /home/agent1/.opencode-v2/bin/opencode"
+Assert-Contains "out-of-date agent binary suggests the rebuild" $r.out 'Code-It-Build.ps1 -agent opencode,opencode-v2'
+Assert "image with an out-of-date agent binary is not run" (-not $r.out.Contains('STUB-DOCKER-RUN'))
+$env:STUB_IMAGE_AGENTS = 'opencode,opencode-v2'
+$env:STUB_IMAGE_AGENT_BINARIES = 'opencode=/home/agent1/.opencode/bin/opencode,opencode-v2=/home/agent1/.opencode-v2/bin/opencode'
+try { $r = Invoke-Scenario $codeIt (@('-agent','opencode-v2') + $commonArgs) $stubPath }
+finally { $env:STUB_IMAGE_AGENTS = $null; $env:STUB_IMAGE_AGENT_BINARIES = $null }
+Assert "image with the current agent binary runs" ($r.code -eq 0 -and $r.out.Contains("docker run -it"))
+Assert "current agent binary gives no out-of-date warning" (-not $r.out.Contains('out of date') -and -not $r.out.Contains('predates'))
+$env:STUB_IMAGE_AGENTS = 'opencode,opencode-v2'
+try { $r = Invoke-Scenario $codeIt (@('-agent','opencode-v2') + $commonArgs) $stubPath }
+finally { $env:STUB_IMAGE_AGENTS = $null }
+Assert "image without agent-binaries label still runs" ($r.code -eq 0 -and $r.out.Contains("docker run -it"))
+Assert-Contains "image without agent-binaries label warns it may be out of date" $r.out "predates code-it recording its agents' binaries"
 # Without a label (older images), fall back to the name-based guess
 $env:STUB_IMAGE_TOOL_CHAINS = ''
 try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }

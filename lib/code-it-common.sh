@@ -149,6 +149,25 @@ ci_image_agents() {
     ci_join , "$agents"
 }
 
+# ci_image_agent_binary RUNTIME IMAGE AGENT: echo the binary path IMAGE's
+# code-it.agent-binaries label (name=binary,...) records for AGENT, or nothing if the
+# label does not list AGENT. Returns 1 if the image has no such label (built before it
+# existed) or the runtime's own error text came back instead.
+ci_image_agent_binary() {
+    local runtime="$1" image="$2" agent="$3" raw="" entry
+    case "$runtime" in
+        docker)    raw=$(docker image inspect --format '{{ index .Config.Labels "code-it.agent-binaries" }}' "$image" 2>/dev/null || true) ;;
+        container) raw=$(container image inspect --format '{{ index .Config.Labels "code-it.agent-binaries" }}' "$image" 2>/dev/null || true) ;;
+    esac
+    [[ "$raw" =~ ^[a-z0-9-]+=/[^,=[:space:]]+(,[a-z0-9-]+=/[^,=[:space:]]+)*$ ]] || return 1
+    for entry in ${raw//,/ }; do
+        if [[ "${entry%%=*}" == "$agent" ]]; then
+            printf '%s' "${entry#*=}"
+            return 0
+        fi
+    done
+}
+
 # ci_image_list RUNTIME: existing image "repo:tag" names, most-recently built first.
 ci_image_list() {
     local runtime="$1"

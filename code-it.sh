@@ -555,6 +555,21 @@ if [[ "$build_image" == false ]]; then
         echo "    Choose one of those with --agent, or rebuild with code-it-build.sh --agent $code_agent,$image_agents" >&2
         exit 1
     fi
+    # An image built before a change to the agent's definition may install it somewhere
+    # else, or run another agent's binary from a shared path, so check the binary the
+    # image recorded against the one the definition names now.
+    if [[ -n "$image_agents" ]]; then
+        if image_agent_binary=$(ci_image_agent_binary "$runtime" "$image" "$code_agent"); then
+            if [[ "$image_agent_binary" != "$AGENT_BINARY" ]]; then
+                echo "Warning: image '$image' runs agent '$code_agent' from ${image_agent_binary:-an unrecorded path}, but agents/$code_agent/config now names $AGENT_BINARY." >&2
+                echo "    The image is out of date; rebuild it with code-it-build.sh --agent $image_agents" >&2
+                exit 1
+            fi
+        else
+            echo "Warning: image '$image' predates code-it recording its agents' binaries, so it may run an out-of-date '$code_agent'." >&2
+            echo "    If the agent is not the one you expect, rebuild with code-it-build.sh --agent $image_agents" >&2
+        fi
+    fi
 fi
 
 # Git author info

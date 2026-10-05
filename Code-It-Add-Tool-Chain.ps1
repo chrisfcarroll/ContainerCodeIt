@@ -1,4 +1,5 @@
 #! /usr/bin/env pwsh
+
 <#
 .SYNOPSIS
     Adds a new tool chain to this repository using code-it headless.

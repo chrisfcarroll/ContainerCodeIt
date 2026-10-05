@@ -1,4 +1,5 @@
 #! /usr/bin/env pwsh
+
 <#
 .SYNOPSIS
     Interactive first-run setup: detect, choose, build, carry over agent logins.

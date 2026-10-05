@@ -1,4 +1,5 @@
 #! /usr/bin/env pwsh
+
 <#
 .SYNOPSIS
     Builds the code-it container image, selecting toolchains, caches and agents.
@@ -178,6 +179,10 @@ try {
     $buildArgs += @('--label', "code-it.tool-chains=$($enabledToolchain -join ',')")
     $buildArgs += @('--label', "code-it.package-caches=$($enabledPackageCaches -join ',')")
     $buildArgs += @('--label', "code-it.agents=$($enabledAgents -join ',')")
+    # Each agent's binary path, so Code-It can tell when an image predates a change to
+    # an agent's definition and would run the wrong binary.
+    $agentBinaries = foreach ($a in $enabledAgents) { "$a=$(Get-CodeItAgentConfig $agentsDir $a 'AGENT_BINARY')" }
+    $buildArgs += @('--label', "code-it.agent-binaries=$($agentBinaries -join ',')")
 
     "    Building with tech $($enabledToolchain -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ',')"
     "    $runtime build $($buildArgs -join ' ') -t $image`:latest $buildContext"

@@ -235,6 +235,13 @@ done
 build_args+=(--label "code-it.tool-chains=$(ci_join , "$enabled_toolchain")")
 build_args+=(--label "code-it.package-caches=$(ci_join , "$enabled_package_caches")")
 build_args+=(--label "code-it.agents=$(ci_join , "$enabled_agents")")
+# Each agent's binary path, so code-it.sh can tell when an image predates a change to
+# an agent's definition and would run the wrong binary.
+agent_binaries=""
+for a in $enabled_agents; do
+    agent_binaries=$(ci_comma_list_add "$agent_binaries" "$a=$(ci_agent_config "$agents_dir" "$a" AGENT_BINARY)")
+done
+build_args+=(--label "code-it.agent-binaries=$(ci_join , "$agent_binaries")")
 
 echo "    Building with tech ${enabled_toolchain// /,}; package repos ${enabled_package_caches// /,}; agents ${enabled_agents// /,}"
 

@@ -48,7 +48,7 @@ cat > "$stub_docker/docker" <<'EOF'
 #!/bin/sh
 case "$1" in
     images) [ -n "${STUB_IMAGES_FAIL:-}" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
-    image)  case "$2" in inspect) case "$*" in *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
+    image)  case "$2" in inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
     build)  [ -n "${STUB_BUILD_FAIL:-}" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -63,7 +63,7 @@ cat > "$stub_container/container" <<'EOF'
 case "$1" in
     image)  case "$2" in
                 ls)      echo "code-it-alpine-dotnet-node  latest" ;;
-                inspect) case "$*" in *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;;
+                inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;;
                 *)       echo "stub container: $*" ;;
             esac ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
@@ -389,6 +389,9 @@ esac
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent opencode-v2 2>&1)
 assert_contains "--agent opencode-v2 selects the v2 installer" "$out" "agents opencode-v2"
 assert_contains "opencode-v2 image label records the agent" "$out" "--label code-it.agents=opencode-v2"
+assert_contains "opencode-v2 image label records its binary" "$out" "--label code-it.agent-binaries=opencode-v2=/home/agent1/.opencode-v2/bin/opencode"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
+assert_contains "agent-binaries label lists every agent" "$out" "--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode/bin/opencode"
 grep -q 'bash /tmp/opencode-v2-install.sh --version 2.0.6' "$script_dir/agents/opencode-v2/install.dockerfile"
 assert "opencode-v2 uses the official installer with a pinned version" "$?"
 [[ "$(grep '^AGENT_BINARY=' "$script_dir/agents/opencode/config")" != "$(grep '^AGENT_BINARY=' "$script_dir/agents/opencode-v2/config")" ]]
@@ -679,6 +682,21 @@ assert_contains "names the agents the image has" "$out" "does not contain agent 
 [[ "$out" != *STUB-DOCKER-RUN* ]]; assert "image without the chosen agent is not run" "$?"
 out=$(STUB_IMAGE_AGENTS=claude PATH="$stub_docker:$PATH" "$code_it" --agent claude "${common_args[@]}" 2>&1)
 assert "image with the chosen agent runs" "$?"
+# An image whose recorded agent binary differs from the agent's definition is out of
+# date (e.g. opencode-v2 built when it shared opencode's path): stop before docker run
+out=$(STUB_IMAGE_AGENTS=opencode,opencode-v2 STUB_IMAGE_AGENT_BINARIES=opencode=/home/agent1/.opencode/bin/opencode,opencode-v2=/home/agent1/.opencode/bin/opencode \
+    PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}" 2>&1)
+[[ "$?" != "0" ]]; assert "image with an out-of-date agent binary fails" "$?"
+assert_contains "names the recorded and expected binaries" "$out" "runs agent 'opencode-v2' from /home/agent1/.opencode/bin/opencode, but agents/opencode-v2/config now names /home/agent1/.opencode-v2/bin/opencode"
+assert_contains "out-of-date agent binary suggests the rebuild" "$out" "code-it-build.sh --agent opencode,opencode-v2"
+[[ "$out" != *STUB-DOCKER-RUN* ]]; assert "image with an out-of-date agent binary is not run" "$?"
+out=$(STUB_IMAGE_AGENTS=opencode,opencode-v2 STUB_IMAGE_AGENT_BINARIES=opencode=/home/agent1/.opencode/bin/opencode,opencode-v2=/home/agent1/.opencode-v2/bin/opencode \
+    PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}" 2>&1)
+assert "image with the current agent binary runs" "$?"
+[[ "$out" != *"out of date"* && "$out" != *predates* ]]; assert "current agent binary gives no out-of-date warning" "$?"
+out=$(STUB_IMAGE_AGENTS=opencode,opencode-v2 PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}" 2>&1)
+assert "image without agent-binaries label still runs" "$?"
+assert_contains "image without agent-binaries label warns it may be out of date" "$out" "predates code-it recording its agents' binaries"
 # Without a label (older images), fall back to the name-based guess
 out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "falls back to the image-name guess without a label" "$out" "looks built for tech 'dotnet,node'"

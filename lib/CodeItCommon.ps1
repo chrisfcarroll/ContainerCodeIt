@@ -132,6 +132,25 @@ function Get-CodeItImageAgents([string]$runtime, [string]$image, [string]$agents
     return ($agents -join ',')
 }
 
+# Get-CodeItImageAgentBinary RUNTIME IMAGE AGENT: the binary path IMAGE's
+# code-it.agent-binaries label (name=binary,...) records for AGENT; "" if the label does
+# not list AGENT; $null if the image has no such label (built before it existed) or the
+# runtime's own error text came back instead.
+function Get-CodeItImageAgentBinary([string]$runtime, [string]$image, [string]$agent) {
+    $raw = if ($runtime -eq 'docker') {
+        (docker image inspect --format '{{ index .Config.Labels "code-it.agent-binaries" }}' $image 2>$null)
+    } else {
+        (container image inspect --format '{{ index .Config.Labels "code-it.agent-binaries" }}' $image 2>$null)
+    }
+    $raw = "$raw".Trim()
+    if ($raw -notmatch '^[a-z0-9-]+=/[^,=\s]+(,[a-z0-9-]+=/[^,=\s]+)*$') { return $null }
+    foreach ($entry in ($raw -split ',')) {
+        $name, $bin = $entry -split '=', 2
+        if ($name -eq $agent) { return $bin }
+    }
+    return ""
+}
+
 # Test-CodeItImageExists RUNTIME IMAGE: true if the runtime has the image.
 function Test-CodeItImageExists([string]$runtime, [string]$image) {
     try {

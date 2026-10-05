@@ -1,4 +1,5 @@
 #! /usr/bin/env pwsh
+
 <#
 .SYNOPSIS
     Launches an Alpine Linux container with OpenCode, Claude Code, and a parameterisable tech stack.
@@ -465,6 +466,21 @@ if (-not $buildImage) {
         Write-Warning "Image '$image' does not contain agent '$codeAgent'; it has: $imageAgents."
         Write-Warning "Choose one of those with -agent, or rebuild with Code-It-Build.ps1 -agent $codeAgent,$imageAgents"
         exit 1
+    }
+    # An image built before a change to the agent's definition may install it somewhere
+    # else, or run another agent's binary from a shared path, so check the binary the
+    # image recorded against the one the definition names now.
+    if ($imageAgents) {
+        $imageAgentBinary = Get-CodeItImageAgentBinary $runtime $image $codeAgent
+        if ($null -eq $imageAgentBinary) {
+            Write-Warning "Image '$image' predates code-it recording its agents' binaries, so it may run an out-of-date '$codeAgent'."
+            Write-Warning "If the agent is not the one you expect, rebuild with Code-It-Build.ps1 -agent $imageAgents"
+        } elseif ($imageAgentBinary -ne $agentBinary) {
+            $recorded = if ($imageAgentBinary) { $imageAgentBinary } else { 'an unrecorded path' }
+            Write-Warning "Image '$image' runs agent '$codeAgent' from $recorded, but agents/$codeAgent/config now names $agentBinary."
+            Write-Warning "The image is out of date; rebuild it with Code-It-Build.ps1 -agent $imageAgents"
+            exit 1
+        }
     }
 }
 

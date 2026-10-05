@@ -1,4 +1,5 @@
 #! /usr/bin/env pwsh
+
 <#
 .SYNOPSIS
     Adds a new coding agent definition to this repository using code-it headless.
