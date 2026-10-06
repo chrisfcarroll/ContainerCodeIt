@@ -100,7 +100,7 @@ url_line=""
 if [[ -n "$url" ]]; then
     url_line="Official documentation URL: $url"
 fi
-prompt=$(cat <<EOF
+IFS= read -r -d '' prompt <<EOF || true
 You are adding a new toolchain to this ContainerCodeIt repository.
 
 Toolchain to add: $name
@@ -140,7 +140,6 @@ If it passes the gate, follow how the existing toolchains are defined as data:
 
 Do not push. Work only on the current branch.
 EOF
-)
 
 ci_add_via_code_it "$name" "$branch" "$repo" "$code_it" "$dry_run" "$prompt" && exit 0
 rc=$?
