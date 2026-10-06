@@ -13,4 +13,4 @@ RUN curl -fsSL https://opencode.ai/v2/install -o /tmp/opencode-v2-install.sh \
     && HOME=/tmp/opencode-v2 bash /tmp/opencode-v2-install.sh --version 2.0.6 --no-modify-path \
     && mkdir -p ~/.opencode-v2/bin && mv /tmp/opencode-v2/.opencode/bin/opencode ~/.opencode-v2/bin/opencode \
     && rm -rf /tmp/opencode-v2 /tmp/opencode-v2-install.sh \
-    && test -x ~/.opencode-v2/bin/opencode # last changed 2026-10-05
+    && test -x ~/.opencode-v2/bin/opencode # last changed 2026-10-06

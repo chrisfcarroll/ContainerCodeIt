@@ -5,4 +5,4 @@
 # fails the build if the binary still is not there.
 RUN curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh \
     && bash /tmp/claude-install.sh && rm -f /tmp/claude-install.sh \
-    && test -x ~/.local/bin/claude # last changed 2026-10-05
+    && test -x ~/.local/bin/claude # last changed 2026-10-06

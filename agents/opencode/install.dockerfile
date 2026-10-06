@@ -9,4 +9,4 @@ USER agent1
 # fails the build if the binary still is not there.
 RUN curl -fsSL https://opencode.ai/install -o /tmp/opencode-install.sh \
     && bash /tmp/opencode-install.sh && rm -f /tmp/opencode-install.sh \
-    && test -x ~/.opencode/bin/opencode # last changed 2026-10-05
+    && test -x ~/.opencode/bin/opencode # last changed 2026-10-06
