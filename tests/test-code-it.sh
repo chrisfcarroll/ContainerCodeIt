@@ -133,6 +133,7 @@ assert_contains "--help documents --rebuild-image" "$out" "--rebuild-image"
 assert_contains "--help documents --prompt" "$out" "--prompt, -p TEXT"
 assert_contains "--help documents --headless" "$out" "--headless"
 assert_contains "--help documents the -- separator" "$out" "-- AGENT-ARGS..."
+assert_contains "--help documents --locale" "$out" "--locale, -l LOCALE"
 
 # ---------------------------------------------------------------------------
 echo "3. Default dry-run with docker: opencode agent, only its state mounted"
@@ -1155,6 +1156,106 @@ assert "history records 'yyyymmdd image-name'" "$?"
 hdry="$tmp/histdry"; mkdir -p "$hdry"
 PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hdry" --toolchain dotnet,node >/dev/null 2>&1
 [[ ! -e "$hdry/image-history" ]]; assert "--dry-run records no history" "$?"
+
+# ---------------------------------------------------------------------------
+echo "20. Locale: --locale, defaulting to the host's"
+common_lib="$script_dir/lib/code-it-common.sh"
+# Run a command with LC_ALL and LANG unset, so only the ones it is given apply
+no_locale_env() { env -u LC_ALL -u LANG "$@"; }
+
+# Windows, macOS and POSIX spellings all become a POSIX UTF-8 name
+while IFS='|' read -r raw want; do
+    got=$(bash -c '. "$1"; ci_normalise_locale "$2"' _ "$common_lib" "$raw")
+    [[ "$got" == "$want" ]]; assert "normalise '$raw' -> '$want' (got '$got')" "$?"
+done <<'LOCALES'
+en_GB.UTF-8|en_GB.UTF-8
+en_GB.utf8|en_GB.UTF-8
+en_US.ISO-8859-1|en_US.UTF-8
+en-GB|en_GB.UTF-8
+sr-Latn-RS|sr_RS.UTF-8@latin
+sr_RS@latin|sr_RS.UTF-8@latin
+zh-Hans-CN|zh_CN.UTF-8
+zh-Hans_CN|zh_CN.UTF-8
+en_GB@rg=gbzzzz|en_GB.UTF-8
+de_DE@euro|de_DE.UTF-8
+es-419|es.UTF-8
+fr|fr.UTF-8
+C|C.UTF-8
+POSIX|C.UTF-8
+C.UTF-8|C.UTF-8
+LOCALES
+for raw in "" 123 x-IV "en GB"; do
+    bash -c '. "$1"; ci_normalise_locale "$2"' _ "$common_lib" "$raw" >/dev/null
+    [[ "$?" != "0" ]]; assert "normalise rejects '$raw'" "$?"
+done
+
+# Host detection, with stub uname (-s and -r), macOS defaults and Windows reg.exe
+locale_bin() {
+    local dir="$tmp/locale-$1"
+    mkdir -p "$dir"
+    printf '#!/bin/sh\ncase "$1" in -r) echo "%s" ;; *) echo "%s" ;; esac\n' "$3" "$2" > "$dir/uname"
+    printf '#!/bin/sh\n[ "$*" = "read -g AppleLocale" ] && echo "en_AU@rg=auzzzz"\n' > "$dir/defaults"
+    # reg.exe prints CRLF lines; it must receive /v unmangled by MSYS path conversion
+    cat > "$dir/reg.exe" <<'REG'
+#!/bin/sh
+[ "$3" = "/v" ] && [ "$4" = "LocaleName" ] || exit 1
+printf '\r\nHKEY_CURRENT_USER\\Control Panel\\International\r\n    LocaleName    REG_SZ    de-CH\r\n\r\n'
+REG
+    chmod +x "$dir/uname" "$dir/defaults" "$dir/reg.exe"
+    printf '%s' "$dir"
+}
+linux_bin=$(locale_bin linux Linux 6.1.0-generic)
+wsl_bin=$(locale_bin wsl Linux 6.18.40.1-microsoft-standard-WSL2)
+mingw_bin=$(locale_bin mingw MINGW64_NT-10.0 3.4.10)
+darwin_bin=$(locale_bin darwin Darwin 23.0.0)
+# resolve_locale PATH_PREFIX RAW [VAR=VALUE...]: ci_resolve_locale RAW in a fresh bash
+resolve_locale() {
+    local bin="$1" raw="$2"
+    shift 2
+    no_locale_env "$@" PATH="$bin:$PATH" bash -c '. "$1"; ci_resolve_locale "$2"' _ "$common_lib" "$raw"
+}
+
+out=$(resolve_locale "$linux_bin" like-host LANG=fr_FR.UTF-8)
+[[ "$out" == "fr_FR.UTF-8" ]]; assert "like-host reads LANG (got '$out')" "$?"
+out=$(resolve_locale "$linux_bin" "" LC_ALL=it_IT.UTF-8 LANG=fr_FR.UTF-8)
+[[ "$out" == "it_IT.UTF-8" ]]; assert "LC_ALL wins over LANG, and empty means like-host (got '$out')" "$?"
+out=$(resolve_locale "$linux_bin" like-host LANG=C.UTF-8)
+[[ "$out" == "C.UTF-8" ]]; assert "Linux with only C.UTF-8 falls back to C.UTF-8 (got '$out')" "$?"
+out=$(resolve_locale "$darwin_bin" like-host LANG=C.UTF-8)
+[[ "$out" == "en_AU.UTF-8" ]]; assert "macOS falls back to AppleLocale (got '$out')" "$?"
+out=$(resolve_locale "$mingw_bin" like-host)
+[[ "$out" == "de_CH.UTF-8" ]]; assert "Git Bash reads the Windows locale from the registry (got '$out')" "$?"
+out=$(resolve_locale "$wsl_bin" like-host LANG=C.UTF-8)
+[[ "$out" == "de_CH.UTF-8" ]]; assert "WSL with only C.UTF-8 reads the Windows locale (got '$out')" "$?"
+out=$(resolve_locale "$wsl_bin" like-host LANG=pt_BR.UTF-8)
+[[ "$out" == "pt_BR.UTF-8" ]]; assert "WSL with a real LANG keeps it (got '$out')" "$?"
+out=$(resolve_locale "$linux_bin" nb-NO LANG=fr_FR.UTF-8)
+[[ "$out" == "nb_NO.UTF-8" ]]; assert "an explicit locale overrides the host's (got '$out')" "$?"
+resolve_locale "$linux_bin" '!!' >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "an unreadable locale is an error" "$?"
+
+# code-it-build passes the locale as a build arg and labels the image with it
+out=$(LANG=en_GB.UTF-8 PATH="$linux_bin:$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+assert_contains "build defaults LOCALE to the host's" "$out" "--build-arg LOCALE=en_GB.UTF-8"
+assert_contains "build labels the image's locale" "$out" "--label code-it.locale=en_GB.UTF-8"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --locale de-DE 2>&1)
+assert_contains "build --locale translates a Windows name" "$out" "--build-arg LOCALE=de_DE.UTF-8"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" -l C 2>&1)
+assert_contains "build -l is the short form" "$out" "--build-arg LOCALE=C.UTF-8"
+PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --locale '!!' >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "code-it-build unreadable --locale fails" "$?"
+grep -q '^ARG LOCALE=C.UTF-8$' "$script_dir/Dockerfile" && grep -q '^ENV LANG=\$LOCALE$' "$script_dir/Dockerfile"
+assert "Dockerfile sets LANG from the LOCALE build arg" "$?"
+
+# code-it passes the locale to the run, and on to code-it-build
+out=$(LANG=en_GB.UTF-8 PATH="$linux_bin:$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node 2>&1)
+assert_contains "code-it runs with the host's locale" "$out" '-e LANG="en_GB.UTF-8"'
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node --locale sv-SE 2>&1)
+assert_contains "code-it --locale sets the run's LANG" "$out" '-e LANG="sv_SE.UTF-8"'
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node --build-image -l sv-SE 2>&1)
+assert_contains "code-it --build-image passes the locale to code-it-build" "$out" "--build-arg LOCALE=sv_SE.UTF-8"
+PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node --locale '!!' >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "code-it unreadable --locale fails" "$?"
 
 # ---------------------------------------------------------------------------
 echo

@@ -7,8 +7,9 @@
 .DESCRIPTION
     Builds the Alpine image from the Dockerfile with the requested toolchains,
     package caches and coding agents, and labels the image with that resolution so
-    Code-It.ps1 can check it rather than guess from the image name. Code-It.ps1's
-    -buildImage and -rebuildImage flags delegate here.
+    Code-It.ps1 can check it rather than guess from the image name. The image's
+    locale defaults to the host's. Code-It.ps1's -buildImage and -rebuildImage
+    flags delegate here.
 
     The agents' install layers live in agents/<name>/install.dockerfile. This script
     assembles them into the Dockerfile (replacing the "# @@CODE_IT_AGENT_INSTALLS@@"
@@ -33,6 +34,12 @@
 .PARAMETER rebuild
     Bump the "# last changed" dates in the Dockerfile and selected agent install
     fragments to today first, so the agent install layers rerun and the agents update.
+
+.PARAMETER locale
+    The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB. Default: like-host,
+    the host's own locale, read from LC_ALL or LANG, else the Windows culture (also
+    from WSL) or macOS's AppleLocale. Windows and macOS names are translated as best
+    they can be, and the codeset is always UTF-8. C.UTF-8 if it cannot be told.
 
 .PARAMETER image
     Image name to build. Default: "code-it-alpine-<chains>", a slug of the resolved
@@ -63,6 +70,8 @@ param (
     [string]$agent         = "",
     [switch]$listAgents    = $false,
     [switch]$rebuild       = $false,
+    [ArgumentCompleter({ param($c, $p, $wordToComplete) @('like-host', 'C.UTF-8') | Where-Object { $_ -like "$wordToComplete*" } })]
+    [string]$locale        = 'like-host',
     [string]$image         = "",
     [string]$dockerfileDir = $PSScriptRoot,
     [string]$runtime       = "",
@@ -103,6 +112,8 @@ if ($PSBoundParameters.ContainsKey('packageCaches')) {
 if ($null -eq $enabledPackageCaches) { exit 1 }
 $enabledAgents = Resolve-CodeItAgents $agent $agentsDir
 if ($null -eq $enabledAgents) { exit 1 }
+$containerLocale = Resolve-CodeItLocale $locale
+if (-not $containerLocale) { exit 1 }
 
 if (-not $image) { $image = CodeIt-ImageName $enabledToolchain }
 
@@ -176,15 +187,17 @@ try {
     foreach ($pc in @('nuget', 'npm')) {
         $buildArgs += @('--build-arg', "$($pc.ToUpper())=$(Bool-Arg ($enabledPackageCaches -contains $pc))")
     }
+    $buildArgs += @('--build-arg', "LOCALE=$containerLocale")
     $buildArgs += @('--label', "code-it.tool-chains=$($enabledToolchain -join ',')")
     $buildArgs += @('--label', "code-it.package-caches=$($enabledPackageCaches -join ',')")
     $buildArgs += @('--label', "code-it.agents=$($enabledAgents -join ',')")
+    $buildArgs += @('--label', "code-it.locale=$containerLocale")
     # Each agent's binary path, so Code-It can tell when an image predates a change to
     # an agent's definition and would run the wrong binary.
     $agentBinaries = foreach ($a in $enabledAgents) { "$a=$(Get-CodeItAgentConfig $agentsDir $a 'AGENT_BINARY')" }
     $buildArgs += @('--label', "code-it.agent-binaries=$($agentBinaries -join ',')")
 
-    "    Building with tech $($enabledToolchain -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ',')"
+    "    Building with tech $($enabledToolchain -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ','); locale $containerLocale"
     "    $runtime build $($buildArgs -join ' ') -t $image`:latest $buildContext"
 
     if ($dryRun) { exit 0 }

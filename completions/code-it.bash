@@ -12,7 +12,7 @@
 
 _code_it_opts='--agent -a --list-agents --opencode -o --claude -c --prompt -p --headless
     --work-dir -w --save-dir -s --image -i --build-image -b --rebuild-image -B
-    --dockerfile-dir --runtime -r --port --agent-name --toolchain -t --stack
+    --dockerfile-dir --runtime -r --port --locale -l --agent-name --toolchain -t --stack
     --package-caches --dry-run -d --help -h --'
 
 # The flags people reach for most, not the full list; add your own favourites here.
@@ -90,6 +90,8 @@ _code_it() {
             COMPREPLY=( $(compgen -W "code-it-alpine-dotnet-node $(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
         --agent-name)
             COMPREPLY=( $(compgen -W "Agent1" -- "$cur") ); return ;;
+        --locale|-l)
+            COMPREPLY=( $(compgen -W "like-host C.UTF-8" -- "$cur") ); return ;;
         --agent|-a)
             COMPREPLY=( $(compgen -W "$(ls "${BASH_SOURCE[0]%/*}/../agents" 2>/dev/null)" -- "$cur") ); return ;;
         --toolchain|-t|--stack)

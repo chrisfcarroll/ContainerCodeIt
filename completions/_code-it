@@ -79,6 +79,7 @@ _code_it() {
         (--runtime|-r)    compadd -- docker container; return ;;
         (--image|-i)      compadd -- code-it-alpine-dotnet-node; return ;;
         (--agent-name) compadd -- Agent1; return ;;
+        (--locale|-l)  compadd -- like-host C.UTF-8; return ;;
         (--agent|-a)   compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
         (--toolchain|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
@@ -87,7 +88,7 @@ _code_it() {
 
     compadd -- --agent -a --list-agents --opencode -o --claude -c --prompt -p --headless \
         --work-dir -w --save-dir -s --image -i --build-image -b --rebuild-image -B \
-        --dockerfile-dir --runtime -r --port --agent-name --toolchain -t --stack \
+        --dockerfile-dir --runtime -r --port --locale -l --agent-name --toolchain -t --stack \
         --package-caches --dry-run -d --help -h --
 }
 

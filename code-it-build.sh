@@ -26,6 +26,12 @@
 #   --rebuild                Bump the "# last changed" dates in the Dockerfile and the
 #                            selected agents' install fragments to today first, so the
 #                            agent install layers rerun and the agents update.
+#   --locale, -l LOCALE      The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB.
+#                            Default: like-host, the host's own locale, read from
+#                            LC_ALL or LANG, else macOS's AppleLocale or the Windows
+#                            user locale (also from Git Bash and WSL). Windows and
+#                            macOS names are translated as best they can be, and the
+#                            codeset is always UTF-8. C.UTF-8 if it cannot be told.
 #   --image, -i NAME         Image name to build. Default: "code-it-alpine-<chains>",
 #                            a slug of the resolved --toolchain list.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile.
@@ -35,9 +41,10 @@
 #   --dry-run, -d            Print the build command without executing it.
 #   --help, -h               Show this help message.
 #
-# The image is labelled with its toolchains and package caches
-# (code-it.tool-chains=..., code-it.package-caches=...), so code-it.sh can detect a
-# mismatch between the image and the --toolchain it was asked to run.
+# The image is labelled with its toolchains, package caches and locale
+# (code-it.tool-chains=..., code-it.package-caches=..., code-it.locale=...), so
+# code-it.sh can detect a mismatch between the image and the --toolchain it was
+# asked to run.
 
 set -euo pipefail
 
@@ -54,6 +61,7 @@ package_caches_set=false
 agents_raw=""
 list_agents=false
 rebuild=false
+locale="$CI_LOCALE_LIKE_HOST"
 image=""
 dockerfile_dir="$script_dir"
 runtime=""
@@ -81,6 +89,10 @@ while [[ $# -gt 0 ]]; do
         --rebuild)
             rebuild=true
             shift
+            ;;
+        --locale|-l)
+            locale="$2"
+            shift 2
             ;;
         --image|-i)
             image="$2"
@@ -141,6 +153,7 @@ else
     enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain") || exit 1
 fi
 enabled_agents=$(ci_resolve_agents "$agents_raw" "$agents_dir") || exit 1
+container_locale=$(ci_resolve_locale "$locale") || exit 1
 
 if [[ -z "$image" ]]; then
     image=$(ci_default_image_name "$enabled_toolchain")
@@ -229,12 +242,14 @@ for pc in nuget npm; do
     if ci_has "$enabled_package_caches" "$pc"; then v=true; else v=false; fi
     build_args+=(--build-arg "$(printf '%s' "$pc" | tr '[:lower:]' '[:upper:]')=$v")
 done
+build_args+=(--build-arg "LOCALE=$container_locale")
 
 # Label the image with its resolution, so code-it.sh can check it rather than guess
 # from the image name.
 build_args+=(--label "code-it.tool-chains=$(ci_join , "$enabled_toolchain")")
 build_args+=(--label "code-it.package-caches=$(ci_join , "$enabled_package_caches")")
 build_args+=(--label "code-it.agents=$(ci_join , "$enabled_agents")")
+build_args+=(--label "code-it.locale=$container_locale")
 # Each agent's binary path, so code-it.sh can tell when an image predates a change to
 # an agent's definition and would run the wrong binary.
 agent_binaries=""
@@ -243,7 +258,7 @@ for a in $enabled_agents; do
 done
 build_args+=(--label "code-it.agent-binaries=$(ci_join , "$agent_binaries")")
 
-echo "    Building with tech ${enabled_toolchain// /,}; package repos ${enabled_package_caches// /,}; agents ${enabled_agents// /,}"
+echo "    Building with tech ${enabled_toolchain// /,}; package repos ${enabled_package_caches// /,}; agents ${enabled_agents// /,}; locale $container_locale"
 
 # Print the command
 echo "    $runtime build ${build_args[*]} -t ${image}:latest $build_context"

@@ -94,6 +94,12 @@
     runs: spell it in full, `--print`, or pass it as `-agentArgs '-p','...'`.
     See https://code.claude.com/docs/en/cli-reference and https://opencode.ai/docs/cli/
 
+.PARAMETER locale
+    The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB. Passed to the
+    container when it runs, and to Code-It-Build.ps1 with -buildImage. Default:
+    like-host, the host's own locale (see Code-It-Build.ps1 -help); C.UTF-8 if it
+    cannot be told.
+
 .PARAMETER agentName
     Name of the agent running in the container. Used for Git author attribution and home
     directory naming. This must match the USER set in the Dockerfile for your image.
@@ -201,6 +207,8 @@ param (
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$runtime        = "",
     [int]$port              = 0,
+    [ArgumentCompleter({ param($c, $p, $wordToComplete) @('like-host', 'C.UTF-8') | Where-Object { $_ -like "$wordToComplete*" } })]
+    [string]$locale         = 'like-host',
     [string]$agentName      = "Agent1",
     [Alias('tech', 'stack')]
     [string]$toolchain     = "",
@@ -279,6 +287,8 @@ $enabledToolchain = Resolve-CodeItToolchain $toolchain
 if ($null -eq $enabledToolchain) { exit 1 }
 $enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolchain
 if ($null -eq $enabledPackageCaches) { exit 1 }
+$containerLocale = Resolve-CodeItLocale $locale
+if (-not $containerLocale) { exit 1 }
 
 # Default image name from the tool-chain list, e.g. code-it-alpine-dotnet or
 # code-it-alpine-node-bun. An explicit -image overrides it.
@@ -577,6 +587,7 @@ if ($buildImage) {
         image         = $image
         dockerfileDir = $dockerfileDir
         runtime       = $runtime
+        locale        = $containerLocale
     }
     if ($rebuildImage) { $buildShimParams['rebuild'] = $true }
     & "$PSScriptRoot/Code-It-Build.ps1" @buildShimParams
@@ -631,6 +642,7 @@ if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
 @"
     $runtime run $ttyArgs --rm -p $portMapping $containerArgs `
                 -e CODE_AGENT=`"$codeAgent`"$headlessEnvPrint `
+                -e LANG=`"$containerLocale`" `
                 -e GIT_AUTHOR_NAME=`"$gitAuthorName`" `
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
                 -e GIT_COMMITTER_NAME=`"$gitAuthorName`" `
@@ -648,6 +660,7 @@ $runRc = 0
             $containerArgs `
             $headlessEnv `
             -e CODE_AGENT="$codeAgent" `
+            -e LANG="$containerLocale" `
             -e GIT_AUTHOR_NAME="$gitAuthorName" `
             -e GIT_AUTHOR_EMAIL="$gitAuthorEmail" `
             -e GIT_COMMITTER_NAME="$gitAuthorName" `

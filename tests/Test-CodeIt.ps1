@@ -185,6 +185,7 @@ $r = Invoke-ScenarioCommand "& '$codeIt' -help" $stubPath
 Assert "-help exit code 0" ($r.code -eq 0)
 Assert-Contains "-help shows the synopsis" $r.out 'Launches an Alpine Linux container'
 Assert-Contains "-help documents -agent" $r.out 'Run the agent defined in agents/<name>'
+Assert-Contains "-help documents -locale" $r.out "The container's locale (its LANG)"
 
 # ---------------------------------------------------------------------------
 "2. Default dry-run: opencode agent, only its state mounted"
@@ -1131,6 +1132,86 @@ $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveD
 Assert "dry-run records no history" (-not (Test-Path -Path (Join-Path $hdry 'image-history')))
 
 # ---------------------------------------------------------------------------
+"12f. Locale: -locale, defaulting to the host's"
+$codeItBuild = Join-Path $scriptDir 'Code-It-Build.ps1'
+
+# Windows, macOS and POSIX spellings all become a POSIX UTF-8 name
+$localeCases = [ordered]@{
+    'en_GB.UTF-8' = 'en_GB.UTF-8'; 'en_GB.utf8' = 'en_GB.UTF-8'; 'en_US.ISO-8859-1' = 'en_US.UTF-8'
+    'en-GB' = 'en_GB.UTF-8'; 'sr-Latn-RS' = 'sr_RS.UTF-8@latin'; 'sr_RS@latin' = 'sr_RS.UTF-8@latin'
+    'zh-Hans-CN' = 'zh_CN.UTF-8'; 'zh-Hans_CN' = 'zh_CN.UTF-8'; 'en_GB@rg=gbzzzz' = 'en_GB.UTF-8'
+    'de_DE@euro' = 'de_DE.UTF-8'; 'es-419' = 'es.UTF-8'; 'fr' = 'fr.UTF-8'
+    'C' = 'C.UTF-8'; 'POSIX' = 'C.UTF-8'; 'C.UTF-8' = 'C.UTF-8'
+}
+$localeTest = @"
+. '$scriptDir/lib/CodeItCommon.ps1'
+foreach (`$raw in @('$(($localeCases.Keys + @('', '123', 'x-IV', 'en GB')) -join "','")')) { "NORM[`$raw]=[`$(ConvertTo-CodeItLocale `$raw)]" }
+# The OS layer is stubbed, so the order of the host's sources can be tested anywhere
+function Get-CodeItOsLocale { `$env:STUB_OS_LOCALE }
+`$env:LC_ALL = ''; `$env:LANG = 'fr_FR.UTF-8'; `$env:STUB_OS_LOCALE = 'de-CH'
+"LANG=[`$(Resolve-CodeItLocale 'like-host')]"
+`$env:LC_ALL = 'it_IT.UTF-8'
+"LCALL=[`$(Resolve-CodeItLocale '')]"
+`$env:LC_ALL = ''; `$env:LANG = 'C.UTF-8'
+"OS=[`$(Resolve-CodeItLocale 'like-host')]"
+`$env:STUB_OS_LOCALE = ''
+"FALLBACK=[`$(Resolve-CodeItLocale 'like-host')]"
+`$env:LANG = 'fr_FR.UTF-8'
+"EXPLICIT=[`$(Resolve-CodeItLocale 'nb-NO')]"
+"BAD=[`$(Resolve-CodeItLocale '!!' 3>`$null)]"
+"@
+$r = Invoke-ScenarioCommand $localeTest $stubPath
+foreach ($k in $localeCases.Keys) {
+    Assert-Contains "normalise '$k' -> '$($localeCases[$k])'" $r.out "NORM[$k]=[$($localeCases[$k])]"
+}
+foreach ($k in @('', '123', 'x-IV', 'en GB')) { Assert-Contains "normalise rejects '$k'" $r.out "NORM[$k]=[]" }
+Assert-Contains "like-host reads LANG" $r.out 'LANG=[fr_FR.UTF-8]'
+Assert-Contains "LC_ALL wins over LANG, and empty means like-host" $r.out 'LCALL=[it_IT.UTF-8]'
+Assert-Contains "a C.UTF-8 LANG falls through to the OS locale" $r.out 'OS=[de_CH.UTF-8]'
+Assert-Contains "nothing to tell falls back to C.UTF-8" $r.out 'FALLBACK=[C.UTF-8]'
+Assert-Contains "an explicit locale overrides the host's" $r.out 'EXPLICIT=[nb_NO.UTF-8]'
+Assert-Contains "an unreadable locale is an error" $r.out 'BAD=[]'
+
+# WSL reads the Windows locale with reg.exe (a stub here; Windows itself uses Get-Culture)
+if (-not $onWindows) {
+    $regBin = Join-Path $tmp 'stub-reg'
+    $null = New-Item -ItemType Directory -Force -Path $regBin
+    Set-Content -Path (Join-Path $regBin 'reg.exe') -Value @'
+#!/bin/sh
+[ "$3" = "/v" ] && [ "$4" = "LocaleName" ] || exit 1
+printf '\r\nHKEY_CURRENT_USER\\Control Panel\\International\r\n    LocaleName    REG_SZ    de-CH\r\n\r\n'
+'@
+    chmod +x (Join-Path $regBin 'reg.exe')
+    $r = Invoke-ScenarioCommand ". '$scriptDir/lib/CodeItCommon.ps1'; 'REG=[' + (Get-CodeItWindowsRegistryLocale) + ']'" "$regBin$sep$stubPath"
+    Assert-Contains "reads the Windows locale from reg.exe" $r.out 'REG=[de-CH]'
+}
+
+# Code-It-Build passes the locale as a build arg and labels the image with it
+$savedLang = $env:LANG; $savedLcAll = $env:LC_ALL
+$env:LANG = 'en_GB.UTF-8'; $env:LC_ALL = $null
+try {
+    $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+    Assert-Contains "build defaults LOCALE to the host's" $r.out '--build-arg LOCALE=en_GB.UTF-8'
+    Assert-Contains "build labels the image's locale" $r.out '--label code-it.locale=en_GB.UTF-8'
+    $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-locale', 'de-DE') $stubPath
+    Assert-Contains "build -locale translates a Windows name" $r.out '--build-arg LOCALE=de_DE.UTF-8'
+    $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-locale', '!!') $stubPath
+    Assert "Code-It-Build unreadable -locale fails" ($r.code -ne 0)
+
+    # Code-It passes the locale to the run, and on to Code-It-Build
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node') + $commonArgs) $stubPath
+    Assert-Contains "Code-It runs with the host's locale" $r.out '-e LANG="en_GB.UTF-8"'
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-locale', 'sv-SE') + $commonArgs) $stubPath
+    Assert-Contains "Code-It -locale sets the run's LANG" $r.out '-e LANG="sv_SE.UTF-8"'
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-buildImage', '-locale', 'sv-SE') + $commonArgs) $stubPath
+    Assert-Contains "Code-It -buildImage passes the locale to Code-It-Build" $r.out '--build-arg LOCALE=sv_SE.UTF-8'
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-locale', '!!') + $commonArgs) $stubPath
+    Assert "Code-It unreadable -locale fails" ($r.code -ne 0)
+} finally {
+    $env:LANG = $savedLang; $env:LC_ALL = $savedLcAll
+}
+
+# ---------------------------------------------------------------------------
 "13. PowerShell tab completion"
 $completion = Join-Path $scriptDir 'completions/CodeItCompletion.ps1'
 $completerTest = @"
@@ -1143,6 +1224,7 @@ function Complete([string]`$line) {
 "OPENCODE:" + (Complete "& '$codeIt' -agentArgs --se")
 "OPENCODEV2:" + (Complete "& '$codeIt' -agent opencode-v2 -agentArgs --sta")
 "RUNTIME:"  + (Complete "& '$codeIt' -runtime ")
+"LOCALE:"   + (Complete "& '$codeIt' -locale ")
 "@
 $r = Invoke-ScenarioCommand $completerTest $stubPath
 Assert "completion script loads" ($r.code -eq 0 -or $null -eq $r.code)
@@ -1150,6 +1232,7 @@ Assert-Contains "-agentArgs completes claude flags" $r.out 'CLAUDE:--model'
 Assert-Contains "-agentArgs completes opencode flags" $r.out 'OPENCODE:--session'
 Assert-Contains "-agent opencode-v2 completes v2 flags" $r.out 'OPENCODEV2:--standalone'
 Assert-Contains "-runtime completes its values" $r.out 'RUNTIME:docker container'
+Assert-Contains "-locale completes like-host" $r.out 'LOCALE:like-host C.UTF-8'
 
 # ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $tmp -EA Silent

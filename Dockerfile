@@ -312,6 +312,11 @@ ENV GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL
 #
 RUN if [ -n "$GIT_AUTHOR_NAME"  ] ; then git config --global user.name "Agent1 for $GIT_AUTHOR_NAME" ; fi
 RUN if [ -n "$GIT_AUTHOR_EMAIL" ] ; then git config --global user.email "$GIT_AUTHOR_EMAIL" ; fi
+# Locale. code-it-build sets LOCALE to the host's locale by default (--locale
+# like-host), always a UTF-8 one; musl-locales, in the base layer, supplies the
+# translations it has. Declared this low so changing it rebuilds only this layer.
+ARG LOCALE=C.UTF-8
+ENV LANG=$LOCALE
 # Run go.sh directly, not via `zsh -c`, so that arguments passed to the container
 # after the image name arrive as "$@" and can be forwarded to the coding agent.
 ENTRYPOINT ["/home/agent1/go.sh"]

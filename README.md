@@ -92,6 +92,7 @@ package cache, tests, and a commit.
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
+| `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
 | `--toolchain LIST`, `-t` | `-toolchain LIST` | remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
@@ -115,6 +116,7 @@ chains and package caches). They accept the same logical parameters:
 | `--agent, -a LIST` | `-agent LIST` | `opencode,claude` | Agents to install |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
 | `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today, to force agent curl-install refreshes. |
+| `--locale`, `-l` | `-locale` | `like-host` | The image's locale (`LANG`). See [Locale](#locale) |
 | `--image`, `-i` | `-image` | `code-it-alpine-<chains>` | Image name to build |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
@@ -132,6 +134,30 @@ wrong binary. Images that predate the binaries label get a warning instead.
 
 The included Dockerfile is based on alpine3.24, which uses musl, and the architecture (amd64 or aarch64)
 of your host machine.
+
+### Locale
+
+By default the container gets the host's locale, so .NET, Node.js and other tools
+that read `LANG` format dates and numbers the way they do on your host.
+`--locale like-host` (the default) reads, in order:
+
+1. `LC_ALL`, then `LANG`, unless they are only `C` or `POSIX`
+2. macOS: `defaults read -g AppleLocale`
+3. Windows: the user's culture. PowerShell uses `Get-Culture`; Git Bash, MSYS2,
+   Cygwin and WSL (whose distro `LANG` is often only `C.UTF-8`) read
+   `HKCU\Control Panel\International\LocaleName` with `reg.exe`
+
+Windows and macOS spell locales differently from Linux, so the name is translated as
+best it can be, and the codeset is always UTF-8: `en-GB` becomes `en_GB.UTF-8`,
+`sr-Latn-RS` becomes `sr_RS.UTF-8@latin`, `zh-Hans-CN` becomes `zh_CN.UTF-8`, and
+macOS's `en_GB@rg=gbzzzz` becomes `en_GB.UTF-8`. If nothing can be told, it is
+`C.UTF-8`. Pass `--locale` / `-locale` with any of those spellings to choose one.
+
+`code-it-build` bakes the locale into the image as `LANG` (and labels the image
+`code-it.locale=<locale>`); `code-it` also passes it to each run as `-e LANG=...`, so
+a different `--locale` takes effect without a rebuild. Alpine's `musl-locales`
+supplies the translated messages it has; musl itself has no locale-specific
+collation.
 
 ## Toolchains
 

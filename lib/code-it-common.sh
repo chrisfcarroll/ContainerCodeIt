@@ -11,6 +11,7 @@
 #   ci_has LIST ITEM                                  return 0 if ITEM is in LIST
 #   ci_detect_runtime REQUESTED                       -> docker|container, or return 1
 #   ci_join COMMA LIST                                space list -> comma list
+#   ci_resolve_locale RAW                             -> e.g. en_GB.UTF-8, or return 1
 #
 # Empty RAW means "use the defaults"; an unknown name prints a warning to stderr
 # and returns 1, so the caller can exit.
@@ -20,6 +21,9 @@ CI_KNOWN_TOOLCHAIN="dotnet node bun python"
 CI_KNOWN_PACKAGE_CACHES="nuget npm bun"
 CI_CONTAINER_PORT=3000
 CI_DEFAULT_AGENTS="opencode claude"
+# --locale's default: match the host. C.UTF-8 when the host's locale cannot be told.
+CI_LOCALE_LIKE_HOST="like-host"
+CI_FALLBACK_LOCALE="C.UTF-8"
 
 ci_comma_list_add() {
     case " $1 " in
@@ -479,6 +483,87 @@ ci_add_via_code_it() {
         echo "Warning: code-it exited $rc (the agent may have refused the gate or failed)." >&2
     fi
     return "$rc"
+}
+
+# ci_normalise_locale RAW: a POSIX locale name for the container, always UTF-8, from
+# a POSIX (en_GB.UTF-8, sr_RS@latin), Windows (en-GB, sr-Latn-RS, zh-Hans-CN) or macOS
+# (en_GB@rg=gbzzzz, zh-Hans_CN) spelling. C and POSIX become C.UTF-8. Return 1 if RAW
+# does not start with a 2- or 3-letter language code. A script subtag is dropped,
+# except Latn, which becomes the @latin modifier; numeric regions (es-419) are dropped.
+ci_normalise_locale() {
+    local raw="$1" modifier="" lang="" region="" part
+    raw=${raw%$'\r'}
+    case "$raw" in
+        C|POSIX|C.*|POSIX.*) printf '%s' "$CI_FALLBACK_LOCALE"; return 0 ;;
+    esac
+    if [[ "$raw" == *@* ]]; then
+        modifier=${raw#*@}
+        raw=${raw%%@*}
+        # macOS's @rg=... and @currency=... keywords, and @euro, mean nothing to a UTF-8 locale
+        [[ "$modifier" =~ ^[A-Za-z]+$ && "$modifier" != euro ]] || modifier=""
+    fi
+    raw=${raw%%.*}
+    local -a parts
+    IFS='-_' read -r -a parts <<< "$raw"
+    lang=${parts[0]:-}
+    [[ "$lang" =~ ^[A-Za-z]{2,3}$ ]] || return 1
+    lang=$(printf '%s' "$lang" | tr '[:upper:]' '[:lower:]')
+    for part in "${parts[@]:1}"; do
+        if [[ "$part" =~ ^[A-Za-z]{4}$ ]]; then
+            [[ "$part" =~ ^[Ll][Aa][Tt][Nn]$ && -z "$modifier" ]] && modifier="latin"
+        elif [[ -z "$region" && "$part" =~ ^[A-Za-z]{2}$ ]]; then
+            region=$(printf '%s' "$part" | tr '[:lower:]' '[:upper:]')
+        fi
+    done
+    printf '%s%s.UTF-8%s' "$lang" "${region:+_$region}" "${modifier:+@$modifier}"
+}
+
+# ci_windows_locale: the Windows user's locale name (e.g. en-GB) from the registry, or
+# nothing. Works from Git Bash, MSYS2, Cygwin and WSL, wherever reg.exe is on the PATH.
+# MSYS would otherwise rewrite the /v switch as a path.
+ci_windows_locale() {
+    command -v reg.exe >/dev/null 2>&1 || return 0
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+        reg.exe query 'HKCU\Control Panel\International' /v LocaleName 2>/dev/null \
+        | tr -d '\r' | awk '$1 == "LocaleName" { print $NF; exit }'
+}
+
+# ci_host_locale: the host's locale, as the host spells it, or nothing. LC_ALL, then
+# LANG, unless they are just C or POSIX, which say nothing about the user; then the
+# OS's own setting: macOS's AppleLocale, or the Windows user locale (from Windows
+# bashes and from WSL, whose distro LANG is often only C.UTF-8).
+ci_host_locale() {
+    local v
+    for v in "${LC_ALL:-}" "${LANG:-}"; do
+        case "$v" in ""|C|POSIX|C.*|POSIX.*) ;; *) printf '%s' "$v"; return 0 ;; esac
+    done
+    case "$(uname -s)" in
+        Darwin)
+            defaults read -g AppleLocale 2>/dev/null || true
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            ci_windows_locale
+            ;;
+        Linux)
+            case "$(uname -r)" in *[Mm]icrosoft*) ci_windows_locale ;; esac
+            ;;
+    esac
+}
+
+# ci_resolve_locale RAW: the container locale for --locale RAW. Empty or like-host
+# means the host's locale, falling back to C.UTF-8 if it cannot be told or read.
+# Anything else must be a locale name; an unreadable one warns and returns 1.
+ci_resolve_locale() {
+    local raw="$1" host
+    if [[ -z "$raw" || "$raw" == "$CI_LOCALE_LIKE_HOST" ]]; then
+        host=$(ci_host_locale)
+        ci_normalise_locale "$host" 2>/dev/null || printf '%s' "$CI_FALLBACK_LOCALE"
+        return 0
+    fi
+    if ! ci_normalise_locale "$raw"; then
+        echo "Warning: Unknown locale '$raw'. Use a name like en_GB.UTF-8 or en-GB, C.UTF-8, or $CI_LOCALE_LIKE_HOST." >&2
+        return 1
+    fi
 }
 
 # ci_detect_runtime REQUESTED: echo the runtime to use, warning and returning 1 if

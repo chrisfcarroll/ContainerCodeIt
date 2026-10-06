@@ -8,6 +8,7 @@
         CodeIt-ImageName CHAINS                -> code-it-alpine-<chains>
         Detect-CodeItRuntime REQUESTED         -> docker|container, or $null on error
         Bool-Arg BOOL                          -> 'true'|'false'
+        Resolve-CodeItLocale RAW               -> e.g. en_GB.UTF-8, or $null on error
 #>
 
 $script:CodeItDefaultToolchain  = @('dotnet', 'node')
@@ -18,6 +19,9 @@ $script:CodeItKnownPackageCaches = @('nuget', 'npm', 'bun')
 $script:CodeItToolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun'; 'uv' = 'python' }
 $script:CodeItContainerPort      = 3000
 $script:CodeItDefaultAgents      = @('opencode', 'claude')
+# -locale's default: match the host. C.UTF-8 when the host's locale cannot be told.
+$script:CodeItLocaleLikeHost     = 'like-host'
+$script:CodeItFallbackLocale     = 'C.UTF-8'
 
 function Split-CodeItList([string]$list) {
     # The unary comma keeps an empty result as an array, not $null
@@ -435,4 +439,86 @@ function Detect-CodeItRuntime([string]$runtime) {
         return $null
     }
     return $runtime
+}
+
+# A POSIX locale name for the container, always UTF-8, from a POSIX (en_GB.UTF-8,
+# sr_RS@latin), Windows (en-GB, sr-Latn-RS, zh-Hans-CN) or macOS (en_GB@rg=gbzzzz,
+# zh-Hans_CN) spelling. C and POSIX become C.UTF-8. $null if $raw does not start with
+# a 2- or 3-letter language code. A script subtag is dropped, except Latn, which
+# becomes the @latin modifier; numeric regions (es-419) are dropped.
+function ConvertTo-CodeItLocale([string]$raw) {
+    $raw = $raw.TrimEnd("`r")
+    if ($raw -cmatch '^(C|POSIX)(\..*)?$') { return $script:CodeItFallbackLocale }
+    $modifier = ''
+    if ($raw.Contains('@')) {
+        $modifier = $raw.Substring($raw.IndexOf('@') + 1)
+        $raw = $raw.Substring(0, $raw.IndexOf('@'))
+        # macOS's @rg=... and @currency=... keywords, and @euro, mean nothing to a UTF-8 locale
+        if ($modifier -notmatch '^[A-Za-z]+$' -or $modifier -eq 'euro') { $modifier = '' }
+    }
+    $parts = @(($raw -split '\.')[0] -split '[-_]')
+    if ($parts[0] -notmatch '^[A-Za-z]{2,3}$') { return $null }
+    $lang = $parts[0].ToLowerInvariant()
+    $region = ''
+    foreach ($part in ($parts | Select-Object -Skip 1)) {
+        if ($part -match '^[A-Za-z]{4}$') {
+            if ($part -eq 'Latn' -and -not $modifier) { $modifier = 'latin' }
+        } elseif (-not $region -and $part -match '^[A-Za-z]{2}$') {
+            $region = $part.ToUpperInvariant()
+        }
+    }
+    $name = $lang
+    if ($region)   { $name += "_$region" }
+    $name += '.UTF-8'
+    if ($modifier) { $name += "@$modifier" }
+    return $name
+}
+
+# The Windows user's locale name (e.g. en-GB) from the registry, or nothing. For WSL,
+# where reg.exe is on the PATH but Get-Culture reads the Linux side.
+function Get-CodeItWindowsRegistryLocale {
+    if (-not (Get-Command reg.exe -EA Silent)) { return '' }
+    $line = reg.exe query 'HKCU\Control Panel\International' /v LocaleName 2>$null |
+        Where-Object { $_ -match '^\s*LocaleName\s' } | Select-Object -First 1
+    if ($line) { return ($line.Trim() -split '\s+')[-1] }
+    return ''
+}
+
+# The OS's own locale setting, as the OS spells it, or nothing: the Windows culture
+# (also from WSL, whose distro LANG is often only C.UTF-8), or macOS's AppleLocale.
+function Get-CodeItOsLocale {
+    if ($env:OS -eq 'Windows_NT') { return (Get-Culture).Name }
+    if ($IsMacOS -eq $true) {
+        return "$(defaults read -g AppleLocale 2>$null)".Trim()
+    }
+    $osRelease = '/proc/sys/kernel/osrelease'
+    if ((Test-Path $osRelease) -and ((Get-Content $osRelease -Raw) -match 'microsoft')) {
+        return Get-CodeItWindowsRegistryLocale
+    }
+    return ''
+}
+
+# The host's locale, as the host spells it, or nothing. LC_ALL, then LANG, unless they
+# are just C or POSIX, which say nothing about the user; then the OS's own setting.
+function Get-CodeItHostLocale {
+    foreach ($v in @($env:LC_ALL, $env:LANG)) {
+        if ($v -and $v -cnotmatch '^(C|POSIX)(\..*)?$') { return $v }
+    }
+    return Get-CodeItOsLocale
+}
+
+# The container locale for -locale $raw. Empty or like-host means the host's locale,
+# falling back to C.UTF-8 if it cannot be told or read. Anything else must be a locale
+# name; an unreadable one warns and returns $null.
+function Resolve-CodeItLocale([string]$raw) {
+    if (-not $raw -or $raw -eq $script:CodeItLocaleLikeHost) {
+        $hostLocale = Get-CodeItHostLocale
+        $resolved = if ($hostLocale) { ConvertTo-CodeItLocale $hostLocale }
+        if ($resolved) { return $resolved } else { return $script:CodeItFallbackLocale }
+    }
+    $resolved = ConvertTo-CodeItLocale $raw
+    if (-not $resolved) {
+        Write-Warning "Unknown locale '$raw'. Use a name like en_GB.UTF-8 or en-GB, C.UTF-8, or $($script:CodeItLocaleLikeHost)."
+    }
+    return $resolved
 }

@@ -61,6 +61,11 @@
 #                            The Apple container CLI cannot, so on macOS 0 is resolved by
 #                            this script to a free port, starting at 3000, then a random
 #                            high port if 3000-3010 are all taken.
+#   --locale, -l LOCALE      The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB.
+#                            Passed to the container when it runs, and to
+#                            code-it-build.sh with --build-image. Default: like-host,
+#                            the host's own locale (see code-it-build.sh --help);
+#                            C.UTF-8 if it cannot be told.
 #   --agent-name NAME        Name of the agent running in the container. Used for Git author
 #                            attribution and home directory naming. Must match the USER set in
 #                            the Dockerfile. Default: "Agent1"
@@ -193,6 +198,7 @@ rebuild_image=false
 dockerfile_dir="$script_dir"
 runtime=""
 port=0
+locale="$CI_LOCALE_LIKE_HOST"
 agent_name="Agent1"
 dry_run=false
 container_args=""
@@ -262,6 +268,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --port)
             port="$2"
+            shift 2
+            ;;
+        --locale|-l)
+            locale="$2"
             shift 2
             ;;
         --agent-name)
@@ -348,6 +358,7 @@ AGENT_SAVE_SUBDIR=""
 # by --toolchain (dotnet->nuget, node->npm). An unknown name is a hard error.
 enabled_toolchain=$(ci_resolve_toolchain "$toolchain") || exit 1
 enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_toolchain") || exit 1
+container_locale=$(ci_resolve_locale "$locale") || exit 1
 
 toolchain_has()    { ci_has "$enabled_toolchain" "$1"; }
 package_cache_has() { ci_has "$enabled_package_caches" "$1"; }
@@ -678,6 +689,7 @@ if [[ "$build_image" == true ]]; then
         --image "$image"
         --dockerfile-dir "$dockerfile_dir"
         --runtime "$runtime"
+        --locale "$container_locale"
     )
     if [[ "$rebuild_image" == true ]]; then
         build_shim_args+=(--rebuild)
@@ -748,6 +760,7 @@ cat <<EOF
     $runtime run ${tty_args[*]} --rm -p $port_mapping \\
                 $container_args \\
                 -e CODE_AGENT="$code_agent" \\$headless_env_print
+                -e LANG="$container_locale" \\
                 -e GIT_AUTHOR_NAME="$git_author_name" \\
                 -e GIT_AUTHOR_EMAIL="$git_author_email" \\
                 -e GIT_COMMITTER_NAME="$git_author_name" \\
@@ -765,6 +778,7 @@ run_rc=0
             $container_args \
             ${headless_env[@]+"${headless_env[@]}"} \
             -e CODE_AGENT="$code_agent" \
+            -e LANG="$container_locale" \
             -e GIT_AUTHOR_NAME="$git_author_name" \
             -e GIT_AUTHOR_EMAIL="$git_author_email" \
             -e GIT_COMMITTER_NAME="$git_author_name" \
