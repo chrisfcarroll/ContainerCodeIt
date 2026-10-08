@@ -192,6 +192,8 @@ RUN git config --global alias.root 'rev-parse --show-toplevel'
 RUN git config --global alias.lg  "log --color --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --graph"
 RUN git config --global alias.glog "log --color --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit"
 RUN git config --global core.autocrlf input
+RUN git config --global feature.manyFiles true
+RUN git config --global core.fsmonitor true
 RUN cat <<'EOF' >> ~/.zshrc
 export PS1='%2~]'
 alias glogg='git log --color --pretty=format:"%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset" --abbrev-commit --graph'
@@ -230,6 +232,15 @@ RUN cat <<'EOF' >> ~/go.sh
 # it answers, exits, and the container exits with the agent's exit code.
 git config --global --add safe.directory /work
 for d in /work/*/ ; do git config --global --add safe.directory "$d" ; done
+# Index format is repository-local, so upgrade each mounted repository once at
+# startup. Skip nested directories that resolve to the same repository root.
+for repo in /work /work/*/ ; do
+    [ -d "$repo" ] || continue
+    if [ -z "$(git -C "$repo" rev-parse --show-prefix 2>/dev/null)" ] &&
+       git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+        git -C "$repo" update-index --index-version 4
+    fi
+done
 # Seed the writable package caches from the launcher's read-only host-cache
 # mounts (if any), so downloads are reused without writing to the host caches.
 if [ -d "$HOME/.npm-host" ] ; then

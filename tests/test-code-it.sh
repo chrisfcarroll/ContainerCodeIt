@@ -440,6 +440,10 @@ assert "Dockerfile base installs no GUI, Kerberos or docs packages" "$?"
 assert "Dockerfile does not mix in the edge repository" "$?"
 grep -qE 'apk add --no-cache .*musl-locales' "$script_dir/Dockerfile"
 assert "Dockerfile base keeps musl-locales for international text" "$?"
+grep -q '^RUN git config --global feature.manyFiles true$' "$script_dir/Dockerfile"
+assert "Dockerfile enables Git's many-files feature globally" "$?"
+grep -q '^RUN git config --global core.fsmonitor true$' "$script_dir/Dockerfile"
+assert "Dockerfile enables Git filesystem monitoring globally" "$?"
 grep -q 'apk add --no-cache libgcc libstdc++ icu-libs libssl3 && ' "$script_dir/Dockerfile"
 assert "PowerShell tarball layer adds the libraries it needs" "$?"
 for a in opencode opencode-v2; do
@@ -851,9 +855,17 @@ for a in "$@"; do last="$a"; done
 eval "$last"
 EOF
     chmod +x "$gobin/tmux"
-    printf '#!/bin/sh\nexit 0\n' > "$gobin/git"; chmod +x "$gobin/git"
+    cat > "$gobin/git" <<'EOF'
+#!/bin/sh
+if [ -n "${GIT_CALLS:-}" ]; then printf '%s\n' "$*" >> "$GIT_CALLS"; fi
+exit 0
+EOF
+    chmod +x "$gobin/git"
 
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
+    git_calls="$tmp/git-calls"
+    : > "$git_calls"
+    out=$(PATH="$gobin:$PATH" GIT_CALLS="$git_calls" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
+    assert_contains "go.sh upgrades mounted repo indexes to version 4" "$(<"$git_calls")" "-C $gowork/repo/ update-index --index-version 4"
     assert_contains "go.sh runs the chosen agent in tmux" "$out" "AGENT-claude"
     out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "explain this repo" 2>&1)
     assert_contains "go.sh forwards arguments through tmux, unsplit" "$out" "AGENT-opencode[--prompt][explain this repo]"
