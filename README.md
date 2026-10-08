@@ -320,6 +320,19 @@ docker run -it --rm \
 
 - Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it-build --rebuild` / `Code-It-Build.ps1 -rebuild`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
+- Git configuration and indexing on Windows
+  - When Git alternates between Windows and the Linux container on a bind-mounted
+    working tree, the two filesystems can report different file metadata. Git then
+    rechecks files whose cached stat information no longer matches, which can make
+    `git status` appear to re-index the whole repository after each switch. This 
+    becomes noticeable in large repositories. 
+    The image enables Git's built-in filesystem monitor and `feature.manyFiles`, and
+    upgrades mounted repository indexes to index format 4 when the container starts.
+    On Windows, use a recent Git for Windows (2.37 or newer) and enable the same optimizations:
+    ```powershell
+    git config --global core.fsmonitor true
+    git config --global feature.manyFiles true
+    ```
 
 ## Runtime detection
 
