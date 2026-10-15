@@ -19,6 +19,10 @@
 # Usage:
 #   ./code-it.sh [OPTIONS] [PROMPT] [-- AGENT-ARGS...]
 #
+# Arguments go to three places: code-it's own options; the container runtime, with
+# --env, --env-file and --run-arg (each repeatable, one argument each, so nothing is
+# word-split); and the coding agent, everything after --.
+#
 # Options:
 #   --agent, -a NAME         Run the agent defined in agents/NAME. Only that agent's
 #                            state is mounted.
@@ -36,6 +40,18 @@
 #                            e.g. -- --model opus --continue. See
 #                              https://code.claude.com/docs/en/cli-reference
 #                              https://opencode.ai/docs/cli/
+#   --env, -e NAME[=VALUE]   Set an environment variable in the container. Repeatable.
+#                            A bare NAME passes the host's value of NAME, if it is set,
+#                            e.g. --env HTTPS_PROXY --env NO_PROXY=localhost
+#   --env-file FILE          Read environment variables from FILE, in the runtime's
+#                            KEY=VALUE format. Repeatable.
+#   --run-arg ARG            Pass ARG to `docker run` (or `container run`) verbatim.
+#                            Repeatable; one argument each, so an option and its value
+#                            are two --run-args, or one if joined with =, e.g.
+#                              --run-arg --network=host --run-arg --dns --run-arg 10.0.0.2
+#                            The runtime's own flags differ, so these are not portable
+#                            between docker and container. --docker-arg is an alias.
+#                            Arguments in SAVE-DIR/run-args (see Notes) come first.
 #   --work-dir, -w DIR       Host directory path to mount as /work in the container.
 #                            Defaults to "."
 #   --save-dir, -s DIR       Host directory for storing agent configuration and state volumes.
@@ -119,6 +135,15 @@
 #   - The prompt and any pass-through arguments are translated into each agent's own
 #     command line: --prompt becomes `claude PROMPT` or `opencode --prompt PROMPT`, and
 #     with --headless it becomes `claude -p PROMPT` or `opencode run PROMPT`
+#   - SAVE-DIR/run-args (default ~/.config/code-it/run-args), if it exists, holds run
+#     arguments for every run, like devcontainer.json's runArgs: one argument per line,
+#     not quoted; blank lines and lines starting with # are ignored. e.g.
+#         # Behind the office proxy
+#         -e
+#         HTTPS_PROXY
+#         --dns=10.0.0.2
+#     They come before --env, --env-file and --run-arg, which come after code-it's own,
+#     so with docker a later -e of the same name wins.
 #   - Git author name and email are automatically captured from environment or git config
 #   - Volume mounts preserve both Claude and OpenCode state between container runs, so you
 #     can destroy the container and create a new one without logging in again
@@ -207,6 +232,8 @@ prompt_set=false
 headless=false
 agent_args=()
 list_agents=false
+# --env, --env-file and --run-arg, in command-line order, as container run arguments
+cli_run_args=()
 
 # Tech stack (see --help). Empty means "use the remembered image, else the defaults":
 # dotnet,node and the package repos they imply (dotnet->nuget, node->npm).
@@ -286,6 +313,26 @@ while [[ $# -gt 0 ]]; do
         --package-caches)
             package_caches="$2"
             package_caches_explicit=true
+            shift 2
+            ;;
+        --env|-e)
+            if ! ci_valid_env_spec "$2"; then
+                echo "Warning: --env needs NAME or NAME=VALUE, not '$2'." >&2
+                exit 1
+            fi
+            cli_run_args+=(-e "$2")
+            shift 2
+            ;;
+        --env-file)
+            if [[ ! -f "$2" ]]; then
+                echo "Warning: --env-file not found: $2" >&2
+                exit 1
+            fi
+            cli_run_args+=(--env-file "$2")
+            shift 2
+            ;;
+        --run-arg|--docker-arg)
+            cli_run_args+=("$2")
             shift 2
             ;;
         --prompt|-p)
@@ -516,6 +563,7 @@ fi
 save_dir=$(abs_dir "$save_dir")
 agent_save_dir=$(abs_dir "$agent_save_dir")
 history_file="$save_dir/image-history"
+run_args_file="$save_dir/run-args"
 
 echo "    Checking $image ..."
 
@@ -734,6 +782,48 @@ else
     headless_env_print=""
 fi
 
+# Extra run arguments: SAVE-DIR/run-args, then --env, --env-file and --run-arg. They
+# follow code-it's own, so they can override them. Docker reads a bare `-e NAME` from
+# the host's environment itself; for the Apple container CLI, code-it does, keeping the
+# printed command free of the value.
+extra_run_args=()
+while IFS= read -r arg; do
+    extra_run_args+=("$arg")
+done < <(ci_read_run_args "$run_args_file")
+if [[ ${#extra_run_args[@]} -gt 0 ]]; then
+    echo "    Using run arguments from $run_args_file"
+fi
+extra_run_args+=(${cli_run_args[@]+"${cli_run_args[@]}"})
+# Printed one option per line: an argument starting with - begins a new line
+extra_run_args_print=""
+for arg in ${extra_run_args[@]+"${extra_run_args[@]}"}; do
+    if [[ "$arg" == -* ]]; then
+        [[ -n "$extra_run_args_print" ]] && extra_run_args_print+=" \\"
+        extra_run_args_print+="
+                $(printf '%q' "$arg")"
+    else
+        extra_run_args_print+=" $(printf '%q' "$arg")"
+    fi
+done
+[[ -n "$extra_run_args_print" ]] && extra_run_args_print+=" \\"
+run_extra_args=()
+env_flag=""
+for arg in ${extra_run_args[@]+"${extra_run_args[@]}"}; do
+    if [[ -n "$env_flag" ]]; then
+        if [[ "$runtime" == "container" && "$arg" != *=* ]] && ci_valid_env_spec "$arg"; then
+            [[ -n "${!arg+set}" ]] && run_extra_args+=("$env_flag" "$arg=${!arg}")
+        else
+            run_extra_args+=("$env_flag" "$arg")
+        fi
+        env_flag=""
+    elif [[ "$arg" == -e || "$arg" == --env ]]; then
+        env_flag="$arg"
+    else
+        run_extra_args+=("$arg")
+    fi
+done
+[[ -n "$env_flag" ]] && run_extra_args+=("$env_flag")
+
 agent_cmd_print=""
 for arg in ${agent_cmd[@]+"${agent_cmd[@]}"}; do
     agent_cmd_print+=" $(printf '%q' "$arg")"
@@ -765,7 +855,7 @@ cat <<EOF
                 -e GIT_AUTHOR_EMAIL="$git_author_email" \\
                 -e GIT_COMMITTER_NAME="$git_author_name" \\
                 -e GIT_COMMITTER_EMAIL="$git_author_email" \\
-                -v "$work_dir_to_mount:/work" \\$agent_mounts_print$cache_mounts_print
+                -v "$work_dir_to_mount:/work" \\$agent_mounts_print$cache_mounts_print$extra_run_args_print
                 ${image}:latest$agent_cmd_print
 EOF
 
@@ -786,6 +876,7 @@ run_rc=0
             -v "$work_dir_to_mount:/work" \
             "${agent_mounts[@]+"${agent_mounts[@]}"}" \
             "${cache_mounts[@]+"${cache_mounts[@]}"}" \
+            ${run_extra_args[@]+"${run_extra_args[@]}"} \
     "${image}:latest" ${agent_cmd[@]+"${agent_cmd[@]}"} || run_rc=$?
 
 # Remember the image used, so later runs can default their toolchains to it.

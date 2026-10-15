@@ -12,6 +12,8 @@
 #   ci_detect_runtime REQUESTED                       -> docker|container, or return 1
 #   ci_join COMMA LIST                                space list -> comma list
 #   ci_resolve_locale RAW                             -> e.g. en_GB.UTF-8, or return 1
+#   ci_read_run_args FILE                             -> the file's run args, one per line
+#   ci_valid_env_spec SPEC                            return 0 if SPEC is NAME[=VALUE]
 #
 # Empty RAW means "use the defaults"; an unknown name prints a warning to stderr
 # and returns 1, so the caller can exit.
@@ -334,6 +336,26 @@ ci_agent_config() {
     esac
     printf '%s' "$line"
 }
+
+# ci_read_run_args FILE: the extra container run arguments in FILE, one per line, as
+# devcontainer.json's runArgs: one argument per line, so nothing is word-split and
+# values need no quoting. Surrounding whitespace is trimmed; blank lines and lines
+# starting with # are skipped. A missing FILE gives nothing.
+ci_read_run_args() {
+    [[ -f "$1" ]] || return 0
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line=${line%$'\r'}
+        line=${line#"${line%%[![:space:]]*}"}
+        line=${line%"${line##*[![:space:]]}"}
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        printf '%s\n' "$line"
+    done < "$1"
+}
+
+# ci_valid_env_spec SPEC: true if SPEC is NAME or NAME=VALUE, NAME being a valid
+# environment variable name.
+ci_valid_env_spec() { [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*(=.*)?$ ]]; }
 
 # ci_agent_exists AGENTS_DIR NAME
 ci_agent_exists() { [[ -f "$1/$2/config" ]]; }

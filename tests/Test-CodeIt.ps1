@@ -1212,6 +1212,67 @@ try {
 }
 
 # ---------------------------------------------------------------------------
+"12g. Extra run arguments: -environment, -envFile, -runArgs and <saveDir>/run-args"
+$raSave = Join-Path $tmp 'run-args-save'
+$null = New-Item -ItemType Directory -Force -Path $raSave
+$raEnvFile = Join-Path $tmp 'proxy.env'
+Set-Content -Path $raEnvFile -Value 'HTTP_PROXY=http://proxy:8080'
+$raArgs = "-WorkDirToMount '$scriptDir' -saveDir '$raSave' -toolchain 'dotnet,node'"
+
+# (a) each parameter becomes run arguments, after Code-It's own and before the image
+$r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -dryRun -environment 'FOO=1','BAR' -envFile '$raEnvFile' -runArgs '--network=host','--dns','10.0.0.2'" $stubPath
+Assert "dry-run with extra run arguments exit code 0" ($r.code -eq 0)
+Assert-Contains "-environment NAME=VALUE is printed" $r.out '-e FOO=1'
+Assert "-environment NAME is printed without a value" ($r.out -match '(?m)-e BAR\r?$')
+Assert-Contains "-envFile is printed" $r.out "--env-file $raEnvFile"
+Assert-Contains "-runArgs values join their option's line" $r.out '--dns 10.0.0.2'
+$env:BAR = 'host-bar'
+try {
+    $r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -e 'FOO=1','BAR' -envFile '$raEnvFile' -dockerArgs '--network=host' --continue" $stubPath
+} finally { $env:BAR = $null }
+Assert-Contains "extra run arguments follow Code-It's own and precede the image; agent args follow it" $r.out `
+    "/home/agent1/.local/share/opencode -e FOO=1 -e BAR --env-file $raEnvFile --network=host code-it-alpine-dotnet-node:latest --continue"
+Assert "docker reads a bare -e NAME itself, so its value is not passed" (-not $r.out.Contains('host-bar'))
+$r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-env', 'FOO=1', '-runArgs', '--network=host', '-WorkDirToMount', $scriptDir, '-saveDir', $raSave)) $stubPath
+Assert-Contains "-env and a single -runArgs bind from -File too" $r.out '-e FOO=1 --network=host code-it-alpine-dotnet-node:latest'
+
+# (b) bad -environment and missing -envFile are errors
+$r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -dryRun -environment 'NOT A NAME=1'" $stubPath
+Assert "-environment with an invalid name fails" ($r.code -ne 0)
+$r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -dryRun -envFile '$(Join-Path $tmp 'no-such.env')'" $stubPath
+Assert "-envFile that does not exist fails" ($r.code -ne 0)
+
+# (c) <saveDir>/run-args: one argument per line, trimmed, CRLF, comments and blanks
+# skipped, before the command line's
+[System.IO.File]::WriteAllText((Join-Path $raSave 'run-args'), "# Behind the office proxy`r`n  -e`r`nHTTPS_PROXY  `r`n`r`n--dns=10.0.0.2`r`n--label=x y`n")
+$r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -e 'FOO=1'" $stubPath
+Assert-Contains "run-args file is reported" $r.out "Using run arguments from $(Join-Path $raSave 'run-args')"
+Assert-Contains "run-args file comes first, then the command line's" $r.out `
+    '-e HTTPS_PROXY --dns=10.0.0.2 --label=x y -e FOO=1 code-it-alpine-dotnet-node:latest'
+Assert "run-args comments are skipped" (-not $r.out.Contains('Behind'))
+$r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -dryRun" $stubPath
+Assert-Contains "run-args file is printed, quoted" $r.out '"--label=x y"'
+Remove-Item (Join-Path $raSave 'run-args')
+$r = Invoke-ScenarioCommand "& '$codeIt' $raArgs" $stubPath
+Assert "no run-args file, no extra arguments" (-not $r.out.Contains('Using run arguments'))
+
+# (d) the Apple container CLI is given the host's value for a bare -e NAME, and an
+# unset NAME is dropped, as docker does; the printout still shows no value
+$env:BAR = 'host-bar'
+try {
+    $r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -runtime container -e 'BAR','UNSET_NAME_FOR_TEST','FOO=1' -runArgs '--env','BAZ=2'" "$stubContainer$sep$stubPath"
+} finally { $env:BAR = $null }
+Assert-Contains "container: bare -e NAME gets the host's value" $r.out '-e BAR=host-bar -e FOO=1 --env BAZ=2 code-it-alpine-dotnet-node:latest'
+Assert "container: printout shows the bare name" ($r.out -match '(?m)-e BAR\r?$')
+
+# (e) help documents the parameters
+$help = Get-Help $codeIt -Full | Out-String
+Assert-Contains "help documents -environment" $help '-environment'
+Assert-Contains "help documents -envFile" $help '-envFile'
+Assert-Contains "help documents -runArgs" $help '-runArgs'
+Assert-Contains "help documents the run-args file" $help '<saveDir>/run-args'
+
+# ---------------------------------------------------------------------------
 "13. PowerShell tab completion"
 $completion = Join-Path $scriptDir 'completions/CodeItCompletion.ps1'
 $completerTest = @"

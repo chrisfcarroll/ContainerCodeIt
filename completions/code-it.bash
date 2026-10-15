@@ -13,7 +13,7 @@
 _code_it_opts='--agent -a --list-agents --opencode -o --claude -c --prompt -p --headless
     --work-dir -w --save-dir -s --image -i --build-image -b --rebuild-image -B
     --dockerfile-dir --runtime -r --port --locale -l --agent-name --toolchain -t --stack
-    --package-caches --dry-run -d --help -h --'
+    --package-caches --env -e --env-file --run-arg --docker-arg --dry-run -d --help -h --'
 
 # The flags people reach for most, not the full list; add your own favourites here.
 _code_it_claude_opts='--print -p --continue -c --resume -r --fork-session --model
@@ -86,6 +86,10 @@ _code_it() {
             COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
         --runtime|-r)
             COMPREPLY=( $(compgen -W "docker container" -- "$cur") ); return ;;
+        --env|-e)
+            COMPREPLY=( $(compgen -e -- "$cur") ); return ;;
+        --env-file)
+            COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
         --image|-i)
             COMPREPLY=( $(compgen -W "code-it-alpine-dotnet-node $(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
         --agent-name)
@@ -98,7 +102,7 @@ _code_it() {
             COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv" -- "$cur") ); return ;;
         --package-caches)
             COMPREPLY=( $(compgen -W "nuget npm bun" -- "$cur") ); return ;;
-        --prompt|-p|--port)
+        --prompt|-p|--port|--run-arg|--docker-arg)
             # free text: leave it to the user
             return ;;
     esac

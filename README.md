@@ -84,6 +84,9 @@ package cache, tests, and a commit.
 | `--prompt`, `-p`, or a bare argument | `-prompt`, or a bare argument | none | Opening prompt for the agent |
 | `--headless` | `-headless` | off | Run the agent one-shot in the foreground instead of in tmux: no TTY, and the container exits with the agent's exit code |
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
+| `--env`, `-e NAME[=VALUE]` (repeatable) | `-environment`, `-env`, `-e` *array* | none | Environment variable for the container; a bare `NAME` passes the host's value. See [Passing arguments to the container runtime](#passing-arguments-to-the-container-runtime) |
+| `--env-file FILE` (repeatable) | `-envFile` *array* | none | File of `KEY=VALUE` environment variables for the container |
+| `--run-arg ARG`, `--docker-arg ARG` (repeatable) | `-runArgs`, `-dockerArgs` *array* | none, plus `<save dir>/run-args` | One argument passed verbatim to `docker run` / `container run` |
 | `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image`, `-i` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
@@ -247,6 +250,52 @@ Anything you want the coding agent itself to see can be passed through the launc
 .\Claude-It.ps1 -headless -prompt "tidy the imports" --max-turns 5
 ```
 
+### Passing arguments to the container runtime
+
+Arguments go to three places: code-it's own options; the container runtime; and the
+coding agent, after `--` (bash) or as unrecognised arguments (PowerShell). Runtime
+arguments get their own repeatable options, one argument each, like `gcc -Xlinker`, so
+nothing is word-split and quoting works the same in bash and PowerShell:
+
+```bash
+# Environment variables: a bare NAME passes the host's value, if it is set
+./code-it.sh -c --env HTTPS_PROXY --env NO_PROXY=localhost,127.0.0.1
+./code-it.sh -c --env-file ~/proxy.env
+
+# Anything else docker run accepts: an option and its value are two --run-args,
+# or one if joined with =
+./code-it.sh -c --run-arg --network=host --run-arg --dns --run-arg 10.0.0.2 -- --continue
+```
+
+```powershell
+.\Code-It.ps1 -c -env 'HTTPS_PROXY','NO_PROXY=localhost,127.0.0.1'
+.\Code-It.ps1 -c -runArgs '--network=host','--dns','10.0.0.2' --continue
+```
+
+For settings every run needs, such as a proxy, put them in `<save dir>/run-args`
+(default `~/.config/code-it/run-args`), as devcontainer.json's `runArgs`: one argument
+per line, not quoted, `#` comments and blank lines ignored:
+
+```text
+# Behind the office proxy
+-e
+HTTPS_PROXY
+-e
+NO_PROXY
+--dns=10.0.0.2
+```
+
+The file's arguments come first, then `--env`, `--env-file` and `--run-arg` in the order
+given, all after code-it's own, so with docker a later `-e` of the same name wins. The
+runtime arguments are passed verbatim, and docker and Apple `container` take different
+flags, so check them against your runtime. `--env` and `--env-file` work with both:
+Docker reads a bare `-e NAME` from the host itself, and for Apple `container` code-it
+fills in the host's value. Either way the printed command does not show the value.
+
+If the network problem is an HTTP proxy, Docker can also inject one into every
+container from `~/.docker/config.json`
+([docs](https://docs.docker.com/engine/cli/proxy/)), with no code-it options at all.
+
 The launcher translates the prompt into each agent's own command line
 ([Claude Code](https://code.claude.com/docs/en/cli-reference),
 [OpenCode v1](https://opencode.ai/docs/cli/),
@@ -360,7 +409,7 @@ The launcher scripts keep the chosen agent's state under one save dir (default `
 | `/home/agent1/.npm-host` | **Read-only.** Host npm cache, if `npm` is enabled and a cache is found; seeded into `~/.npm` at startup |
 | `/home/agent1/.bun-host` | **Read-only.** Host Bun cache, if `bun` is enabled and a cache is found; seeded into `~/.bun/install/cache` at startup |
 
-Alternatively, pass `-e ANTHROPIC_API_KEY=sk-...` (claude) or a provider API key env var (opencode) instead of mounting state.
+Alternatively, pass `--env ANTHROPIC_API_KEY` (claude) or a provider API key env var (opencode) instead of mounting state.
 
 # Isolating your agent from upstream origin repos.
 

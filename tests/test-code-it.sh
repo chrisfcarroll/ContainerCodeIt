@@ -804,6 +804,9 @@ completions_out=$(
     echo "OPTS:$(comp ./code-it.sh --he | tr '\n' ' ')"
     echo "RUNTIME:$(comp ./code-it.sh --runtime '' | tr '\n' ' ')"
     echo "FREETEXT:$(comp ./code-it.sh --prompt '' | tr '\n' ' ')"
+    echo "RUNOPTS:$(comp ./code-it.sh --env | tr '\n' ' ')"
+    echo "ENVNAME:$(PATH_FOR_COMPLETION_TEST=1 comp ./code-it.sh -e PATH_FOR_COMP | tr '\n' ' ')"
+    echo "RUNARG:$(comp ./code-it.sh --run-arg '' | tr '\n' ' ')"
     echo "CLAUDEALIAS:$(comp ./claude-it.sh -- --mod | tr '\n' ' ')"
     echo "CLAUDEFLAG:$(comp ./code-it.sh -c -- --perm | tr '\n' ' ')"
     echo "CLAUDEMODE:$(comp ./code-it.sh -c -- --permission-mode '' | tr '\n' ' ')"
@@ -814,6 +817,10 @@ completions_out=$(
 assert_contains "completes launcher options" "$completions_out" "OPTS:--headless"
 assert_contains "completes --runtime values" "$completions_out" "RUNTIME:docker container"
 assert_contains "offers nothing for a free-text --prompt" "$completions_out" "FREETEXT:
+"
+assert_contains "completes --env and --env-file" "$completions_out" "RUNOPTS:--env --env-file"
+assert_contains "completes --env with environment variable names" "$completions_out" "ENVNAME:PATH_FOR_COMPLETION_TEST"
+assert_contains "offers nothing for a free-text --run-arg" "$completions_out" "RUNARG:
 "
 assert_contains "claude-it.sh completes claude flags after --" "$completions_out" "CLAUDEALIAS:--model"
 assert_contains "-c completes claude flags after --" "$completions_out" "CLAUDEFLAG:--permission-mode"
@@ -1268,6 +1275,74 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotne
 assert_contains "code-it --build-image passes the locale to code-it-build" "$out" "--build-arg LOCALE=sv_SE.UTF-8"
 PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node --locale '!!' >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it unreadable --locale fails" "$?"
+
+# ---------------------------------------------------------------------------
+echo "21. Extra run arguments: --env, --env-file, --run-arg and SAVE-DIR/run-args"
+ra_save="$tmp/run-args-save"; mkdir -p "$ra_save"
+ra_args=(--work-dir "$script_dir" --save-dir "$ra_save" --toolchain dotnet,node)
+ra_envfile="$tmp/proxy.env"; echo "HTTP_PROXY=http://proxy:8080" > "$ra_envfile"
+
+# (a) each option becomes run arguments, in command-line order, after code-it's own
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" --dry-run \
+    --env FOO=1 -e BAR --env-file "$ra_envfile" --run-arg --network=host --docker-arg --dns --docker-arg 10.0.0.2 2>&1)
+assert "dry-run with extra run arguments exit code" "$?"
+assert_contains "--env NAME=VALUE is printed" "$out" "-e FOO=1"
+assert_contains "-e NAME is printed without a value" "$out" "-e BAR \\"
+assert_contains "--env-file is printed" "$out" "--env-file $ra_envfile"
+assert_contains "--run-arg is printed" "$out" "--network=host"
+assert_contains "--docker-arg values join their option's line" "$out" "--dns 10.0.0.2 \\"
+out=$(BAR=host-bar PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" \
+    --env FOO=1 -e BAR --env-file "$ra_envfile" --run-arg --network=host --run-arg "--label=a b" 2>&1)
+assert_contains "extra run arguments follow code-it's own and precede the image" "$out" \
+    "/work -v $ra_save/.config/opencode:/home/agent1/.config/opencode -v $ra_save/.local/share/opencode:/home/agent1/.local/share/opencode -e FOO=1 -e BAR --env-file $ra_envfile --network=host --label=a b code-it-alpine-dotnet-node:latest"
+case "$out" in
+    *host-bar*) assert "docker reads a bare -e NAME itself, so its value is not passed" 1 ;;
+    *)          assert "docker reads a bare -e NAME itself, so its value is not passed" 0 ;;
+esac
+
+# (b) bad --env and missing --env-file are errors
+PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" --dry-run --env "NOT A NAME=1" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "--env with an invalid name fails" "$?"
+PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" --dry-run --env-file "$tmp/no-such.env" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "--env-file that does not exist fails" "$?"
+
+# (c) SAVE-DIR/run-args: one argument per line, trimmed, CRLF, comments and blanks skipped,
+# before the command line's
+printf '# Behind the office proxy\r\n  -e\r\nHTTPS_PROXY  \r\n\r\n--dns=10.0.0.2\r\n--label=x y\n' > "$ra_save/run-args"
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" --env FOO=1 2>&1)
+assert_contains "run-args file is reported" "$out" "Using run arguments from $ra_save/run-args"
+assert_contains "run-args file comes first, then the command line's" "$out" \
+    "-e HTTPS_PROXY --dns=10.0.0.2 --label=x y -e FOO=1 code-it-alpine-dotnet-node:latest"
+case "$out" in
+    *Behind*) assert "run-args comments are skipped" 1 ;;
+    *)        assert "run-args comments are skipped" 0 ;;
+esac
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" --dry-run 2>&1)
+assert_contains "run-args file is printed, quoted" "$out" "--label=x\\ y"
+rm "$ra_save/run-args"
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" 2>&1)
+case "$out" in
+    *"Using run arguments"*) assert "no run-args file, no extra arguments" 1 ;;
+    *)                       assert "no run-args file, no extra arguments" 0 ;;
+esac
+
+# (d) the Apple container CLI is given the host's value for a bare -e NAME, and an
+# unset NAME is dropped, as docker does; the printout still shows no value
+out=$(BAR=host-bar PATH="$stub_container:$stub_docker:$PATH" "$code_it" -r container "${ra_args[@]}" \
+    -e BAR -e UNSET_NAME_FOR_TEST -e FOO=1 --run-arg --env --run-arg BAZ=2 2>&1)
+assert_contains "container: bare -e NAME gets the host's value" "$out" "[-e][BAR=host-bar][-e][FOO=1][--env][BAZ=2][code-it-alpine-dotnet-node:latest]"
+assert_contains "container: printout shows the bare name" "$out" "-e BAR \\"
+
+# (e) the agent's -- arguments still go to the agent, not the runtime
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" --run-arg --network=host -- --continue 2>&1)
+assert_contains "-- still goes to the agent, after the image" "$out" "--network=host code-it-alpine-dotnet-node:latest --continue"
+
+# (f) --help documents the options
+out=$(PATH="$stub_docker:$PATH" "$code_it" --help)
+assert_contains "--help documents --env" "$out" "--env, -e NAME[=VALUE]"
+assert_contains "--help documents --env-file" "$out" "--env-file FILE"
+assert_contains "--help documents --run-arg" "$out" "--run-arg ARG"
+assert_contains "--help documents the run-args file" "$out" "SAVE-DIR/run-args"
 
 # ---------------------------------------------------------------------------
 echo

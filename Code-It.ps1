@@ -25,6 +25,21 @@
     The script supports optional image building and port mappings. Only the chosen
     agent's state (from agents/<name>/config) is mounted, so sessions and logins persist.
 
+.PARAMETER environment
+    Environment variables to set in the container, each NAME=VALUE or a bare NAME, which
+    passes the host's value of NAME if it is set. Aliases: -env, -e
+    e.g. -env 'HTTPS_PROXY','NO_PROXY=localhost'
+
+.PARAMETER envFile
+    Files of environment variables, in the runtime's KEY=VALUE format.
+
+.PARAMETER runArgs
+    Arguments passed to `docker run` (or `container run`) verbatim, one array element
+    each, so nothing is word-split: an option and its value are two elements, or one
+    if joined with =, e.g. -runArgs '--network=host','--dns','10.0.0.2'
+    The runtime's own flags differ, so these are not portable between docker and
+    container. Arguments in <saveDir>/run-args (see Notes) come first. Alias: -dockerArgs
+
 .PARAMETER WorkDirToMount
     Host directory path to mount as /work in the container. Defaults to the current directory.
 
@@ -150,6 +165,11 @@
     shuts down.
 
 .EXAMPLE
+    .\Code-It.ps1 -env HTTPS_PROXY -runArgs '--dns','10.0.0.2' -c --continue
+    Passes the host's HTTPS_PROXY and a DNS server to the container, and --continue to
+    Claude Code.
+
+.EXAMPLE
     .\Code-It.ps1 -c --continue --model opus
     Passes those flags straight through to Claude Code.
 
@@ -157,6 +177,15 @@
     - The prompt and any pass-through arguments are translated into each agent's own
       command line: -prompt becomes `claude PROMPT` or `opencode --prompt PROMPT`, and
       with -headless it becomes `claude -p PROMPT` or `opencode run PROMPT`
+    - <saveDir>/run-args (default ~/.config/code-it/run-args), if it exists, holds run
+      arguments for every run, like devcontainer.json's runArgs: one argument per line,
+      not quoted; blank lines and lines starting with # are ignored. e.g.
+          # Behind the office proxy
+          -e
+          HTTPS_PROXY
+          --dns=10.0.0.2
+      They come before -environment, -envFile and -runArgs, which come after Code-It's
+      own, so with docker a later -e of the same name wins.
     - Git author name and email are automatically captured from environment or git config
     - Volume mounts preserve both Claude and OpenCode state between container runs, so you
       can destroy the container and create a new one without logging in again
@@ -215,6 +244,12 @@ param (
     [string]$packageCaches  = "",
     [string]$prompt         = "",
     [switch]$headless       = $false,
+    # Not $env, which is PowerShell's environment drive
+    [Alias('env', 'e')]
+    [string[]]$environment  = @(),
+    [string[]]$envFile      = @(),
+    [Alias('dockerArgs')]
+    [string[]]$runArgs      = @(),
     [Alias('h')]
     [switch]$help           = $false,
     [switch]$dryRun         = $false,
@@ -275,6 +310,24 @@ if (-not $prompt -and $agentArgs.Count -ge 1 -and -not $agentArgs[0].StartsWith(
     }
 }
 $promptSet = [bool]$prompt
+
+# -environment, -envFile and -runArgs, in that order, as container run arguments
+$cliRunArgs = @()
+foreach ($spec in $environment) {
+    if (-not (Test-CodeItEnvSpec $spec)) {
+        Write-Warning "-environment needs NAME or NAME=VALUE, not '$spec'."
+        exit 1
+    }
+    $cliRunArgs += @('-e', $spec)
+}
+foreach ($file in $envFile) {
+    if (-not (Test-Path -Path $file -PathType Leaf)) {
+        Write-Warning "-envFile not found: $file"
+        exit 1
+    }
+    $cliRunArgs += @('--env-file', $file)
+}
+$cliRunArgs += $runArgs
 
 # -rebuildImage implies -buildImage
 if ($rebuildImage) { $buildImage = $true }
@@ -427,6 +480,7 @@ if (Test-Path -Path $defaultConfigDir -PathType Container) {
 $saveDir = (Resolve-Path $saveDir).Path
 $agentSaveDir = (Resolve-Path $agentSaveDir).Path
 $historyFile = Join-Path $saveDir 'image-history'
+$runArgsFile = Join-Path $saveDir 'run-args'
 
 "    Checking $image ..."
 
@@ -634,6 +688,38 @@ $ttyArgs     = if ($headless) { @('-i') }                        else { @('-it')
 $headlessEnv = if ($headless) { @('-e', 'CODE_AGENT_HEADLESS=1') } else { @() }
 $headlessEnvPrint = if ($headless) { "`n                -e CODE_AGENT_HEADLESS=1" } else { "" }
 
+# Extra run arguments: <saveDir>/run-args, then -environment, -envFile and -runArgs.
+# They follow Code-It's own, so they can override them. Docker reads a bare `-e NAME`
+# from the host's environment itself; for the Apple container CLI, Code-It does, keeping
+# the printed command free of the value.
+$extraRunArgs = Get-CodeItRunArgs $runArgsFile
+if ($extraRunArgs.Count -gt 0) { "    Using run arguments from $runArgsFile" }
+$extraRunArgs = @($extraRunArgs) + @($cliRunArgs)
+# Printed one option per line: an argument starting with - begins a new line
+$extraRunArgsPrint = ""
+foreach ($a in $extraRunArgs) {
+    $shown = if ($a -match '[\s"]') { '"' + ($a -replace '"', '\"') + '"' } else { $a }
+    if ($a.StartsWith('-')) { $extraRunArgsPrint += "`n                $shown" } else { $extraRunArgsPrint += " $shown" }
+}
+$runExtraArgs = @()
+$envFlag = $null
+foreach ($a in $extraRunArgs) {
+    if ($envFlag) {
+        if ($runtime -eq 'container' -and -not $a.Contains('=') -and (Test-CodeItEnvSpec $a)) {
+            $hostValue = [Environment]::GetEnvironmentVariable($a)
+            if ($null -ne $hostValue) { $runExtraArgs += @($envFlag, "$a=$hostValue") }
+        } else {
+            $runExtraArgs += @($envFlag, $a)
+        }
+        $envFlag = $null
+    } elseif ($a -eq '-e' -or $a -eq '--env') {
+        $envFlag = $a
+    } else {
+        $runExtraArgs += $a
+    }
+}
+if ($envFlag) { $runExtraArgs += $envFlag }
+
 $agentCmdPrint = ($agentCmd | ForEach-Object {
     if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
 }) -join ' '
@@ -647,7 +733,7 @@ if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
                 -e GIT_COMMITTER_NAME=`"$gitAuthorName`" `
                 -e GIT_COMMITTER_EMAIL=`"$gitAuthorEmail`" `
-                -v `"$WorkDirToMount`:/work`"$agentMountPrint$cacheMountPrint
+                -v `"$WorkDirToMount`:/work`"$agentMountPrint$cacheMountPrint$extraRunArgsPrint
             $image`:latest$agentCmdPrint
 "@
 
@@ -668,6 +754,7 @@ $runRc = 0
             -v "$WorkDirToMount`:/work" `
             $agentMountArgs `
             $cacheMountArgs `
+            $runExtraArgs `
     $image`:latest $agentCmd
 if ($LASTEXITCODE -ne 0) { $runRc = $LASTEXITCODE }
 

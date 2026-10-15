@@ -9,6 +9,8 @@
         Detect-CodeItRuntime REQUESTED         -> docker|container, or $null on error
         Bool-Arg BOOL                          -> 'true'|'false'
         Resolve-CodeItLocale RAW               -> e.g. en_GB.UTF-8, or $null on error
+        Get-CodeItRunArgs FILE                 -> the file's run args, as an array
+        Test-CodeItEnvSpec SPEC                -> $true if SPEC is NAME[=VALUE]
 #>
 
 $script:CodeItDefaultToolchain  = @('dotnet', 'node')
@@ -310,6 +312,21 @@ function Get-CodeItAgentConfig([string]$dir, [string]$name, [string]$key) {
         }
     }
     return $null
+}
+
+# Get-CodeItRunArgs FILE: the extra container run arguments in FILE, as
+# devcontainer.json's runArgs: one argument per line, so nothing is word-split and
+# values need no quoting. Surrounding whitespace is trimmed; blank lines and lines
+# starting with # are skipped. A missing FILE gives an empty array.
+function Get-CodeItRunArgs([string]$file) {
+    if (-not $file -or -not (Test-Path -Path $file -PathType Leaf)) { return ,@() }
+    return ,@(Get-Content $file | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+}
+
+# Test-CodeItEnvSpec SPEC: $true if SPEC is NAME or NAME=VALUE, NAME being a valid
+# environment variable name.
+function Test-CodeItEnvSpec([string]$spec) {
+    return ($spec -match '^[A-Za-z_][A-Za-z0-9_]*(=.*)?$')
 }
 
 function Test-CodeItAgentExists([string]$dir, [string]$name) {
