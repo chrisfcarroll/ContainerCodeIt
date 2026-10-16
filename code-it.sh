@@ -90,7 +90,8 @@
 #                            code-it image. With no SAVE-DIR or no code-it image,
 #                            code-it-first-run.sh runs instead.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
-#                            (aliases js-bun, ts-bun), python (alias uv).
+#                            (aliases js-bun, ts-bun), python (alias uv),
+#                            powershell (alias pwsh).
 #   --package-caches LIST    Comma-separated package repos whose host cache is mounted
 #                            read-only. 
 #                            Known: nuget, npm, bun.

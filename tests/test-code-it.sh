@@ -409,6 +409,19 @@ echo "10d. code-it reads the image label"
 out=$(STUB_IMAGE_TOOL_CHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for tech 'node,bun'"
 
+echo "10g. PowerShell tool chain (powershell / pwsh)"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain dotnet,node,powershell 2>&1)
+assert_contains "--toolchain powershell sets POWERSHELL=true" "$out" "--build-arg POWERSHELL=true"
+assert_contains "--toolchain powershell derives the image name" "$out" "-t code-it-alpine-dotnet-node-powershell:latest"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain pwsh 2>&1)
+assert_contains "pwsh aliases powershell" "$out" "-t code-it-alpine-powershell:latest"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain dotnet,node 2>&1)
+assert_contains "a build without powershell sets POWERSHELL=false" "$out" "--build-arg POWERSHELL=false"
+grep -q '^ARG POWERSHELL=false$' "$script_dir/Dockerfile"
+assert "Dockerfile switches PowerShell off by default" "$?"
+grep -q 'if \[ "\$POWERSHELL" != true \]; then' "$script_dir/Dockerfile"
+assert "Dockerfile gates PowerShell on POWERSHELL" "$?"
+
 echo "10e. Python tool chain (python / uv / --stack)"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --stack python 2>&1)
 assert_contains "--stack python sets PYTHON=true" "$out" "--build-arg PYTHON=true"
@@ -998,9 +1011,12 @@ chmod +x "$stub_first_build"
 
 # (a) detection with a stubbed PATH/HOME: docker and node present, no bun
 firstbin="$tmp/firstbin"; mkdir -p "$firstbin"
-for cmd in bash sh sed grep tr uname dirname mkdir cat git touch echo printf pwd basename find cp ls test; do
+for cmd in bash sh sed grep tr dirname mkdir cat git touch echo printf pwd basename find cp ls test; do
     src=$(command -v "$cmd" 2>/dev/null) && ln -s "$src" "$firstbin/$cmd"
 done
+# A plain Linux host, whatever this one is (WSL or Git Bash would preselect powershell)
+printf '#!/bin/sh\ncase "$1" in -r) echo 6.0.0-generic ;; *) echo "${STUB_UNAME_S:-Linux}" ;; esac\n' > "$firstbin/uname"
+chmod +x "$firstbin/uname"
 cp "$stub_docker/docker" "$firstbin/docker"; chmod +x "$firstbin/docker"
 printf '#!/bin/sh\necho v20.0.0\n' > "$firstbin/node"; chmod +x "$firstbin/node"
 firsthome="$tmp/firsthome"; mkdir -p "$firsthome"
@@ -1017,6 +1033,28 @@ case "$out" in
     *"2) node *"*) assert "first-run detection is not fooled by bun" 0 ;;
     *)             assert "first-run detection is not fooled by bun" 1 ;;
 esac
+
+assert_contains "first-run offers powershell" "$out" "5) powershell"
+[[ "$out" != *"5) powershell *"* ]]; assert "first-run marks powershell undetected" "$?"
+
+# powershell is preselected when pwsh is found, on Windows, and alongside the usual
+# default when it is the only tool chain found
+pwshbin="$tmp/pwshbin"; mkdir -p "$pwshbin"
+printf '#!/bin/sh\necho PowerShell 7.6.6\n' > "$pwshbin/pwsh"; chmod +x "$pwshbin/pwsh"
+out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$firstbin:$pwshbin" bash "$first_run" --dry-run \
+        --code-it-build "$stub_first_build" 2>&1)
+assert_contains "first-run marks pwsh as powershell detected" "$out" "5) powershell *"
+assert_contains "first-run preselects powershell when pwsh is found" "$out" "--toolchain node,powershell"
+nodeless="$tmp/firstbin-nonode"; cp -R "$firstbin" "$nodeless"; rm -f "$nodeless/node"
+out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$nodeless:$pwshbin" bash "$first_run" --dry-run \
+        --code-it-build "$stub_first_build" 2>&1)
+assert_contains "powershell alone is added to the usual default" "$out" "--toolchain dotnet,node,powershell"
+out=$(printf '\n\n\n' | STUB_UNAME_S=MINGW64_NT-10.0 HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
+        --code-it-build "$stub_first_build" 2>&1)
+assert_contains "first-run preselects powershell on Windows" "$out" "--toolchain node,powershell"
+out=$(HOME="$firsthome" PATH="$firstbin:$pwshbin" bash "$first_run" --dry-run --yes --toolchain node \
+        --code-it-build "$stub_first_build" 2>&1)
+assert_contains "an explicit first-run --toolchain is not extended" "$out" "--toolchain node --agent"
 
 # (b) answer parsing: pick tool chain 4 (python) and agent 2 (claude)
 out=$(printf '4\n2\n\n' | HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
@@ -1064,11 +1102,12 @@ histbin="$tmp/histbin"; mkdir -p "$histbin"
 cat > "$histbin/docker" <<'EOF'
 #!/bin/sh
 case "$1" in
-    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest code-it-alpine-dotnet-node-powershell:latest ;;
+    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest code-it-alpine-dotnet-node-cobol:latest code-it-alpine-dotnet-node-powershell:latest ;;
     image)
         for a in "$@"; do last="$a"; done
         case "$last" in
             *python*)      echo python ;;
+            *cobol*)       echo dotnet,node,cobol ;;
             *powershell*)  echo dotnet,node,powershell ;;
             *dotnet-node*) echo dotnet,node ;;
             *dotnet*)      echo dotnet ;;
@@ -1115,13 +1154,20 @@ esac
 # (k) a remembered image labelled with a tool chain this checkout does not know (built
 # by another branch) is still used, for the chains that are known
 hunk="$tmp/histunknown"; mkdir -p "$hunk"
-printf '20260101 code-it-alpine-dotnet-node-powershell\n' > "$hunk/image-history"
+printf '20260101 code-it-alpine-dotnet-node-cobol\n' > "$hunk/image-history"
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hunk" 2>&1)
 assert "an unknown chain in the remembered image's label is not an error" "$?"
 [[ "$out" != *"Unknown tech stack"* ]]; assert "an unknown label chain gives no unknown-tech warning" "$?"
-assert_contains "notes the unknown label chain" "$out" "has tool chains this code-it does not know (dotnet,node,powershell); using dotnet,node"
-assert_contains "runs the image with the unknown label chain" "$out" "code-it-alpine-dotnet-node-powershell:latest"
+assert_contains "notes the unknown label chain" "$out" "has tool chains this code-it does not know (dotnet,node,cobol); using dotnet,node"
+assert_contains "runs the image with the unknown label chain" "$out" "code-it-alpine-dotnet-node-cobol:latest"
 assert_contains "the known label chains decide the package caches" "$out" "NuGet package cache"
+
+# (l) powershell is a known chain: its remembered image is used with no note
+hpwsh="$tmp/histpwsh"; mkdir -p "$hpwsh"
+printf '20260101 code-it-alpine-dotnet-node-powershell\n20260102 code-it-alpine-dotnet-node-powershell\n' > "$hpwsh/image-history"
+out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hpwsh" 2>&1)
+assert_contains "uses the remembered powershell image" "$out" "Using remembered image: code-it-alpine-dotnet-node-powershell"
+[[ "$out" != *"does not know"* ]]; assert "powershell in a label is known" "$?"
 
 # (d) save dir exists but no history: the most recently built existing code-it image
 hnone="$tmp/histnone"; mkdir -p "$hnone"

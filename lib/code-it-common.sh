@@ -20,7 +20,7 @@
 # and returns 1, so the caller can exit.
 
 CI_DEFAULT_TOOLCHAIN="dotnet node"
-CI_KNOWN_TOOLCHAIN="dotnet node bun python"
+CI_KNOWN_TOOLCHAIN="dotnet node bun python powershell"
 CI_KNOWN_PACKAGE_CACHES="nuget npm bun"
 CI_CONTAINER_PORT=3000
 CI_DEFAULT_AGENTS="opencode claude"
@@ -41,6 +41,7 @@ ci_toolchain_alias() {
         js-bun|ts-bun)   printf 'bun' ;;
         # uv is Python's package manager here, so it selects the python tool chain
         uv)              printf 'python' ;;
+        pwsh)            printf 'powershell' ;;
         *)               printf '%s' "$1" ;;
     esac
 }
@@ -67,9 +68,9 @@ ci_resolve_toolchain() {
         t=$(ci_toolchain_alias "$t")
         case "$t" in
             "") ;;
-            dotnet|node|bun|python) out=$(ci_comma_list_add "$out" "$t") ;;
+            dotnet|node|bun|python|powershell) out=$(ci_comma_list_add "$out" "$t") ;;
             *)
-                echo "Warning: Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv)." >&2
+                echo "Warning: Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh)." >&2
                 return 1
                 ;;
         esac
@@ -234,7 +235,7 @@ ci_image_exists() {
 # still exists and whose toolchains cover >=70% of weighted usage, or nothing.
 # Weights run from 1 (oldest remembered) to 15 (most recent). Spec 09.
 ci_history_choose_image() {
-    local runtime="$1" file="$2" l image i j c w cov
+    local runtime="$1" file="$2" l image i j w cov
     [[ -f "$file" ]] || return 1
     local -a lines=() chains=()
     while IFS= read -r l; do
@@ -251,32 +252,22 @@ ci_history_choose_image() {
         total=$(( total + 15 - n + 1 + i ))
     done
     (( total > 0 )) || return 1
-    local dotnet_w=0 node_w=0 bun_w=0 python_w=0
+    # Weight per known chain, in CI_KNOWN_TOOLCHAIN order (no associative arrays in
+    # macOS's bash 3.2)
+    local -a known=($CI_KNOWN_TOOLCHAIN) weights=()
+    local k
+    for ((k=0; k<${#known[@]}; k++)); do weights[k]=0; done
     for ((i=0; i<n; i++)); do
         w=$(( 15 - n + 1 + i ))
-        for c in $CI_KNOWN_TOOLCHAIN; do
-            if ci_has "${chains[i]//,/ }" "$c"; then
-                case "$c" in
-                    dotnet) dotnet_w=$((dotnet_w + w)) ;;
-                    node)   node_w=$((node_w + w)) ;;
-                    bun)    bun_w=$((bun_w + w)) ;;
-                    python) python_w=$((python_w + w)) ;;
-                esac
-            fi
+        for ((k=0; k<${#known[@]}; k++)); do
+            if ci_has "${chains[i]//,/ }" "${known[k]}"; then weights[k]=$(( weights[k] + w )); fi
         done
     done
     # Newest first: the first image whose chains cover >=70% of the weight wins.
     for ((j=n-1; j>=0; j--)); do
         cov=0
-        for c in $CI_KNOWN_TOOLCHAIN; do
-            if ci_has "${chains[j]//,/ }" "$c"; then
-                case "$c" in
-                    dotnet) cov=$((cov + dotnet_w)) ;;
-                    node)   cov=$((cov + node_w)) ;;
-                    bun)    cov=$((cov + bun_w)) ;;
-                    python) cov=$((cov + python_w)) ;;
-                esac
-            fi
+        for ((k=0; k<${#known[@]}; k++)); do
+            if ci_has "${chains[j]//,/ }" "${known[k]}"; then cov=$(( cov + weights[k] )); fi
         done
         if (( cov * 10 >= total * 7 )); then
             image="${lines[j]#* }"
@@ -440,6 +431,11 @@ ci_toolchain_commands() {
         node)   printf '%s\n' 'node --version' 'volta --version' ;;
         bun)    printf '%s\n' 'bun --version' ;;
         python) printf '%s\n' 'python3 --version' 'uv --version' ;;
+        # powershell is Windows PowerShell 5.1, which has no --version; the .exe
+        # spellings find the Windows host's from WSL
+        powershell) printf '%s\n' 'pwsh --version' 'pwsh.exe --version' \
+                        'powershell -NoLogo -NoProfile -Command exit' \
+                        'powershell.exe -NoLogo -NoProfile -Command exit' ;;
     esac
 }
 
@@ -586,6 +582,15 @@ ci_host_locale() {
             case "$(uname -r)" in *[Mm]icrosoft*) ci_windows_locale ;; esac
             ;;
     esac
+}
+
+# ci_host_is_windows: true on Windows, from Git Bash, MSYS2, Cygwin or WSL.
+ci_host_is_windows() {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) return 0 ;;
+        Linux) case "$(uname -r)" in *[Mm]icrosoft*) return 0 ;; esac ;;
+    esac
+    return 1
 }
 
 # ci_resolve_locale RAW: the container locale for --locale RAW. Empty or like-host

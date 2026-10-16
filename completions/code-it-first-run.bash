@@ -17,7 +17,7 @@ _code_it_first_run() {
         --runtime|-r)
             COMPREPLY=( $(compgen -W "docker container" -- "$cur") ); return ;;
         --toolchain|-t)
-            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh" -- "$cur") ); return ;;
         --agents|-a)
             COMPREPLY=( $(compgen -W "$(ls "${BASH_SOURCE[0]%/*}/../agents" 2>/dev/null)" -- "$cur") ); return ;;
     esac

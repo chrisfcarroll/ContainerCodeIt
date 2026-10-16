@@ -9,6 +9,9 @@
     runs Code-It-Build.ps1, offers to copy agent state into the save dir, and prints
     the Code-It.ps1 command to start.
 
+    The toolchains detected on the host are preselected, else dotnet,node, and
+    powershell always is: you are running PowerShell.
+
 .PARAMETER saveDir
     Where agent state is kept and copied. Default: ~/.config/code-it
 
@@ -124,7 +127,12 @@ if ($toolchain) {
     $chosenToolchain = Resolve-CodeItToolchain $toolchain
     if ($null -eq $chosenToolchain) { exit 1 }
 } else {
-    $defaultTcs = if ($detectedToolchain.Count) { $detectedToolchain -join ' ' } else { $script:CodeItDefaultToolchain -join ' ' }
+    # PowerShell is an addition to the other tool chains, not a replacement for them,
+    # so the usual default applies when it is the only one detected. Running this
+    # script means PowerShell is here, so it is always in the default.
+    $defaultList = @($detectedToolchain | Where-Object { $_ -ne 'powershell' })
+    if (-not $defaultList.Count) { $defaultList = $script:CodeItDefaultToolchain }
+    $defaultTcs = (@($defaultList) + 'powershell') -join ' '
     $chosenToolchain = Read-CodeItChoice "Toolchains to build" $defaultTcs $toolchainAvailable
     $chosenToolchain = Split-CodeItList ($chosenToolchain -replace ' ', ',')
 }

@@ -408,6 +408,15 @@ try { $r = Invoke-Scenario $codeIt (@('-image', 'code-it-alpine-dotnet-node') + 
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
 Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for tech 'node,bun'"
 
+"9g. PowerShell tool chain (powershell / pwsh)"
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node,powershell') $stubPath
+Assert-Contains "-toolchain powershell sets POWERSHELL=true" $r.out '--build-arg POWERSHELL=true'
+Assert-Contains "-toolchain powershell derives the image name" $r.out '-t code-it-alpine-dotnet-node-powershell:latest'
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'pwsh') $stubPath
+Assert-Contains "pwsh aliases powershell" $r.out '-t code-it-alpine-powershell:latest'
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node') $stubPath
+Assert-Contains "a build without powershell sets POWERSHELL=false" $r.out '--build-arg POWERSHELL=false'
+
 "9e. Python tool chain (python / uv / -stack)"
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-stack', 'python') $stubPath
 Assert-Contains "-stack python sets PYTHON=true" $r.out '--build-arg PYTHON=true'
@@ -924,6 +933,21 @@ $null = New-Item -ItemType Directory -Force -Path "$fh/.config/opencode"
 Set-Content -Path "$fh/.config/opencode/config.json" -Value 'ORIGINAL'
 $savedHome = $env:HOME; $savedUserProfile = $env:USERPROFILE
 
+# Running the .ps1 means PowerShell is here, so powershell is always preselected
+$env:HOME = $fh; $env:USERPROFILE = $fh
+try {
+    $r = Invoke-Scenario $firstRun @('-yes', '-dryRun', '-agents', 'opencode',
+        '-saveDir', (Join-Path $tmp 'firstpwsh-ps'), '-codeItBuild', $stubFirst) $stubPath
+} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
+Assert-Contains "first-run offers powershell" $r.out 'powershell'
+Assert "first-run preselects powershell from the .ps1" ($r.out -match '-toolchain \S*powershell -agent')
+$env:HOME = $fh; $env:USERPROFILE = $fh
+try {
+    $r = Invoke-Scenario $firstRun @('-yes', '-dryRun', '-toolchain', 'node', '-agents', 'opencode',
+        '-saveDir', (Join-Path $tmp 'firstpwsh-ps'), '-codeItBuild', $stubFirst) $stubPath
+} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
+Assert-Contains "an explicit first-run -toolchain is not extended" $r.out '-toolchain node -agent'
+
 # --dryRun builds nothing and copies nothing
 $fd = Join-Path $tmp 'firstdry-ps'
 $env:HOME = $fh; $env:USERPROFILE = $fh
@@ -972,11 +996,13 @@ if "%~1"=="images" (
   echo code-it-alpine-dotnet:latest
   echo code-it-alpine-dotnet-node:latest
   echo code-it-alpine-python:latest
+  echo code-it-alpine-dotnet-node-cobol:latest
   echo code-it-alpine-dotnet-node-powershell:latest
   goto :eof
 )
 if "%~1"=="image" (
   echo %* | findstr /C:"python" >nul && (echo python& goto :eof)
+  echo %* | findstr /C:"cobol" >nul && (echo dotnet,node,cobol& goto :eof)
   echo %* | findstr /C:"powershell" >nul && (echo dotnet,node,powershell& goto :eof)
   echo %* | findstr /C:"dotnet-node" >nul && (echo dotnet,node& goto :eof)
   echo %* | findstr /C:"dotnet" >nul && (echo dotnet& goto :eof)
@@ -991,11 +1017,12 @@ echo STUB %*
     Set-Content -Path (Join-Path $histDocker 'docker') -Value @'
 #!/bin/sh
 case "$1" in
-    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest code-it-alpine-dotnet-node-powershell:latest ;;
+    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest code-it-alpine-dotnet-node-cobol:latest code-it-alpine-dotnet-node-powershell:latest ;;
     image)
         for a in "$@"; do last="$a"; done
         case "$last" in
             *python*)      echo python ;;
+            *cobol*)       echo dotnet,node,cobol ;;
             *powershell*)  echo dotnet,node,powershell ;;
             *dotnet-node*) echo dotnet,node ;;
             *dotnet*)      echo dotnet ;;
@@ -1043,12 +1070,19 @@ Assert "explicit -image bypasses the default" (-not ($r.out.Contains('Using reme
 # a remembered image labelled with a tool chain this checkout does not know (built by
 # another branch) is still used, for the chains that are known
 $hunk = Join-Path $tmp 'histunknown'; $null = New-Item -ItemType Directory -Force -Path $hunk
-'20260101 code-it-alpine-dotnet-node-powershell' | Set-Content -Path (Join-Path $hunk 'image-history')
+'20260101 code-it-alpine-dotnet-node-cobol' | Set-Content -Path (Join-Path $hunk 'image-history')
 $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hunk) $histPath
 Assert "an unknown chain in the remembered image's label is not an error" ($r.code -eq 0)
 Assert "an unknown label chain gives no unknown-tech warning" (-not $r.out.Contains('Unknown tech stack'))
-Assert-Contains "notes the unknown label chain" $r.out 'has tool chains this code-it does not know (dotnet,node,powershell); using dotnet,node'
-Assert-Contains "runs the image with the unknown label chain" $r.out 'code-it-alpine-dotnet-node-powershell:latest'
+Assert-Contains "notes the unknown label chain" $r.out 'has tool chains this code-it does not know (dotnet,node,cobol); using dotnet,node'
+Assert-Contains "runs the image with the unknown label chain" $r.out 'code-it-alpine-dotnet-node-cobol:latest'
+
+# powershell is a known chain: its remembered image is used with no note
+$hpwsh = Join-Path $tmp 'histpwsh'; $null = New-Item -ItemType Directory -Force -Path $hpwsh
+@('20260101 code-it-alpine-dotnet-node-powershell', '20260102 code-it-alpine-dotnet-node-powershell') | Set-Content -Path (Join-Path $hpwsh 'image-history')
+$r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hpwsh) $histPath
+Assert-Contains "uses the remembered powershell image" $r.out 'Using remembered image: code-it-alpine-dotnet-node-powershell'
+Assert "powershell in a label is known" (-not $r.out.Contains('does not know'))
 
 # save dir exists but no history: the most recently built existing code-it image
 $hnone = Join-Path $tmp 'histnone'; $null = New-Item -ItemType Directory -Force -Path $hnone

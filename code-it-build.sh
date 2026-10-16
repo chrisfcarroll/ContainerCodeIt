@@ -15,7 +15,8 @@
 #   --toolchain, -t LIST     Comma-separated toolchains to build. Required: with none,
 #                            this help is printed and the script exits 1.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
-#                            (aliases js-bun, ts-bun), python (alias uv).
+#                            (aliases js-bun, ts-bun), python (alias uv),
+#                            powershell (alias pwsh).
 #                            --stack is an alias for --toolchain.
 #   --package-caches LIST    Comma-separated package repos to support, independent of
 #                            --toolchain. Known: nuget, npm, bun.
@@ -244,7 +245,7 @@ ci_strip_dockerfile_comments < "$build_context/Dockerfile" > "$build_context/Doc
 # Build args for the toolchains and package caches, spelled the way the
 # Dockerfile's ARGs match them (uppercase).
 build_args=()
-for tc in dotnet node bun python; do
+for tc in $CI_KNOWN_TOOLCHAIN; do
     if ci_has "$enabled_toolchain" "$tc"; then v=true; else v=false; fi
     build_args+=(--build-arg "$(printf '%s' "$tc" | tr '[:lower:]' '[:upper:]')=$v")
 done

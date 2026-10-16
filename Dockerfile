@@ -24,6 +24,8 @@ RUN apk add --no-cache vim less tmux oh-my-zsh ncurses-terminfo tzdata musl-loca
 #                                             own runtime, bundler and package
 #                                             manager)
 #   PYTHON   Python 3 + uv
+#   POWERSHELL PowerShell 7                  (on aarch64 also installs the .NET
+#                                             SDK, which it needs; see below)
 #   NUGET    NuGet package cache support      (may be selected without DOTNET)
 #   NPM      npm package cache support        (may be selected without NODE)
 #
@@ -35,13 +37,14 @@ ARG DOTNET=true
 ARG NODE=true
 ARG BUN=false
 ARG PYTHON=false
+ARG POWERSHELL=false
 ARG NUGET=
 ARG NPM=
 RUN set -e; \
     case "$NUGET" in true|false) ;; *) NUGET=$DOTNET ;; esac; \
     case "$NPM"   in true|false) ;; *) NPM=$NODE   ;; esac; \
-    printf 'DOTNET=%s\nNODE=%s\nBUN=%s\nPYTHON=%s\nNUGET=%s\nNPM=%s\n' \
-        "$DOTNET" "$NODE" "$BUN" "$PYTHON" "$NUGET" "$NPM" > /etc/code-it-tech.env
+    printf 'DOTNET=%s\nNODE=%s\nBUN=%s\nPYTHON=%s\nPOWERSHELL=%s\nNUGET=%s\nNPM=%s\n' \
+        "$DOTNET" "$NODE" "$BUN" "$PYTHON" "$POWERSHELL" "$NUGET" "$NPM" > /etc/code-it-tech.env
 
 # --- .NET ------------------------------------------------------------------
 RUN . /etc/code-it-tech.env; if [ "$DOTNET" = true ]; then \
@@ -83,15 +86,18 @@ RUN . /etc/code-it-tech.env; if [ "$PYTHON" = true ]; then \
 # ===========================================================================
 # PowerShell
 # ===========================================================================
-# Microsoft only ships musl (Alpine) builds for x64, so on other architectures
-# install it as a dotnet tool instead, with gcompat plus a tiny shim for two
-# glibc-only symbols its native library needs (verified on aarch64). That path
-# needs the .NET SDK, so it is skipped when DOTNET is switched off.
+# Only with POWERSHELL. Microsoft only ships musl (Alpine) builds for x64, so on
+# other architectures install it as a dotnet tool instead, with gcompat plus a
+# tiny shim for two glibc-only symbols its native library needs (verified on
+# aarch64). A dotnet tool needs the .NET SDK to install and its runtime to run, so
+# that path adds the SDK when DOTNET is switched off.
 # The x64 tarball is not an apk package, so add the libraries it links
 # (libgcc, libstdc++) and loads at runtime (icu-libs for globalization, libssl3
 # for TLS) ourselves.
-RUN set -e; \
-    if [ "$(uname -m)" = "x86_64" ]; then \
+RUN set -e; . /etc/code-it-tech.env; \
+    if [ "$POWERSHELL" != true ]; then \
+        echo "Skipping PowerShell: POWERSHELL is off"; \
+    elif [ "$(uname -m)" = "x86_64" ]; then \
         apk add --no-cache libgcc libstdc++ icu-libs libssl3 && \
         curl -L https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/powershell-7.6.6-linux-musl-x64.tar.gz -o /tmp/powershell.tar.gz && \
         mkdir -p /opt/microsoft/powershell/7 && \
@@ -99,7 +105,8 @@ RUN set -e; \
         chmod +x /opt/microsoft/powershell/7/pwsh && \
         ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh && \
         rm -rf /tmp/powershell*; \
-    elif . /etc/code-it-tech.env && [ "$DOTNET" = true ]; then \
+    else \
+        if [ "$DOTNET" != true ]; then apk add --no-cache dotnet10-sdk; fi && \
         apk add --no-cache gcompat && \
         apk add --no-cache --virtual .pwsh-build build-base && \
         dotnet tool install --tool-path /opt/microsoft/powershell PowerShell && \
@@ -114,8 +121,6 @@ RUN set -e; \
         apk del .pwsh-build && \
         printf '#!/bin/sh\nLD_PRELOAD=/usr/lib/libpsl-chk-shim.so exec /opt/microsoft/powershell/pwsh "$@"\n' > /usr/bin/pwsh && \
         chmod +x /usr/bin/pwsh; \
-    else \
-        echo "Skipping PowerShell: it needs the .NET SDK on non-x86_64"; \
     fi
 
 # ===========================================================================

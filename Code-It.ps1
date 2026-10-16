@@ -17,7 +17,7 @@
     - Volume mounts for code repositories and agent configuration
     - Git author environment variables or config settings (name and email)
     - Paths to preserve agent credentials, settings, and session data across container runs
-    - A parameterisable set of toolchains (dotnet, node, bun, python) and package
+    - A parameterisable set of toolchains (dotnet, node, bun, python, powershell) and package
       caches (nuget, npm, bun), chosen with -toolchain and -packageCaches
     - The enabled host package caches, mounted read-only
     - Port mappings
@@ -108,7 +108,7 @@
 
 .PARAMETER toolchain
     Comma-separated toolchains. Known: dotnet, node (aliases js-node, ts-node), bun
-    (aliases js-bun, ts-bun), python (alias uv). Alias: -stack.
+    (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh). Alias: -stack.
     Default: those of the remembered image, the most recent in <saveDir>/image-history
     whose toolchains cover 70% of your recent runs; else of the most recently used, or
     else built, code-it image. With no <saveDir> or no code-it image,

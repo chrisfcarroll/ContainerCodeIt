@@ -15,11 +15,11 @@
 #>
 
 $script:CodeItDefaultToolchain  = @('dotnet', 'node')
-$script:CodeItKnownToolchain    = @('dotnet', 'node', 'bun', 'python')
+$script:CodeItKnownToolchain    = @('dotnet', 'node', 'bun', 'python', 'powershell')
 $script:CodeItKnownPackageCaches = @('nuget', 'npm', 'bun')
 # js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both);
 # uv is Python's package manager here, so it selects the python tool chain
-$script:CodeItToolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun'; 'uv' = 'python' }
+$script:CodeItToolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun'; 'uv' = 'python'; 'pwsh' = 'powershell' }
 $script:CodeItContainerPort      = 3000
 $script:CodeItDefaultAgents      = @('opencode', 'claude')
 # -locale's default: match the host. C.UTF-8 when the host's locale cannot be told.
@@ -39,7 +39,7 @@ function Resolve-CodeItToolchain([string]$raw) {
     } | Where-Object { $_ } | Select-Object -Unique)
     foreach ($t in $resolved) {
         if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $script:CodeItKnownToolchain) {
-            Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv)."
+            Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh)."
             Write-Warning "A comma-separated list is expected, e.g. -toolchain 'node,bun'."
             return $null
         }
@@ -280,6 +280,7 @@ function Get-CodeItToolchainCommands([string]$name) {
         'node'   { return @('node --version', 'volta --version') }
         'bun'    { return @('bun --version') }
         'python' { return @('python3 --version', 'uv --version') }
+        'powershell' { return @('pwsh --version', 'powershell') }
         default  { return @() }
     }
 }

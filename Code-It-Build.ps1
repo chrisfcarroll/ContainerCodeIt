@@ -16,7 +16,8 @@
 
 .PARAMETER toolchain
     Comma-separated toolchains to build. Known: dotnet, node (aliases js-node,
-    ts-node), bun (aliases js-bun, ts-bun), python (alias uv). Alias: -stack.
+    ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell
+    (alias pwsh). Alias: -stack.
     Required: with none, this help is printed and the script exits 1.
 
 .PARAMETER packageCaches
@@ -189,7 +190,7 @@ try {
     # Build args for the toolchains and package caches, spelled the way the
     # Dockerfile's ARGs match them (uppercase), plus labels recording the resolution.
     $buildArgs = @()
-    foreach ($tc in @('dotnet', 'node', 'bun', 'python')) {
+    foreach ($tc in $script:CodeItKnownToolchain) {
         $buildArgs += @('--build-arg', "$($tc.ToUpper())=$(Bool-Arg ($enabledToolchain -contains $tc))")
     }
     foreach ($pc in @('nuget', 'npm')) {

@@ -7,6 +7,10 @@
 # include, runs code-it-build, optionally copies agent state into the save dir, and
 # prints the code-it command to start.
 #
+# The toolchains detected on the host are preselected, else dotnet,node. powershell
+# is preselected as well when pwsh or powershell is found, or on Windows (Git Bash,
+# MSYS2, Cygwin or WSL).
+#
 # Usage:
 #   ./code-it-first-run.sh [OPTIONS]
 #
@@ -153,8 +157,16 @@ echo "Using container runtime: $runtime"
 if [[ -n "$toolchain_arg" ]]; then
     chosen_toolchain=$(ci_resolve_toolchain "$toolchain_arg") || exit 1
 else
-    default_tcs="$detected_toolchain"
+    # PowerShell is an addition to the other tool chains, not a replacement for them,
+    # so the usual default applies when it is the only one detected.
+    default_tcs=""
+    for t in $detected_toolchain; do
+        [[ "$t" == powershell ]] || default_tcs=$(ci_comma_list_add "$default_tcs" "$t")
+    done
     [[ -n "$default_tcs" ]] || default_tcs="$CI_DEFAULT_TOOLCHAIN"
+    if ci_has "$detected_toolchain" powershell || ci_host_is_windows; then
+        default_tcs=$(ci_comma_list_add "$default_tcs" powershell)
+    fi
     chosen_toolchain=$(choose "Toolchains to build" "$default_tcs" "${toolchain_available[@]}")
 fi
 if [[ -z "$chosen_toolchain" ]]; then

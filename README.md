@@ -27,7 +27,8 @@ Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succ
 
 `code-it` first run does interactive setup. it checks the container runtime
 and git, attempts to detect if you have at least one toolchain and agent already, asks which to
-include (pre-selecting what it found), shows the resulting `code-it-build` command and
+include (pre-selecting what it found, else `dotnet,node`; and `powershell` when `pwsh`
+or `powershell` is found, on Windows, or always from `Code-It-FirstRun.ps1`), shows the resulting `code-it-build` command and
 runs it, offering to re-use your existing agent session state. Existing state is copied, not moved 
 or symlinked or changed. Copied state will include your agent login in the container.
 The script waits for you to confirm y/n before doing anything.
@@ -109,7 +110,7 @@ package cache, tests, and a commit.
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
+| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
@@ -186,10 +187,10 @@ launchers expose them as two comma-separated lists, passed to `docker build` as
 `--build-arg`s:
 
 - `--toolchain` / `-toolchain` (alias `--stack` / `-stack`) — toolchains to build:
-  `dotnet`, `node`, `bun`, `python`. Default: the remembered image, else an existing
+  `dotnet`, `node`, `bun`, `python`, `powershell`. Default: the remembered image, else an existing
   code-it image, else the first-run setup (see below).
   `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
-  `bun`; `uv` is an alias for `python`. Aliases resolve to the canonical name, so
+  `bun`; `uv` is an alias for `python`; `pwsh` is an alias for `powershell`. Aliases resolve to the canonical name, so
   `--toolchain ts-node` is `--toolchain node` and produces the same image name.
 - `--package-caches` / `-packageCaches` — package repos whose host cache is mounted
   read-only: `nuget`, `npm`, `bun`. Default: the repos implied by `--toolchain`
@@ -225,9 +226,9 @@ Subsequent calls to `code-it` with no --toolchain specified will reuse your most
 `--toolchain node` installs Node.js from Alpine repos, and npm when `npm` is a package cache.
 `--toolchain bun` installs Bun with its official installer.
 `--toolchain python` adds Python 3, uv and uvx from Alpine's repos.
-
-Every image also has PowerShell 7: on x86_64 from Microsoft's musl build; on aarch64
-only with `dotnet`, as a dotnet tool, since Microsoft ships no musl build for it.
+`--toolchain powershell` adds PowerShell 7 (`pwsh`): on x86_64 from Microsoft's musl
+build; on aarch64 as a dotnet tool, since Microsoft ships no musl build for it, so it
+also installs the .NET 10 SDK if `dotnet` is not selected.
 
 
 ## Agents
