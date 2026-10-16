@@ -129,15 +129,14 @@ assert "--help exit code" "$?"
 assert_contains "--help shows usage" "$out" "Usage:"
 assert_contains "--help documents -c" "$out" "--claude, -c"
 assert_contains "--help documents -o" "$out" "--opencode, -o"
-assert_contains "--help documents --rebuild-image" "$out" "--rebuild-image"
 assert_contains "--help documents --prompt" "$out" "--prompt, -p TEXT"
 assert_contains "--help documents --headless" "$out" "--headless"
 assert_contains "--help documents the -- separator" "$out" "-- AGENT-ARGS..."
 assert_contains "--help documents --locale" "$out" "--locale, -l LOCALE"
-assert_contains "--help marks --build-image deprecated" "$out" "Deprecated: use code-it-build.sh"
+[[ "$out" != *--build-image* && "$out" != *--dockerfile-dir* ]]; assert "--help no longer offers building" "$?"
 assert_contains "--help documents the remembered toolchain default" "$out" "SAVE-DIR/image-history"
 out=$(PATH="$stub_docker:$PATH" "$script_dir/code-it-build.sh" --help)
-assert_contains "code-it-build --help documents the toolchain default" "$out" "--toolchain, -t LIST     Comma-separated toolchains to build. Default: dotnet,node."
+assert_contains "code-it-build --help says --toolchain is required" "$out" "Required: with none,"
 
 # ---------------------------------------------------------------------------
 echo "3. Default dry-run with docker: opencode agent, only its state mounted"
@@ -270,51 +269,38 @@ PATH="$stub_docker:$PATH" "$code_it" --nonsense >/dev/null 2>&1
 PATH="$stub_docker:$PATH" "$code_it" --dry-run --work-dir "$tmp/does-not-exist" --save-dir "$save" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "missing work dir fails" "$?"
 PATH="$stub_docker:$PATH" "$code_it" --image no-such-image "${common_args[@]}" >/dev/null 2>&1
-[[ "$?" != "0" ]]; assert "unknown image without --build-image fails" "$?"
+[[ "$?" != "0" ]]; assert "unknown explicit image fails" "$?"
 out=$(STUB_IMAGES_FAIL=1 PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" 2>&1)
 [[ "$?" != "0" ]]; assert "failure to list images fails" "$?"
 assert_contains "failure to list images asks if the runtime is running" "$out" "Could not list docker images"
 
 # ---------------------------------------------------------------------------
-echo "10. Build image"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image "${common_args[@]}")
-assert "--build-image exit code" "$?"
-assert_contains "docker build invoked" "$out" "STUB-DOCKER-BUILD"
-assert_contains "build tags the image" "$out" "-t code-it-alpine-dotnet-node:latest"
-PATH="$stub_docker:$PATH" "$code_it" --build-image --dockerfile-dir "$tmp" "${common_args[@]}" >/dev/null 2>&1
-[[ "$?" != "0" ]]; assert "--build-image with no Dockerfile fails" "$?"
-out=$(STUB_BUILD_FAIL=1 PATH="$stub_docker:$PATH" "$code_it" --build-image --work-dir "$script_dir" --save-dir "$save" 2>&1)
-[[ "$?" != "0" ]]; assert "failed build exits non-zero" "$?"
-[[ "$out" != *STUB-DOCKER-RUN* ]]; assert "failed build does not run the container" "$?"
-
-# ---------------------------------------------------------------------------
-echo "10b. Rebuild image (updates the agent install fragments)"
-dfdir="$tmp/dfdir"; mkdir -p "$dfdir"
-cp "$script_dir/Dockerfile" "$dfdir/Dockerfile"
-cp -R "$script_dir/agents" "$dfdir/agents"
-sed -i -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$dfdir/agents/"*/install.dockerfile
-today=$(date +%Y-%m-%d)
-out=$(PATH="$stub_docker:$PATH" "$code_it" --rebuild-image --dockerfile-dir "$dfdir" "${common_args[@]}")
-assert "--rebuild-image exit code" "$?"
-assert_contains "rebuild invokes docker build" "$out" "STUB-DOCKER-BUILD"
-assert_contains "rebuild implies build (no --build-image needed)" "$out" "-t code-it-alpine-dotnet-node:latest"
-grep -q "# last changed $today" "$dfdir/agents/opencode/install.dockerfile"
-assert "opencode install fragment dates bumped to today" "$?"
-grep -q "# last changed 2000-01-01" "$dfdir/agents/opencode/install.dockerfile" >/dev/null 2>&1
-[[ "$?" != "0" ]]; assert "old dates gone from the fragment" "$?"
-# plain --build-image leaves the dates alone
-sed -i -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$dfdir/agents/"*/install.dockerfile
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --dockerfile-dir "$dfdir" "${common_args[@]}")
-assert "--build-image exit code (dfdir)" "$?"
-grep -q "# last changed 2000-01-01" "$dfdir/agents/opencode/install.dockerfile"
-assert "--build-image leaves dates unchanged" "$?"
+echo "10. code-it does not build"
+for opt in --build-image -b --rebuild-image -B "--dockerfile-dir $tmp"; do
+    # shellcheck disable=SC2086
+    out=$(PATH="$stub_docker:$PATH" "$code_it" $opt "${common_args[@]}" 2>&1)
+    [[ "$?" != "0" ]]; assert "removed ${opt%% *} fails" "$?"
+    assert_contains "removed ${opt%% *} points to code-it-build" "$out" "has been removed: build images with code-it-build.sh"
+    [[ "$out" != *STUB-DOCKER-BUILD* ]]; assert "removed ${opt%% *} does not build" "$?"
+done
 
 # ---------------------------------------------------------------------------
 echo "10c. code-it-build: dry-run, labels, --tech, --rebuild"
 build_it="$script_dir/code-it-build.sh"
 
-# --dry-run prints the build command (the same args code-it passes) without executing
+# There is no default toolchain: with none, print the help and exit 1
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+[[ "$?" == "1" ]]; assert "code-it-build without --toolchain exits 1" "$?"
+assert_contains "code-it-build without --toolchain says it is required" "$out" "--toolchain is required"
+assert_contains "code-it-build without --toolchain prints the help" "$out" "Usage:"
+[[ "$out" != *"docker build"* ]]; assert "code-it-build without --toolchain does not build" "$?"
+PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain , >/dev/null 2>&1
+[[ "$?" == "1" ]]; assert "code-it-build with an empty --toolchain list exits 1" "$?"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet --dry-run --dockerfile-dir "$script_dir" 2>&1)
+assert_contains "code-it-build builds only the toolchain given" "$out" "--build-arg NODE=false"
+
+# --dry-run prints the build command (the same args code-it passes) without executing
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" 2>&1)
 assert "code-it-build --dry-run exit code" "$?"
 assert_contains "build dry-run prints the build command" "$out" "docker build"
 assert_contains "build dry-run passes DOTNET=true" "$out" "--build-arg DOTNET=true"
@@ -342,15 +328,22 @@ assert_contains "build --package-caches nuget excludes NPM" "$out" "--build-arg 
 # Unknown names are hard errors
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain cobol >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build unknown tool chain fails" "$?"
-PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --package-caches pip >/dev/null 2>&1
+PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --package-caches pip >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build unknown package cache fails" "$?"
 
-# --rebuild bumps the dates and then really builds
+# --rebuild bumps the dates and then really builds; a plain build leaves them alone
+today=$(date +%Y-%m-%d)
 bdfdir="$tmp/build-dfdir"; mkdir -p "$bdfdir"
 cp "$script_dir/Dockerfile" "$bdfdir/Dockerfile"
 cp -R "$script_dir/agents" "$bdfdir/agents"
 sed -i -E "s/# last changed [0-9]{4}-[0-9]{2}-[0-9]{2}/# last changed 2000-01-01/" "$bdfdir/agents/"*/install.dockerfile
-out=$(PATH="$stub_docker:$PATH" "$build_it" --rebuild --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
+assert_contains "code-it-build invokes docker build" "$out" "STUB-DOCKER-BUILD"
+grep -q "# last changed 2000-01-01" "$bdfdir/agents/opencode/install.dockerfile"
+assert "code-it-build without --rebuild leaves the dates unchanged" "$?"
+STUB_BUILD_FAIL=1 PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dockerfile-dir "$bdfdir" --runtime docker >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "code-it-build failed build exits non-zero" "$?"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --rebuild --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
 assert "code-it-build --rebuild exit code" "$?"
 assert_contains "code-it-build --rebuild invokes docker build" "$out" "STUB-DOCKER-BUILD"
 grep -q "# last changed $today" "$bdfdir/agents/opencode/install.dockerfile"
@@ -358,7 +351,7 @@ assert "code-it-build --rebuild bumps the opencode fragment" "$?"
 grep -q "# last changed $today" "$bdfdir/agents/claude/install.dockerfile"
 assert "code-it-build --rebuild bumps the claude fragment" "$?"
 # A missing Dockerfile is an error
-PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$tmp" >/dev/null 2>&1
+PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$tmp" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build without a Dockerfile fails" "$?"
 
 # The marker sits after "USER agent1"; /etc/code-it-agents is root-owned, so the
@@ -374,7 +367,7 @@ fi
 echo "STUB-DOCKER-BUILD \$*"
 EOF
 chmod +x "$capturebin/docker"
-PATH="$capturebin:$PATH" "$build_it" --dockerfile-dir "$script_dir" >/dev/null 2>&1
+PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet,node --dockerfile-dir "$script_dir" >/dev/null 2>&1
 assert "code-it-build captured the assembled Dockerfile" "$([[ -s "$capture" ]]; echo $?)"
 [[ "$(awk '/^USER /{u=$2} /printf .* > \/etc\/code-it-agents/{print u; exit}' "$capture")" == "root" ]]
 assert "assembled Dockerfile writes /etc/code-it-agents as root" "$?"
@@ -382,20 +375,20 @@ assert "assembled Dockerfile writes /etc/code-it-agents as root" "$?"
 assert "assembled Dockerfile drops back to agent1 after the root write" "$?"
 
 echo "10f. code-it-build agents"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" 2>&1)
 assert_contains "default build installs opencode and claude" "$out" "agents opencode,claude"
 assert_contains "default build labels the agents" "$out" "--label code-it.agents=opencode,claude"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent opencode 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent opencode 2>&1)
 assert_contains "--agent opencode selects only opencode" "$out" "agents opencode"
 case "$out" in
     *"agents opencode,claude"*) assert "--agent opencode excludes claude" 1 ;;
     *)                         assert "--agent opencode excludes claude" 0 ;;
 esac
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent opencode-v2 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent opencode-v2 2>&1)
 assert_contains "--agent opencode-v2 selects the v2 installer" "$out" "agents opencode-v2"
 assert_contains "opencode-v2 image label records the agent" "$out" "--label code-it.agents=opencode-v2"
 assert_contains "opencode-v2 image label records its binary" "$out" "--label code-it.agent-binaries=opencode-v2=/home/agent1/.opencode-v2/bin/opencode"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
 assert_contains "agent-binaries label lists every agent" "$out" "--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode/bin/opencode"
 grep -q 'bash /tmp/opencode-v2-install.sh --version 2.0.6' "$script_dir/agents/opencode-v2/install.dockerfile"
 assert "opencode-v2 uses the official installer with a pinned version" "$?"
@@ -403,20 +396,18 @@ assert "opencode-v2 uses the official installer with a pinned version" "$?"
 assert "opencode and opencode-v2 binaries do not overwrite each other" "$?"
 grep -q 'mv .*/\.opencode/bin/opencode ~/\.opencode-v2/bin/opencode' "$script_dir/agents/opencode-v2/install.dockerfile"
 assert "opencode-v2 installs to its own AGENT_BINARY path" "$?"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
 assert_contains "--agent accepts a list" "$out" "agents claude,opencode"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --list-agents)
 assert "--list-agents exit code" "$?"
 assert_contains "code-it-build --list-agents lists claude" "$out" "claude"
 assert_contains "code-it-build --list-agents lists opencode" "$out" "opencode"
-PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --agent nosuch >/dev/null 2>&1
+PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent nosuch >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build unknown agent fails" "$?"
 
 echo "10d. code-it reads the image label"
 out=$(STUB_IMAGE_TOOL_CHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for tech 'node,bun'"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image "${common_args[@]}")
-assert_contains "the --build-image shim prints a deprecation note" "$out" "deprecated"
 
 echo "10e. Python tool chain (python / uv / --stack)"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --stack python 2>&1)
@@ -425,10 +416,10 @@ assert_contains "--stack python derives the image name" "$out" "-t code-it-alpin
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain uv 2>&1)
 assert_contains "uv aliases python (PYTHON=true)" "$out" "--build-arg PYTHON=true"
 assert_contains "uv canonical image name" "$out" "-t code-it-alpine-python:latest"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
-assert_contains "default build sets PYTHON=false" "$out" "--build-arg PYTHON=false"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --stack python -b "${common_args[@]}" 2>&1)
-assert_contains "code-it --stack python delegates a PYTHON=true build" "$out" "--build-arg PYTHON=true"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" 2>&1)
+assert_contains "a build without python sets PYTHON=false" "$out" "--build-arg PYTHON=false"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --stack python "${common_args[@]}" 2>&1)
+assert_contains "code-it --stack python looks for the python image" "$out" "image 'code-it-alpine-python' does not exist"
 # Python and uv are installed together only when the Python toolchain is enabled.
 grep -q "apk add --no-cache python3 uv" "$script_dir/Dockerfile"
 assert "Dockerfile installs uv with the Python toolchain" "$?"
@@ -543,10 +534,8 @@ assert_contains "run inside an agent container does not repeat the agent prefix"
 echo "11b. Short-form aliases"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -p "explain this" "${common_args[@]}")
 assert_contains "-p is --prompt" "$out" '--prompt explain\ this'
-out=$(PATH="$stub_docker:$PATH" "$code_it" -t node,bun -b "${common_args[@]}")
-assert_contains "-t is --toolchain" "$out" "code-it-alpine-node-bun:latest"
-out=$(PATH="$stub_docker:$PATH" "$code_it" -b "${common_args[@]}")
-assert_contains "-b is --build-image" "$out" "STUB-DOCKER-BUILD"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -t node "${common_args[@]}")
+assert_contains "-t is --toolchain" "$out" "'code-it-alpine-node' does not exist; using 'code-it-alpine-dotnet-node'"
 out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" -r container -i code-it-alpine-dotnet-node -w "$script_dir" -s "$save" -d)
 assert_contains "-r is --runtime" "$out" "Using container runtime: container"
 assert_contains "-i is --image" "$out" "code-it-alpine-dotnet-node:latest"
@@ -554,11 +543,6 @@ case "$out" in
     *STUB-DOCKER-RUN*) assert "-d is --dry-run (no run)" 1 ;;
     *)                 assert "-d is --dry-run (no run)" 0 ;;
 esac
-alias_dfdir="$tmp/alias-dfdir"; mkdir -p "$alias_dfdir"
-cp "$script_dir/Dockerfile" "$alias_dfdir/Dockerfile"
-cp -R "$script_dir/agents" "$alias_dfdir/agents"
-out=$(PATH="$stub_docker:$PATH" "$code_it" -B --dockerfile-dir "$alias_dfdir" -w "$script_dir" -s "$save" -d)
-assert_contains "-B is --rebuild-image" "$out" "STUB-DOCKER-BUILD"
 
 # ---------------------------------------------------------------------------
 echo "12. NuGet package cache: detection and read-only mount"
@@ -626,8 +610,8 @@ echo "12b. Tech stack: --toolchain / --package-caches build args and read-only c
 npm_cache="$tmp/npm-cache"; mkdir -p "$npm_cache"
 bun_cache="$tmp/bun-cache"; mkdir -p "$bun_cache"
 
-# Defaults: tech dotnet,node and the package repos they imply (nuget, npm)
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image "${common_args[@]}")
+# dotnet,node and the package repos they imply (nuget, npm)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain dotnet,node)
 assert_contains "default build passes DOTNET=true" "$out" "--build-arg DOTNET=true"
 assert_contains "default build passes NODE=true" "$out" "--build-arg NODE=true"
 assert_contains "default build passes BUN=false" "$out" "--build-arg BUN=false"
@@ -636,7 +620,7 @@ assert_contains "node implies NPM=true" "$out" "--build-arg NPM=true"
 assert_contains "reports the resolved tech" "$out" "tech dotnet,node; package repos nuget,npm"
 
 # --toolchain replaces the default set
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain node,bun "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain node,bun)
 assert_contains "--toolchain node,bun drops DOTNET" "$out" "--build-arg DOTNET=false"
 assert_contains "--toolchain node,bun keeps NODE" "$out" "--build-arg NODE=true"
 assert_contains "--toolchain node,bun keeps BUN" "$out" "--build-arg BUN=true"
@@ -644,41 +628,41 @@ assert_contains "--toolchain node,bun drops NUGET (dotnet gone)" "$out" "--build
 assert_contains "--toolchain node,bun keeps NPM (node present)" "$out" "--build-arg NPM=true"
 
 # --package-caches replaces the implied set, independently of --toolchain
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain node,bun --package-caches npm "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain node,bun --package-caches npm)
 assert_contains "--package-caches npm keeps NPM" "$out" "--build-arg NPM=true"
 assert_contains "--package-caches npm excludes BUN cache" "$out" "--build-arg NUGET=false"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain node,bun --package-caches bun "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain node,bun --package-caches bun)
 assert_contains "--package-caches bun selects the BUN package cache" "$out" "--build-arg NPM=false"
 assert_contains "--package-caches bun excludes NPM" "$out" "--build-arg NUGET=false"
 
 # --package-caches nuget with no dotnet still selects the NuGet cache (nuget without dotnet)
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain bun --package-caches nuget "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain bun --package-caches nuget)
 assert_contains "nuget package cache without dotnet" "$out" "--build-arg NUGET=true"
 
 # The default image name follows --toolchain, so the built and run images agree
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain node,bun "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain node,bun)
 assert_contains "image name derives from --toolchain" "$out" "-t code-it-alpine-node-bun:latest"
 
 # The old --tech spelling is kept as a hidden alias
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --tech bun "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tech bun)
 assert_contains "--tech alias selects BUN" "$out" "--build-arg BUN=true"
 
 # Tech aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain js-node "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain js-node)
 assert_contains "js-node aliases node (NODE=true)" "$out" "--build-arg NODE=true"
 assert_contains "js-node canonical image name" "$out" "-t code-it-alpine-node:latest"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain ts-node "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain ts-node)
 assert_contains "ts-node aliases node (NODE=true)" "$out" "--build-arg NODE=true"
 assert_contains "ts-node canonical image name" "$out" "-t code-it-alpine-node:latest"
 assert_contains "ts-node implies the npm package cache" "$out" "--build-arg NPM=true"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain js-bun "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain js-bun)
 assert_contains "js-bun aliases bun (BUN=true)" "$out" "--build-arg BUN=true"
 assert_contains "js-bun canonical image name" "$out" "-t code-it-alpine-bun:latest"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain ts-bun,bun "${common_args[@]}")
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain ts-bun,bun)
 assert_contains "ts-bun aliases bun and dedupes with bun" "$out" "-t code-it-alpine-bun:latest"
 
 # The old --packages spelling is gone, not an alias
-PATH="$stub_docker:$PATH" "$code_it" --build-image --packages npm "${common_args[@]}" >/dev/null 2>&1
+PATH="$stub_docker:$PATH" "$code_it" --packages npm "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "removed --packages spelling fails" "$?"
 
 # An image label that disagrees with --toolchain is called out
@@ -698,7 +682,7 @@ out=$(STUB_IMAGE_AGENTS=opencode,opencode-v2 STUB_IMAGE_AGENT_BINARIES=opencode=
     PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}" 2>&1)
 [[ "$?" != "0" ]]; assert "image with an out-of-date agent binary fails" "$?"
 assert_contains "names the recorded and expected binaries" "$out" "runs agent 'opencode-v2' from /home/agent1/.opencode/bin/opencode, but agents/opencode-v2/config now names /home/agent1/.opencode-v2/bin/opencode"
-assert_contains "out-of-date agent binary suggests the rebuild" "$out" "code-it-build.sh --agent opencode,opencode-v2"
+assert_contains "out-of-date agent binary suggests the rebuild" "$out" "code-it-build.sh --toolchain dotnet,node --agent opencode,opencode-v2"
 [[ "$out" != *STUB-DOCKER-RUN* ]]; assert "image with an out-of-date agent binary is not run" "$?"
 out=$(STUB_IMAGE_AGENTS=opencode,opencode-v2 STUB_IMAGE_AGENT_BINARIES=opencode=/home/agent1/.opencode/bin/opencode,opencode-v2=/home/agent1/.opencode-v2/bin/opencode \
     PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}" 2>&1)
@@ -712,9 +696,9 @@ out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --toolchain
 assert_contains "falls back to the image-name guess without a label" "$out" "looks built for tech 'dotnet,node'"
 
 # Unknown names are hard errors
-PATH="$stub_docker:$PATH" "$code_it" --build-image --toolchain cobol "${common_args[@]}" >/dev/null 2>&1
+PATH="$stub_docker:$PATH" "$code_it" --toolchain cobol "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "--toolchain with an unknown name fails" "$?"
-PATH="$stub_docker:$PATH" "$code_it" --build-image --package-caches pip "${common_args[@]}" >/dev/null 2>&1
+PATH="$stub_docker:$PATH" "$code_it" --package-caches pip "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "--package-caches with an unknown name fails" "$?"
 
 # Host caches for enabled package repos are mounted read-only
@@ -1259,25 +1243,23 @@ resolve_locale "$linux_bin" '!!' >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "an unreadable locale is an error" "$?"
 
 # code-it-build passes the locale as a build arg and labels the image with it
-out=$(LANG=en_GB.UTF-8 PATH="$linux_bin:$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+out=$(LANG=en_GB.UTF-8 PATH="$linux_bin:$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" 2>&1)
 assert_contains "build defaults LOCALE to the host's" "$out" "--build-arg LOCALE=en_GB.UTF-8"
 assert_contains "build labels the image's locale" "$out" "--label code-it.locale=en_GB.UTF-8"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --locale de-DE 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --locale de-DE 2>&1)
 assert_contains "build --locale translates a Windows name" "$out" "--build-arg LOCALE=de_DE.UTF-8"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" -l C 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" -l C 2>&1)
 assert_contains "build -l is the short form" "$out" "--build-arg LOCALE=C.UTF-8"
-PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --locale '!!' >/dev/null 2>&1
+PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --locale '!!' >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build unreadable --locale fails" "$?"
 grep -q '^ARG LOCALE=C.UTF-8$' "$script_dir/Dockerfile" && grep -q '^ENV LANG=\$LOCALE$' "$script_dir/Dockerfile"
 assert "Dockerfile sets LANG from the LOCALE build arg" "$?"
 
-# code-it passes the locale to the run, and on to code-it-build
+# code-it passes the locale to the run
 out=$(LANG=en_GB.UTF-8 PATH="$linux_bin:$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node 2>&1)
 assert_contains "code-it runs with the host's locale" "$out" '-e LANG="en_GB.UTF-8"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node --locale sv-SE 2>&1)
 assert_contains "code-it --locale sets the run's LANG" "$out" '-e LANG="sv_SE.UTF-8"'
-out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node --build-image -l sv-SE 2>&1)
-assert_contains "code-it --build-image passes the locale to code-it-build" "$out" "--build-arg LOCALE=sv_SE.UTF-8"
 PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node --locale '!!' >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it unreadable --locale fails" "$?"
 

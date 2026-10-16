@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # Builds the code-it container image from the Dockerfile, selecting the toolchains,
-# package caches and coding agents to include. code-it.sh delegates its --build-image
-# and --rebuild-image flags here.
+# package caches and coding agents to include. code-it.sh runs the images this builds.
 #
 # The coding agents' install layers live in agents/<name>/install.dockerfile. This
 # script assembles them into the Dockerfile (replacing the
@@ -13,7 +12,8 @@
 #   ./code-it-build.sh [OPTIONS]
 #
 # Options:
-#   --toolchain, -t LIST     Comma-separated toolchains to build. Default: dotnet,node.
+#   --toolchain, -t LIST     Comma-separated toolchains to build. Required: with none,
+#                            this help is printed and the script exits 1.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun), python (alias uv).
 #                            --stack is an alias for --toolchain.
@@ -68,6 +68,8 @@ dockerfile_dir="$script_dir"
 runtime=""
 dry_run=false
 
+show_help() { sed -n '2,/^$/{ s/^# \{0,1\}//; p; }' "$0"; }
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --toolchain|--tech|--stack|-t)
@@ -112,7 +114,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            sed -n '2,/^$/{ s/^# \{0,1\}//; p; }' "$0"
+            show_help
             exit 0
             ;;
         -*)
@@ -145,9 +147,16 @@ if [[ "$list_agents" == true ]]; then
     exit 0
 fi
 
-# Resolve the requested toolchains, package caches and agents. An explicit, empty
-# --package-caches means "no package caches", not "use the implied ones".
-enabled_toolchain=$(ci_resolve_toolchain "$toolchain") || exit 1
+# There is no default toolchain: building one nobody asked for wastes a long build.
+# The empty-list check also catches --toolchain ','.
+# An explicit, empty --package-caches means "no package caches", not "use the implied ones".
+enabled_toolchain=""
+[[ -n "$toolchain" ]] && { enabled_toolchain=$(ci_resolve_toolchain "$toolchain") || exit 1; }
+if [[ -z "$enabled_toolchain" ]]; then
+    echo "Warning: --toolchain is required." >&2
+    show_help
+    exit 1
+fi
 if [[ "$package_caches_set" == true ]]; then
     enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_toolchain") || exit 1
 else

@@ -67,20 +67,6 @@
     every requested tool chain is used instead. Set it explicitly to force a particular
     image (an error if it does not exist).
 
-.PARAMETER buildImage
-    Deprecated: use Code-It-Build.ps1. Builds the image before running the container,
-    by delegating to Code-It-Build.ps1 with this run's toolchains, package caches,
-    locale and image name, and only the selected agent. Default: $false
-
-.PARAMETER rebuildImage
-    Like -buildImage, but first updates the "# last changed" cache-bust dates in the
-    Dockerfile to today, forcing the agent install layers to rerun so the agents are
-    updated. Deprecated: use Code-It-Build.ps1 -rebuild. Default: $false
-
-.PARAMETER dockerfileDir
-    Directory containing the Dockerfile. Used with -buildImage.
-    Defaults to this script's own directory.
-
 .PARAMETER runtime
     Container runtime to use: "docker" or "container".
     Default: auto-detected as described above.
@@ -112,9 +98,8 @@
 
 .PARAMETER locale
     The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB. Passed to the
-    container when it runs, and to Code-It-Build.ps1 with -buildImage. Default:
-    like-host, the host's own locale (see Code-It-Build.ps1 -help); C.UTF-8 if it
-    cannot be told.
+    container when it runs, so it need not be the image's. Default: like-host, the
+    host's own locale (see Code-It-Build.ps1 -help); C.UTF-8 if it cannot be told.
 
 .PARAMETER agentName
     Name of the agent running in the container. Used for Git author attribution and home
@@ -151,8 +136,8 @@
     Runs OpenCode in the default container mounting the current directory.
 
 .EXAMPLE
-    .\Code-It.ps1 -buildImage
-    Builds the image from the Dockerfile next to this script, then runs it.
+    .\Code-It.ps1 -toolchain python
+    Runs the code-it-alpine-python image, built by Code-It-Build.ps1 -toolchain python.
 
 .EXAMPLE
     .\Code-It.ps1 -port 8000
@@ -236,9 +221,6 @@ param (
     [switch]$listAgents     = $false,
     [string]$saveDir        = "$HOME/.config/code-it",
     [string]$image          = "",
-    [switch]$buildImage     = $false,
-    [switch]$rebuildImage   = $false,
-    [string]$dockerfileDir  = $PSScriptRoot,
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$runtime        = "",
     [int]$port              = 0,
@@ -335,8 +317,12 @@ foreach ($file in $envFile) {
 }
 $cliRunArgs += $runArgs
 
-# -rebuildImage implies -buildImage
-if ($rebuildImage) { $buildImage = $true }
+# Removed parameters would otherwise reach the agent as pass-through arguments
+$removed = @($agentArgs | Where-Object { $_ -match '^-(b|buildImage|rebuildImage|dockerfileDir)$' })
+if ($removed) {
+    Write-Warning "$($removed[0]) has been removed: build images with Code-It-Build.ps1, then run them."
+    exit 1
+}
 
 # Resolve -toolchain / -packageCaches. A list replaces the default set rather than
 # toggling it, so there are no per-tech on/off parameters to clash with future tech
@@ -492,26 +478,23 @@ $runArgsFile = Join-Path $saveDir 'run-args'
 
 Write-Verbose ([string]::join("`n", @("    $runtime images") + $validImages)).ToString()
 
-# An existing image is only required when we are not about to build one. If the exact
-# image is missing and the user did not name one, use the most-recently built existing
-# image whose recorded toolchains contain every requested chain.
-if (-not $buildImage) {
-    $exactExists = $validImages | Where-Object { $_ -and ($_ -eq $image -or $_ -match "^$([regex]::Escape($image))[: ]") } | Select-Object -First 1
-    if (-not $exactExists) {
-        if ($PSBoundParameters.ContainsKey('image')) {
-            Write-Warning "$runtime image '$image' does not exist.
+# If the exact image is missing and the user did not name one, use the most-recently
+# built existing image whose recorded toolchains contain every requested chain.
+$exactExists = $validImages | Where-Object { $_ -and ($_ -eq $image -or $_ -match "^$([regex]::Escape($image))[: ]") } | Select-Object -First 1
+if (-not $exactExists) {
+    if ($PSBoundParameters.ContainsKey('image')) {
+        Write-Warning "$runtime image '$image' does not exist.
     Build it, or set -image to an image that exists."
-            exit 1
-        }
-        $supersetImage = Find-CodeItSupersetImage $runtime $enabledToolchain
-        if ($supersetImage) {
-            "    '$image' does not exist; using '$supersetImage', which contains $($enabledToolchain -join ',')"
-            $image = $supersetImage
-        } else {
-            Write-Warning "$runtime image '$image' does not exist.
+        exit 1
+    }
+    $supersetImage = Find-CodeItSupersetImage $runtime $enabledToolchain
+    if ($supersetImage) {
+        "    '$image' does not exist; using '$supersetImage', which contains $($enabledToolchain -join ',')"
+        $image = $supersetImage
+    } else {
+        Write-Warning "$runtime image '$image' does not exist.
     Build it with Code-It-Build.ps1 -toolchain $($enabledToolchain -join ','), or set -image to an image that exists."
-            exit 1
-        }
+        exit 1
     }
 }
 
@@ -530,27 +513,26 @@ if ($imageToolchain -and -not (Test-CodeItToolchainInclude $imageToolchain $enab
 
 # The image must contain the chosen agent: go.sh cannot run one it lacks. Check here,
 # where the error is readable, rather than in the container.
-if (-not $buildImage) {
-    $imageAgents = Get-CodeItImageAgents $runtime $image $agentsDir
-    if ($imageAgents -and (($imageAgents -split ',') -notcontains $codeAgent)) {
-        Write-Warning "Image '$image' does not contain agent '$codeAgent'; it has: $imageAgents."
-        Write-Warning "Choose one of those with -agent, or rebuild with Code-It-Build.ps1 -agent $codeAgent,$imageAgents"
+$imageAgents = Get-CodeItImageAgents $runtime $image $agentsDir
+$rebuildToolchain = if ($imageToolchain) { $imageToolchain } else { $enabledToolchain -join ',' }
+if ($imageAgents -and (($imageAgents -split ',') -notcontains $codeAgent)) {
+    Write-Warning "Image '$image' does not contain agent '$codeAgent'; it has: $imageAgents."
+    Write-Warning "Choose one of those with -agent, or rebuild with Code-It-Build.ps1 -toolchain $rebuildToolchain -agent $codeAgent,$imageAgents"
+    exit 1
+}
+# An image built before a change to the agent's definition may install it somewhere
+# else, or run another agent's binary from a shared path, so check the binary the
+# image recorded against the one the definition names now.
+if ($imageAgents) {
+    $imageAgentBinary = Get-CodeItImageAgentBinary $runtime $image $codeAgent
+    if ($null -eq $imageAgentBinary) {
+        Write-Warning "Image '$image' predates code-it recording its agents' binaries, so it may run an out-of-date '$codeAgent'."
+        Write-Warning "If the agent is not the one you expect, rebuild with Code-It-Build.ps1 -toolchain $rebuildToolchain -agent $imageAgents"
+    } elseif ($imageAgentBinary -ne $agentBinary) {
+        $recorded = if ($imageAgentBinary) { $imageAgentBinary } else { 'an unrecorded path' }
+        Write-Warning "Image '$image' runs agent '$codeAgent' from $recorded, but agents/$codeAgent/config now names $agentBinary."
+        Write-Warning "The image is out of date; rebuild it with Code-It-Build.ps1 -toolchain $rebuildToolchain -agent $imageAgents"
         exit 1
-    }
-    # An image built before a change to the agent's definition may install it somewhere
-    # else, or run another agent's binary from a shared path, so check the binary the
-    # image recorded against the one the definition names now.
-    if ($imageAgents) {
-        $imageAgentBinary = Get-CodeItImageAgentBinary $runtime $image $codeAgent
-        if ($null -eq $imageAgentBinary) {
-            Write-Warning "Image '$image' predates code-it recording its agents' binaries, so it may run an out-of-date '$codeAgent'."
-            Write-Warning "If the agent is not the one you expect, rebuild with Code-It-Build.ps1 -agent $imageAgents"
-        } elseif ($imageAgentBinary -ne $agentBinary) {
-            $recorded = if ($imageAgentBinary) { $imageAgentBinary } else { 'an unrecorded path' }
-            Write-Warning "Image '$image' runs agent '$codeAgent' from $recorded, but agents/$codeAgent/config now names $agentBinary."
-            Write-Warning "The image is out of date; rebuild it with Code-It-Build.ps1 -agent $imageAgents"
-            exit 1
-        }
     }
 }
 
@@ -633,27 +615,6 @@ if ($enabledPackageCaches -contains 'bun') {
         Add-CacheMount $bunCache "$containerHome/.bun-host" 'Bun package cache'
     } else {
         "    No Bun package cache found; Bun will download into the container"
-    }
-}
-
-# Build image if requested. This is a thin shim: Code-It-Build.ps1 owns building,
-# the Dockerfile's "# last changed" bump and the image label.
-if ($buildImage) {
-    "    Note: -buildImage is deprecated; use Code-It-Build.ps1. Delegating."
-    $buildShimParams = @{
-        toolchain    = ($enabledToolchain -join ',')
-        packageCaches = ($enabledPackageCaches -join ',')
-        agent         = $codeAgent
-        image         = $image
-        dockerfileDir = $dockerfileDir
-        runtime       = $runtime
-        locale        = $containerLocale
-    }
-    if ($rebuildImage) { $buildShimParams['rebuild'] = $true }
-    & "$PSScriptRoot/Code-It-Build.ps1" @buildShimParams
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Code-It-Build.ps1 failed with exit code $LASTEXITCODE"
-        exit $LASTEXITCODE
     }
 }
 

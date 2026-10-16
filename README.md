@@ -105,9 +105,6 @@ package cache, tests, and a commit.
 | `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image`, `-i` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
-| `--build-image`, `-b` | `-buildImage` | off | Deprecated: use `code-it-build`. Build the image before running, with only the selected agent |
-| `--rebuild-image`, `-B` | `-rebuildImage` | off | Deprecated: use `code-it-build --rebuild`. As `--build-image`, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
-| `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
@@ -122,6 +119,11 @@ exist, `code-it` uses the most-recently built existing image whose
 `code-it-alpine-dotnet-bun` for `dotnet`), and says which image it chose. An explicit
 `--image` is used as-is and is an error if missing.
 
+`code-it` runs images; it does not build them. Build with `code-it-build`, or let
+first run do it. (The old `--build-image`, `--rebuild-image` and `--dockerfile-dir`
+options are gone: `code-it` chooses one agent to run, while an image holds a set, so
+building from `code-it` rebuilt images without their other agents.)
+
 ## code-it-build options
 
 `code-it-build.sh` and `Code-It-Build.ps1` build the image (and label it with its tool
@@ -129,7 +131,7 @@ chains and package caches). They accept the same logical parameters:
 
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
-| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | `dotnet,node` | Toolchains to build (aliases as above) |
+| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | required | Toolchains to build (aliases as above). With none, prints the help and exits 1 |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Package repos to support; an explicit empty list means none |
 | `--agent`, `--agents`, `-a LIST` | `-agent`, `-agents LIST` | `opencode,claude` | Agents to install |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
@@ -231,11 +233,11 @@ only with `dotnet`, as a dotnet tool, since Microsoft ships no musl build for it
 ## Agents
 
 ```bash
-./code-it-build.sh --agent opencode          # a leaner image, OpenCode only
-./code-it.sh --agent opencode                # run it
-./code-it-build.sh --agent opencode-v2       # OpenCode v2, pinned separately
-./code-it.sh --agent opencode-v2 --headless "summarise this repo"
-./code-it.sh --list-agents                   # what is available
+./code-it-build.sh -t node --agent opencode              # a leaner image, OpenCode only
+./code-it.sh -t node --agent opencode                    # run it
+./code-it-build.sh -t node --agent opencode,opencode-v2  # v1 and v2 side by side
+./code-it.sh -t node --agent opencode-v2 --headless "summarise this repo"
+./code-it.sh --list-agents                               # what is available
 ```
 
 OpenCode v1 and v2 can be built into the same image: v2's binary is moved to
@@ -421,7 +423,7 @@ docker run -it --rm \
 
 ## Rough Edges
 
-- Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it-build --rebuild` / `Code-It-Build.ps1 -rebuild`)
+- Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it-build --toolchain <chains> --rebuild` / `Code-It-Build.ps1 -toolchain <chains> -rebuild`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
 - Git configuration and indexing on Windows
   - When Git alternates between Windows and the Linux container on a bind-mounted

@@ -273,7 +273,7 @@ if [ -z "$agent_bin" ] ; then
     exit 1
 fi
 if [ ! -x "$agent_bin" ] ; then
-    echo "Agent binary $agent_bin is missing from this image: its install step failed. Rebuild with code-it-build --rebuild." >&2
+    echo "Agent binary $agent_bin is missing from this image: its install step failed. Rebuild with code-it-build --toolchain <chains> --rebuild." >&2
     exit 1
 fi
 if [ "${CODE_AGENT_HEADLESS:-}" = "1" ] ; then

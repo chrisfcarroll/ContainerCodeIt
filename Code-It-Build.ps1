@@ -8,8 +8,7 @@
     Builds the Alpine image from the Dockerfile with the requested toolchains,
     package caches and coding agents, and labels the image with that resolution so
     Code-It.ps1 can check it rather than guess from the image name. The image's
-    locale defaults to the host's. Code-It.ps1's -buildImage and -rebuildImage
-    flags delegate here.
+    locale defaults to the host's. Code-It.ps1 runs the images this builds.
 
     The agents' install layers live in agents/<name>/install.dockerfile. This script
     assembles them into the Dockerfile (replacing the "# @@CODE_IT_AGENT_INSTALLS@@"
@@ -17,8 +16,8 @@
 
 .PARAMETER toolchain
     Comma-separated toolchains to build. Known: dotnet, node (aliases js-node,
-    ts-node), bun (aliases js-bun, ts-bun), python (alias uv). Default: "dotnet,node".
-    Alias: -stack.
+    ts-node), bun (aliases js-bun, ts-bun), python (alias uv). Alias: -stack.
+    Required: with none, this help is printed and the script exits 1.
 
 .PARAMETER packageCaches
     Comma-separated package repos to support, independent of -toolchain. Known:
@@ -58,7 +57,7 @@
     .\Code-It-Build.ps1 -toolchain 'node,bun' -packageCaches npm -agent opencode
 
 .EXAMPLE
-    .\Code-It-Build.ps1 -rebuild
+    .\Code-It-Build.ps1 -toolchain 'dotnet,node' -rebuild
 #>
 
 [CmdletBinding(PositionalBinding = $false)]
@@ -100,10 +99,19 @@ if ($listAgents) {
     exit 0
 }
 
-# Resolve the requested toolchains, package caches and agents. An explicit, empty
-# -packageCaches means "no package caches", not "use the implied ones".
-$enabledToolchain = Resolve-CodeItToolchain $toolchain
-if ($null -eq $enabledToolchain) { exit 1 }
+# There is no default toolchain: building one nobody asked for wastes a long build.
+# The empty-list check also catches -toolchain ','.
+# An explicit, empty -packageCaches means "no package caches", not "use the implied ones".
+$enabledToolchain = @()
+if ($toolchain) {
+    $enabledToolchain = Resolve-CodeItToolchain $toolchain
+    if ($null -eq $enabledToolchain) { exit 1 }
+}
+if ($enabledToolchain.Count -eq 0) {
+    Write-Warning "-toolchain is required."
+    Get-Help $PSCommandPath -Full
+    exit 1
+}
 if ($PSBoundParameters.ContainsKey('packageCaches')) {
     $enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolchain
 } else {

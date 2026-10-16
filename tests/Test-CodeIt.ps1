@@ -186,7 +186,7 @@ Assert "-help exit code 0" ($r.code -eq 0)
 Assert-Contains "-help shows the synopsis" $r.out 'Launches an Alpine Linux container'
 Assert-Contains "-help documents -agent" $r.out 'Run the agent defined in agents/<name>'
 Assert-Contains "-help documents -locale" $r.out "The container's locale (its LANG)"
-Assert-Contains "-help marks -buildImage deprecated" $r.out 'Deprecated: use Code-It-Build.ps1'
+Assert "-help no longer offers building" (-not $r.out.Contains('-buildImage') -and -not $r.out.Contains('-dockerfileDir'))
 Assert-Contains "-help documents the remembered toolchain default" $r.out '<saveDir>/image-history'
 foreach ($f in @('Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1')) {
     $help = Get-Help (Join-Path $scriptDir $f) -Full | Out-String
@@ -297,59 +297,39 @@ Assert "-runtime bogus fails" ($r.code -ne 0)
 $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', (Join-Path $tmp 'does-not-exist'), '-saveDir', $save) $stubPath
 Assert "missing work dir fails" ($r.code -ne 0)
 $r = Invoke-Scenario $codeIt (@('-image', 'no-such-image') + $commonArgs) $stubPath
-Assert "unknown image without -buildImage fails" ($r.code -ne 0)
+Assert "unknown explicit image fails" ($r.code -ne 0)
 $env:STUB_IMAGES_FAIL = '1'
 try { $r = Invoke-Scenario $codeIt $commonArgs $stubPath } finally { $env:STUB_IMAGES_FAIL = $null }
 Assert "failure to list images fails" ($r.code -ne 0)
 Assert-Contains "failure to list images asks if the runtime is running" $r.out 'Could not list docker images'
 
 # ---------------------------------------------------------------------------
-"9. Build image"
-$r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
-Assert "-buildImage exit code 0" ($r.code -eq 0)
-Assert-Contains "docker build invoked" $r.out 'STUB-DOCKER-BUILD'
-Assert-Contains "build tags the image" $r.out '-t code-it-alpine-dotnet-node:latest'
-$r = Invoke-Scenario $codeIt (@('-buildImage', '-dockerfileDir', $tmp) + $commonArgs) $stubPath
-Assert "-buildImage with no Dockerfile fails" ($r.code -ne 0)
-$env:STUB_BUILD_FAIL = '1'
-try { $r = Invoke-Scenario $codeIt @('-buildImage', '-WorkDirToMount', $scriptDir, '-saveDir', $save) $stubPath }
-finally { $env:STUB_BUILD_FAIL = $null }
-Assert "failed build exits non-zero" ($r.code -ne 0)
-Assert "failed build does not run the container" (-not $r.out.Contains('STUB-DOCKER-RUN'))
-
-# ---------------------------------------------------------------------------
-"9b. Rebuild image (updates the agent install fragments)"
-$dfDir = Join-Path $tmp 'dfdir'
-$null = New-Item -ItemType Directory -Force -Path $dfDir
-Copy-Item (Join-Path $scriptDir 'Dockerfile') (Join-Path $dfDir 'Dockerfile')
-Copy-Item (Join-Path $scriptDir 'agents') (Join-Path $dfDir 'agents') -Recurse -Force
-$openFragmentPath = Join-Path $dfDir 'agents/opencode/install.dockerfile'
-$openFragmentOld = [IO.File]::ReadAllText($openFragmentPath) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'
-[IO.File]::WriteAllText($openFragmentPath, $openFragmentOld)
-$today = [DateTime]::Today.ToString('yyyy-MM-dd')
-$r = Invoke-Scenario $codeIt (@('-rebuildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
-Assert "-rebuildImage exit code 0" ($r.code -eq 0)
-Assert-Contains "rebuild invokes docker build" $r.out 'STUB-DOCKER-BUILD'
-Assert-Contains "rebuild implies build (no -buildImage needed)" $r.out '-t code-it-alpine-dotnet-node:latest'
-$frag = Get-Content $openFragmentPath -Raw
-Assert "opencode fragment dates bumped to today" ($frag.Contains("# last changed $today"))
-Assert "old dates gone from the fragment" (-not $frag.Contains('# last changed 2000-01-01'))
-Assert "rebuild changes only the dates" ($frag -eq ($openFragmentOld -replace '# last changed 2000-01-01', "# last changed $today"))
-$fragBytes = [IO.File]::ReadAllBytes($openFragmentPath)
-Assert "rebuild writes no BOM" (-not ($fragBytes[0] -eq 0xEF -and $fragBytes[1] -eq 0xBB -and $fragBytes[2] -eq 0xBF))
-# plain -buildImage leaves the dates untouched
-[IO.File]::WriteAllText($openFragmentPath, $openFragmentOld)
-$r = Invoke-Scenario $codeIt (@('-buildImage', '-dockerfileDir', $dfDir) + $commonArgs) $stubPath
-Assert "-buildImage exit code 0 (dfdir)" ($r.code -eq 0)
-$frag = Get-Content $openFragmentPath -Raw
-Assert "-buildImage leaves dates unchanged" ($frag.Contains('# last changed 2000-01-01'))
+"9. Code-It does not build"
+foreach ($removedArgs in @(@('-buildImage'), @('-b'), @('-rebuildImage'), @('-dockerfileDir', $tmp))) {
+    $r = Invoke-Scenario $codeIt ($removedArgs + $commonArgs) $stubPath
+    Assert "removed $($removedArgs[0]) fails" ($r.code -ne 0)
+    Assert-Contains "removed $($removedArgs[0]) points to Code-It-Build" $r.out 'has been removed: build images with Code-It-Build.ps1'
+    Assert "removed $($removedArgs[0]) does not build" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
+}
 
 # ---------------------------------------------------------------------------
 "9c. Code-It-Build.ps1: dry-run, labels, -tech, -rebuild"
 $codeItBuild = Join-Path $scriptDir 'Code-It-Build.ps1'
+$today = [DateTime]::Today.ToString('yyyy-MM-dd')
+
+# There is no default toolchain: with none, print the help and exit 1
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+Assert "Code-It-Build without -toolchain exits 1" ($r.code -eq 1)
+Assert-Contains "Code-It-Build without -toolchain says it is required" $r.out '-toolchain is required'
+Assert-Contains "Code-It-Build without -toolchain prints the help" $r.out 'SYNOPSIS'
+Assert "Code-It-Build without -toolchain does not build" (-not $r.out.Contains('docker build'))
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', ',') $stubPath
+Assert "Code-It-Build with an empty -toolchain list exits 1" ($r.code -eq 1)
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet') $stubPath
+Assert-Contains "Code-It-Build builds only the toolchain given" $r.out '--build-arg NODE=false'
 
 # -dryRun prints the build command without executing it
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
 Assert "Code-It-Build -dryRun exit code 0" ($r.code -eq 0)
 Assert-Contains "build dry-run prints the build command" $r.out 'docker build'
 Assert-Contains "build dry-run passes DOTNET=true" $r.out '--build-arg DOTNET=true'
@@ -374,7 +354,7 @@ Assert-Contains "build -packageCaches nuget excludes NPM" $r.out '--build-arg NP
 # Unknown names are hard errors
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'cobol') $stubPath
 Assert "Code-It-Build unknown tool chain fails" ($r.code -ne 0)
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-packageCaches', 'pip') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir, '-packageCaches', 'pip') $stubPath
 Assert "Code-It-Build unknown package cache fails" ($r.code -ne 0)
 
 # -rebuild bumps the dates and then really builds
@@ -386,30 +366,30 @@ foreach ($a in @('opencode', 'claude', 'opencode-v2')) {
     $p = Join-Path $bDfDir "agents/$a/install.dockerfile"
     [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'))
 }
-$r = Invoke-Scenario $codeItBuild @('-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker', '-agent', 'opencode,claude,opencode-v2') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker', '-agent', 'opencode,claude,opencode-v2') $stubPath
 Assert "Code-It-Build -rebuild exit code 0" ($r.code -eq 0)
 Assert-Contains "Code-It-Build -rebuild invokes docker build" $r.out 'STUB-DOCKER-BUILD'
 Assert "Code-It-Build -rebuild bumps the opencode fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the claude fragment" ((Get-Content (Join-Path $bDfDir 'agents/claude/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the opencode-v2 fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode-v2/install.dockerfile') -Raw).Contains("# last changed $today"))
 # A missing Dockerfile is an error
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $tmp) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $tmp) $stubPath
 Assert "Code-It-Build without a Dockerfile fails" ($r.code -ne 0)
 
 "9f. Code-It-Build agents"
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
 Assert-Contains "default build installs opencode and claude" $r.out 'agents opencode,claude'
 Assert-Contains "default build labels the agents" $r.out '--label code-it.agents=opencode,claude'
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-agent', 'opencode') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir, '-agent', 'opencode') $stubPath
 Assert-Contains "-agent opencode selects only opencode" $r.out 'agents opencode'
 Assert "default -agent excludes claude" (-not $r.out.Contains('agents opencode,claude'))
-$r = Invoke-ScenarioCommand "& '$codeItBuild' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
+$r = Invoke-ScenarioCommand "& '$codeItBuild' -toolchain 'dotnet,node' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
 Assert-Contains "-agent accepts a list" $r.out 'agents claude,opencode'
-$r = Invoke-Scenario $codeItBuild @('-dryRun','-dockerfileDir',$scriptDir,'-agent','opencode-v2') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun','-dockerfileDir',$scriptDir,'-agent','opencode-v2') $stubPath
 Assert-Contains "-agent opencode-v2 selects the v2 installer" $r.out 'agents opencode-v2'
 Assert-Contains "opencode-v2 image label records the agent" $r.out '--label code-it.agents=opencode-v2'
 Assert-Contains "opencode-v2 image label records its binary" $r.out '--label code-it.agent-binaries=opencode-v2=/home/agent1/.opencode-v2/bin/opencode'
-$r = Invoke-ScenarioCommand "& '$codeItBuild' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
+$r = Invoke-ScenarioCommand "& '$codeItBuild' -toolchain 'dotnet,node' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
 Assert-Contains "agent-binaries label lists every agent" $r.out '--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode/bin/opencode'
 $v2Install = Get-Content (Join-Path $scriptDir 'agents/opencode-v2/install.dockerfile') -Raw
 Assert "opencode-v2 uses the pinned official installer" ($v2Install.Contains('https://opencode.ai/v2/install -o') -and $v2Install -match 'HOME=\S+ bash \S+ --version 2\.0\.6')
@@ -419,7 +399,7 @@ $r = Invoke-ScenarioCommand "& '$codeItBuild' -listAgents" $stubPath
 Assert "Code-It-Build -listAgents exit code 0" ($r.code -eq 0)
 Assert-Contains "Code-It-Build -listAgents lists claude" $r.out 'claude'
 Assert-Contains "Code-It-Build -listAgents lists opencode" $r.out 'opencode'
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-agent', 'nosuch') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir, '-agent', 'nosuch') $stubPath
 Assert "Code-It-Build unknown agent fails" ($r.code -ne 0)
 
 "9d. Code-It reads the image label"
@@ -427,8 +407,6 @@ $env:STUB_IMAGE_TOOL_CHAINS = 'node,bun'
 try { $r = Invoke-Scenario $codeIt (@('-image', 'code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
 Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for tech 'node,bun'"
-$r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
-Assert-Contains "the -buildImage shim prints a deprecation note" $r.out 'deprecated'
 
 "9e. Python tool chain (python / uv / -stack)"
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-stack', 'python') $stubPath
@@ -437,10 +415,10 @@ Assert-Contains "-stack python derives the image name" $r.out '-t code-it-alpine
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'uv') $stubPath
 Assert-Contains "uv aliases python (PYTHON=true)" $r.out '--build-arg PYTHON=true'
 Assert-Contains "uv canonical image name" $r.out '-t code-it-alpine-python:latest'
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
-Assert-Contains "default build sets PYTHON=false" $r.out '--build-arg PYTHON=false'
-$r = Invoke-Scenario $codeIt (@('-stack', 'python', '-buildImage') + $commonArgs) $stubPath
-Assert-Contains "code-it -stack python delegates a PYTHON=true build" $r.out '--build-arg PYTHON=true'
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+Assert-Contains "a build without python sets PYTHON=false" $r.out '--build-arg PYTHON=false'
+$r = Invoke-Scenario $codeIt (@('-stack', 'python') + $commonArgs) $stubPath
+Assert-Contains "code-it -stack python looks for the python image" $r.out "image 'code-it-alpine-python' does not exist"
 $dfText = Get-Content (Join-Path $scriptDir 'Dockerfile') -Raw
 Assert "Dockerfile installs uv with the Python toolchain" ($dfText.Contains('apk add --no-cache python3 uv'))
 Assert "Dockerfile gates Python packages on PYTHON" ($dfText.Contains('if [ "$PYTHON" = true ]'))
@@ -639,7 +617,7 @@ try {
 
 # ---------------------------------------------------------------------------
 "11b. Tech stack: -toolchain / -packageCaches build args and read-only caches"
-$r = Invoke-Scenario $codeIt (@('-buildImage') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node') $stubPath
 Assert-Contains "default build passes DOTNET=true" $r.out '--build-arg DOTNET=true'
 Assert-Contains "default build passes NODE=true" $r.out '--build-arg NODE=true'
 Assert-Contains "default build passes BUN=false" $r.out '--build-arg BUN=false'
@@ -648,7 +626,7 @@ Assert-Contains "node implies NPM=true" $r.out '--build-arg NPM=true'
 Assert-Contains "reports the resolved tech" $r.out 'tech dotnet,node; package repos nuget,npm'
 
 # -toolchain replaces the default set
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','node,bun') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'node,bun') $stubPath
 Assert-Contains "-toolchain node,bun drops DOTNET" $r.out '--build-arg DOTNET=false'
 Assert-Contains "-toolchain node,bun keeps NODE" $r.out '--build-arg NODE=true'
 Assert-Contains "-toolchain node,bun keeps BUN" $r.out '--build-arg BUN=true'
@@ -656,42 +634,41 @@ Assert-Contains "-toolchain node,bun drops NUGET (dotnet gone)" $r.out '--build-
 Assert-Contains "-toolchain node,bun keeps NPM (node present)" $r.out '--build-arg NPM=true'
 
 # -packageCaches replaces the implied set, independently of -toolchain
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','node,bun','-packageCaches','npm') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'node,bun', '-packageCaches', 'npm') $stubPath
 Assert-Contains "-packageCaches npm keeps NPM" $r.out '--build-arg NPM=true'
 Assert-Contains "-packageCaches npm excludes NUGET" $r.out '--build-arg NUGET=false'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','node,bun','-packageCaches','bun') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'node,bun', '-packageCaches', 'bun') $stubPath
 Assert-Contains "-packageCaches bun selects the BUN package cache" $r.out '--build-arg NPM=false'
 Assert-Contains "-packageCaches bun excludes NUGET" $r.out '--build-arg NUGET=false'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','bun','-packageCaches','nuget') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'bun', '-packageCaches', 'nuget') $stubPath
 Assert-Contains "nuget package cache without dotnet" $r.out '--build-arg NUGET=true'
 
 # The default image name follows -toolchain
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','node,bun') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'node,bun') $stubPath
 Assert-Contains "image name derives from -toolchain" $r.out '-t code-it-alpine-node-bun:latest'
 
 # The old -tech spelling is kept as a hidden alias
-$r = Invoke-Scenario $codeIt (@('-buildImage','-tech','bun') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath
 Assert-Contains "-tech alias selects BUN" $r.out '--build-arg BUN=true'
 
 # Tech aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','js-node') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'js-node') $stubPath
 Assert-Contains "js-node aliases node (NODE=true)" $r.out '--build-arg NODE=true'
 Assert-Contains "js-node canonical image name" $r.out '-t code-it-alpine-node:latest'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','ts-node') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'ts-node') $stubPath
 Assert-Contains "ts-node aliases node (NODE=true)" $r.out '--build-arg NODE=true'
 Assert-Contains "ts-node canonical image name" $r.out '-t code-it-alpine-node:latest'
 Assert-Contains "ts-node implies the npm package cache" $r.out '--build-arg NPM=true'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','js-bun') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'js-bun') $stubPath
 Assert-Contains "js-bun aliases bun (BUN=true)" $r.out '--build-arg BUN=true'
 Assert-Contains "js-bun canonical image name" $r.out '-t code-it-alpine-bun:latest'
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','ts-bun,bun') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'ts-bun,bun') $stubPath
 Assert-Contains "ts-bun aliases bun and dedupes with bun" $r.out '-t code-it-alpine-bun:latest'
 
 # The old -packages spelling is gone as a parameter: it is now passed to the agent,
 # so it no longer selects a package cache
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','bun','-packages','npm') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-toolchain','dotnet,node','-packages','npm') + $commonArgs) $stubPath
 Assert-Contains "removed -packages is forwarded to the agent" $r.out '-packages npm'
-Assert-Contains "removed -packages no longer selects NPM" $r.out '--build-arg NPM=false'
 
 $env:STUB_IMAGE_TOOL_CHAINS = 'dotnet'
 try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
@@ -717,7 +694,7 @@ try { $r = Invoke-Scenario $codeIt (@('-agent','opencode-v2') + $commonArgs) $st
 finally { $env:STUB_IMAGE_AGENTS = $null; $env:STUB_IMAGE_AGENT_BINARIES = $null }
 Assert "image with an out-of-date agent binary fails" ($r.code -ne 0)
 Assert-Contains "names the recorded and expected binaries" $r.out "runs agent 'opencode-v2' from /home/agent1/.opencode/bin/opencode, but agents/opencode-v2/config now names /home/agent1/.opencode-v2/bin/opencode"
-Assert-Contains "out-of-date agent binary suggests the rebuild" $r.out 'Code-It-Build.ps1 -agent opencode,opencode-v2'
+Assert-Contains "out-of-date agent binary suggests the rebuild" $r.out 'Code-It-Build.ps1 -toolchain dotnet,node -agent opencode,opencode-v2'
 Assert "image with an out-of-date agent binary is not run" (-not $r.out.Contains('STUB-DOCKER-RUN'))
 $env:STUB_IMAGE_AGENTS = 'opencode,opencode-v2'
 $env:STUB_IMAGE_AGENT_BINARIES = 'opencode=/home/agent1/.opencode/bin/opencode,opencode-v2=/home/agent1/.opencode-v2/bin/opencode'
@@ -737,9 +714,9 @@ finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
 Assert-Contains "falls back to the image-name guess without a label" $r.out "looks built for tech 'dotnet,node'"
 
 # Unknown names are hard errors
-$r = Invoke-Scenario $codeIt (@('-buildImage','-toolchain','cobol') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-toolchain','cobol') + $commonArgs) $stubPath
 Assert "-toolchain with an unknown name fails" ($r.code -ne 0)
-$r = Invoke-Scenario $codeIt (@('-buildImage','-packageCaches','pip') + $commonArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-packageCaches','pip') + $commonArgs) $stubPath
 Assert "-packageCaches with an unknown name fails" ($r.code -ne 0)
 
 $npmCache = Join-Path $tmp 'npm-cache'; $bunCache = Join-Path $tmp 'bun-cache'
@@ -1197,21 +1174,19 @@ printf '\r\nHKEY_CURRENT_USER\\Control Panel\\International\r\n    LocaleName   
 $savedLang = $env:LANG; $savedLcAll = $env:LC_ALL
 $env:LANG = 'en_GB.UTF-8'; $env:LC_ALL = $null
 try {
-    $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+    $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
     Assert-Contains "build defaults LOCALE to the host's" $r.out '--build-arg LOCALE=en_GB.UTF-8'
     Assert-Contains "build labels the image's locale" $r.out '--label code-it.locale=en_GB.UTF-8'
-    $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-locale', 'de-DE') $stubPath
+    $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir, '-locale', 'de-DE') $stubPath
     Assert-Contains "build -locale translates a Windows name" $r.out '--build-arg LOCALE=de_DE.UTF-8'
-    $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-locale', '!!') $stubPath
+    $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir, '-locale', '!!') $stubPath
     Assert "Code-It-Build unreadable -locale fails" ($r.code -ne 0)
 
-    # Code-It passes the locale to the run, and on to Code-It-Build
+    # Code-It passes the locale to the run
     $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node') + $commonArgs) $stubPath
     Assert-Contains "Code-It runs with the host's locale" $r.out '-e LANG="en_GB.UTF-8"'
     $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-locale', 'sv-SE') + $commonArgs) $stubPath
     Assert-Contains "Code-It -locale sets the run's LANG" $r.out '-e LANG="sv_SE.UTF-8"'
-    $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-buildImage', '-locale', 'sv-SE') + $commonArgs) $stubPath
-    Assert-Contains "Code-It -buildImage passes the locale to Code-It-Build" $r.out '--build-arg LOCALE=sv_SE.UTF-8'
     $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-locale', '!!') + $commonArgs) $stubPath
     Assert "Code-It unreadable -locale fails" ($r.code -ne 0)
 } finally {

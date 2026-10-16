@@ -63,16 +63,6 @@
 #                            label contains every requested tool chain is used instead.
 #                            Set it explicitly to force a particular image (an error if it
 #                            does not exist).
-#   --build-image, -b        Deprecated: use code-it-build.sh. Builds the image before
-#                            running, by delegating to code-it-build.sh with this run's
-#                            toolchains, package caches, locale and image name, and only
-#                            the selected agent.
-#   --rebuild-image, -B      Like --build-image, but first updates the "# last changed"
-#                            cache-bust dates in the Dockerfile to today, forcing the
-#                            agent install layers to rerun so the agents are updated.
-#                            Deprecated: use code-it-build.sh --rebuild.
-#   --dockerfile-dir DIR     Directory containing the Dockerfile. Used with --build-image.
-#                            Defaults to this script's own directory.
 #   --runtime, -r NAME       Container runtime to use: "docker" or "container".
 #                            Default: auto-detected as described above.
 #   --port PORT              Host port to map to the container's port 3000 (so it takes a
@@ -82,16 +72,15 @@
 #                            this script to a free port, starting at 3000, then a random
 #                            high port if 3000-3010 are all taken.
 #   --locale, -l LOCALE      The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB.
-#                            Passed to the container when it runs, and to
-#                            code-it-build.sh with --build-image. Default: like-host,
-#                            the host's own locale (see code-it-build.sh --help);
-#                            C.UTF-8 if it cannot be told.
+#                            Passed to the container when it runs, so it need not be
+#                            the image's. Default: like-host, the host's own locale
+#                            (see code-it-build.sh --help); C.UTF-8 if it cannot be told.
 #   --agent-name NAME        Name of the agent running in the container. Used for Git author
 #                            attribution and home directory naming. Must match the USER set in
 #                            the Dockerfile. Default: "Agent1"
 #
-# Tech stack (used as Docker --build-arg when --build-image is given, and to
-# decide which host package caches are mounted read-only). Passing a list
+# Tech stack (used for the default image name, and to decide which host package
+# caches are mounted read-only). Passing a list
 # REPLACES the default set, so there are no on/off flags to clash with future
 # tech names:
 #   --toolchain, -t LIST     Comma-separated toolchains. --stack is an alias.
@@ -123,8 +112,8 @@
 #   ./code-it.sh --claude --work-dir ~/my-repos
 #       Runs Claude Code in the default container with a custom work directory.
 #
-#   ./code-it.sh --build-image
-#       Builds the image from the Dockerfile next to this script, then runs it.
+#   ./code-it.sh --toolchain python
+#       Runs the code-it-alpine-python image, built by code-it-build.sh --toolchain python.
 #
 #   ./code-it.sh --port 8000
 #       Maps host port 8000 to the container's port 3000.
@@ -229,9 +218,6 @@ work_dir_to_mount="."
 save_dir="$HOME/.config/code-it"
 image=""
 image_explicit=false
-build_image=false
-rebuild_image=false
-dockerfile_dir="$script_dir"
 runtime=""
 port=0
 locale="$CI_LOCALE_LIKE_HOST"
@@ -287,18 +273,9 @@ while [[ $# -gt 0 ]]; do
             image_explicit=true
             shift 2
             ;;
-        --build-image|-b)
-            build_image=true
-            shift
-            ;;
-        --rebuild-image|-B)
-            build_image=true
-            rebuild_image=true
-            shift
-            ;;
-        --dockerfile-dir)
-            dockerfile_dir="$2"
-            shift 2
+        --build-image|-b|--rebuild-image|-B|--dockerfile-dir)
+            echo "$1 has been removed: build images with code-it-build.sh, then run them." >&2
+            exit 1
             ;;
         --runtime|-r)
             runtime="$2"
@@ -578,25 +555,22 @@ run_args_file="$save_dir/run-args"
 
 echo "    Checking $image ..."
 
-# An existing image is only required when we are not about to build one. If the exact
-# image is missing and the user did not name one, use the most-recently built existing
-# image whose recorded toolchains contain every requested chain.
-if [[ "$build_image" == false ]]; then
-    if ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
-        if [[ "$image_explicit" == true ]]; then
-            echo "Warning: $runtime image '$image' does not exist." >&2
-            echo "Build it, or set --image to an image that exists." >&2
-            exit 1
-        fi
-        superset_image=$(ci_find_superset_image "$runtime" "$enabled_toolchain") || superset_image=""
-        if [[ -n "$superset_image" ]]; then
-            echo "    '$image' does not exist; using '$superset_image', which contains ${enabled_toolchain// /,}"
-            image="$superset_image"
-        else
-            echo "Warning: $runtime image '$image' does not exist." >&2
-            echo "Build it with code-it-build.sh --toolchain $(ci_join , "$enabled_toolchain"), or set --image to an image that exists." >&2
-            exit 1
-        fi
+# If the exact image is missing and the user did not name one, use the most-recently
+# built existing image whose recorded toolchains contain every requested chain.
+if ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
+    if [[ "$image_explicit" == true ]]; then
+        echo "Warning: $runtime image '$image' does not exist." >&2
+        echo "Build it, or set --image to an image that exists." >&2
+        exit 1
+    fi
+    superset_image=$(ci_find_superset_image "$runtime" "$enabled_toolchain") || superset_image=""
+    if [[ -n "$superset_image" ]]; then
+        echo "    '$image' does not exist; using '$superset_image', which contains ${enabled_toolchain// /,}"
+        image="$superset_image"
+    else
+        echo "Warning: $runtime image '$image' does not exist." >&2
+        echo "Build it with code-it-build.sh --toolchain $(ci_join , "$enabled_toolchain"), or set --image to an image that exists." >&2
+        exit 1
     fi
 fi
 
@@ -618,27 +592,26 @@ fi
 
 # The image must contain the chosen agent: go.sh cannot run one it lacks. Check here,
 # where the error is readable, rather than in the container.
-if [[ "$build_image" == false ]]; then
-    image_agents=$(ci_image_agents "$runtime" "$image" "$agents_dir")
-    if [[ -n "$image_agents" ]] && ! ci_has "${image_agents//,/ }" "$code_agent"; then
-        echo "Warning: image '$image' does not contain agent '$code_agent'; it has: $image_agents." >&2
-        echo "    Choose one of those with --agent, or rebuild with code-it-build.sh --agent $code_agent,$image_agents" >&2
-        exit 1
-    fi
-    # An image built before a change to the agent's definition may install it somewhere
-    # else, or run another agent's binary from a shared path, so check the binary the
-    # image recorded against the one the definition names now.
-    if [[ -n "$image_agents" ]]; then
-        if image_agent_binary=$(ci_image_agent_binary "$runtime" "$image" "$code_agent"); then
-            if [[ "$image_agent_binary" != "$AGENT_BINARY" ]]; then
-                echo "Warning: image '$image' runs agent '$code_agent' from ${image_agent_binary:-an unrecorded path}, but agents/$code_agent/config now names $AGENT_BINARY." >&2
-                echo "    The image is out of date; rebuild it with code-it-build.sh --agent $image_agents" >&2
-                exit 1
-            fi
-        else
-            echo "Warning: image '$image' predates code-it recording its agents' binaries, so it may run an out-of-date '$code_agent'." >&2
-            echo "    If the agent is not the one you expect, rebuild with code-it-build.sh --agent $image_agents" >&2
+image_agents=$(ci_image_agents "$runtime" "$image" "$agents_dir")
+rebuild_toolchain=${image_toolchain:-$(ci_join , "$enabled_toolchain")}
+if [[ -n "$image_agents" ]] && ! ci_has "${image_agents//,/ }" "$code_agent"; then
+    echo "Warning: image '$image' does not contain agent '$code_agent'; it has: $image_agents." >&2
+    echo "    Choose one of those with --agent, or rebuild with code-it-build.sh --toolchain $rebuild_toolchain --agent $code_agent,$image_agents" >&2
+    exit 1
+fi
+# An image built before a change to the agent's definition may install it somewhere
+# else, or run another agent's binary from a shared path, so check the binary the
+# image recorded against the one the definition names now.
+if [[ -n "$image_agents" ]]; then
+    if image_agent_binary=$(ci_image_agent_binary "$runtime" "$image" "$code_agent"); then
+        if [[ "$image_agent_binary" != "$AGENT_BINARY" ]]; then
+            echo "Warning: image '$image' runs agent '$code_agent' from ${image_agent_binary:-an unrecorded path}, but agents/$code_agent/config now names $AGENT_BINARY." >&2
+            echo "    The image is out of date; rebuild it with code-it-build.sh --toolchain $rebuild_toolchain --agent $image_agents" >&2
+            exit 1
         fi
+    else
+        echo "Warning: image '$image' predates code-it recording its agents' binaries, so it may run an out-of-date '$code_agent'." >&2
+        echo "    If the agent is not the one you expect, rebuild with code-it-build.sh --toolchain $rebuild_toolchain --agent $image_agents" >&2
     fi
 fi
 
@@ -735,25 +708,6 @@ if package_cache_has bun; then
     else
         echo "    No Bun package cache found; Bun will download into the container"
     fi
-fi
-
-# Build image if requested. This is a thin shim: code-it-build.sh owns building,
-# the Dockerfile's "# last changed" bump and the image label.
-if [[ "$build_image" == true ]]; then
-    echo "    Note: --build-image is deprecated; use code-it-build.sh. Delegating."
-    build_shim_args=(
-        --toolchain "$(ci_join , "$enabled_toolchain")"
-        --package-caches "$(ci_join , "$enabled_package_caches")"
-        --agent "$code_agent"
-        --image "$image"
-        --dockerfile-dir "$dockerfile_dir"
-        --runtime "$runtime"
-        --locale "$container_locale"
-    )
-    if [[ "$rebuild_image" == true ]]; then
-        build_shim_args+=(--rebuild)
-    fi
-    "$script_dir/code-it-build.sh" "${build_shim_args[@]}"
 fi
 
 # Translate the prompt, and any -- pass-through arguments, into the chosen agent's own

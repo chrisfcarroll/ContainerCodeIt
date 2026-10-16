@@ -11,8 +11,8 @@
 #     https://opencode.ai/docs/cli/
 
 _code_it_opts='--agent -a --list-agents --opencode -o --claude -c --prompt -p --headless
-    --work-dir -w --save-dir -s --image -i --build-image -b --rebuild-image -B
-    --dockerfile-dir --runtime -r --port --locale -l --agent-name --toolchain -t --stack
+    --work-dir -w --save-dir -s --image -i
+    --runtime -r --port --locale -l --agent-name --toolchain -t --stack
     --package-caches --env -e --env-file --run-arg --docker-arg --dry-run -d --help -h --'
 
 # The flags people reach for most, not the full list; add your own favourites here.
@@ -82,7 +82,7 @@ _code_it() {
     fi
 
     case "$prev" in
-        --work-dir|-w|--save-dir|-s|--dockerfile-dir)
+        --work-dir|-w|--save-dir|-s)
             COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
         --runtime|-r)
             COMPREPLY=( $(compgen -W "docker container" -- "$cur") ); return ;;
