@@ -32,7 +32,7 @@
     Print the prompt and the code-it command, and do nothing else.
 
 .EXAMPLE
-    .\Code-It-Add-Agent.ps1 cursor --url https://docs.cursor.com/cli
+    .\Code-It-Add-Agent.ps1 cursor -url https://docs.cursor.com/cli
 #>
 
 [CmdletBinding(PositionalBinding = $false)]

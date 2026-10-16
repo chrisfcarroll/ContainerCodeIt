@@ -17,8 +17,8 @@
     - Volume mounts for code repositories and agent configuration
     - Git author environment variables or config settings (name and email)
     - Paths to preserve agent credentials, settings, and session data across container runs
-    - A parameterisable tech stack (dotnet/node/bun and the nuget/npm package repos),
-      chosen with switches and passed to docker build as build args
+    - A parameterisable set of toolchains (dotnet, node, bun, python) and package
+      caches (nuget, npm, bun), chosen with -toolchain and -packageCaches
     - The enabled host package caches, mounted read-only
     - Port mappings
 
@@ -68,13 +68,14 @@
     image (an error if it does not exist).
 
 .PARAMETER buildImage
-    If specified, builds the image from the Dockerfile before running the container.
-    Default: $false
+    Deprecated: use Code-It-Build.ps1. Builds the image before running the container,
+    by delegating to Code-It-Build.ps1 with this run's toolchains, package caches,
+    locale and image name, and only the selected agent. Default: $false
 
 .PARAMETER rebuildImage
     Like -buildImage, but first updates the "# last changed" cache-bust dates in the
     Dockerfile to today, forcing the agent install layers to rerun so the agents are
-    updated. Default: $false
+    updated. Deprecated: use Code-It-Build.ps1 -rebuild. Default: $false
 
 .PARAMETER dockerfileDir
     Directory containing the Dockerfile. Used with -buildImage.
@@ -121,10 +122,12 @@
     Default: "Agent1"
 
 .PARAMETER toolchain
-    Comma-separated toolchains to build into the image, passed to docker build as
-    the DOTNET/NODE/BUN/PYTHON build args. Known: dotnet, node (aliases js-node,
-    ts-node), bun (aliases js-bun, ts-bun), python (alias uv).
-    Default: "dotnet,node". Alias: -stack.
+    Comma-separated toolchains. Known: dotnet, node (aliases js-node, ts-node), bun
+    (aliases js-bun, ts-bun), python (alias uv). Alias: -stack.
+    Default: those of the remembered image, the most recent in <saveDir>/image-history
+    whose toolchains cover 70% of your recent runs; else of the most recently used, or
+    else built, code-it image. With no <saveDir> or no code-it image,
+    Code-It-FirstRun.ps1 runs instead.
 
 .PARAMETER packageCaches
     Comma-separated package repos whose host cache is mounted read-only. 
@@ -175,8 +178,9 @@
 
 .NOTES
     - The prompt and any pass-through arguments are translated into each agent's own
-      command line: -prompt becomes `claude PROMPT` or `opencode --prompt PROMPT`, and
-      with -headless it becomes `claude -p PROMPT` or `opencode run PROMPT`
+      command line, from the AGENT_CMD_* templates in agents/<name>/config: -prompt
+      becomes `claude PROMPT` or `opencode --prompt PROMPT`, and with -headless it
+      becomes `claude -p PROMPT` or `opencode run PROMPT`
     - <saveDir>/run-args (default ~/.config/code-it/run-args), if it exists, holds run
       arguments for every run, like devcontainer.json's runArgs: one argument per line,
       not quoted; blank lines and lines starting with # are ignored. e.g.
@@ -187,12 +191,14 @@
       They come before -environment, -envFile and -runArgs, which come after Code-It's
       own, so with docker a later -e of the same name wins.
     - Git author name and email are automatically captured from environment or git config
-    - Volume mounts preserve both Claude and OpenCode state between container runs, so you
-      can destroy the container and create a new one without logging in again
+    - Volume mounts preserve the selected agent's state between container runs, so you
+      can destroy the container and create a new one without logging in again. Only
+      the paths in AGENT_STATE_DIRS and AGENT_STATE_FILES of agents/<name>/config are
+      mounted, under <saveDir> (or <saveDir>/AGENT_SAVE_SUBDIR, e.g. for opencode-v2)
     - Alternatively, use ANTHROPIC_API_KEY (claude) or a provider API key env var (opencode)
       to avoid volume mounts for credentials
-    - Host package caches are mounted read-only (never written) when the matching
-      switch is on and a cache is found, so downloads are reused:
+    - Host package caches are mounted read-only (never written) for the package
+      repos in -packageCaches when a cache is found, so downloads are reused:
         NuGet: ~/.nuget/packages-host (a fallbackPackageFolder). Looked up, in order,
                from the NUGET_PACKAGES env var, the globalPackagesFolder setting in
                the user-level NuGet.Config, and the default ~/.nuget/packages
@@ -502,8 +508,8 @@ if (-not $buildImage) {
             "    '$image' does not exist; using '$supersetImage', which contains $($enabledToolchain -join ',')"
             $image = $supersetImage
         } else {
-            Write-Warning "$runtime image '$image' does not exist and -buildImage was not specified.
-    Either build the image with -buildImage flag or ensure the image is available locally."
+            Write-Warning "$runtime image '$image' does not exist.
+    Build it with Code-It-Build.ps1 -toolchain $($enabledToolchain -join ','), or set -image to an image that exists."
             exit 1
         }
     }

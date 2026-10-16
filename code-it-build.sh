@@ -13,7 +13,7 @@
 #   ./code-it-build.sh [OPTIONS]
 #
 # Options:
-#   --toolchain, -t LIST   Comma-separated toolchains to build. Default: dotnet,node.
+#   --toolchain, -t LIST     Comma-separated toolchains to build. Default: dotnet,node.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun), python (alias uv).
 #                            --stack is an alias for --toolchain.
@@ -22,6 +22,7 @@
 #                            Default: the repos implied by --toolchain
 #                            (dotnet->nuget, node->npm).
 #   --agent, -a LIST         Comma-separated agents to install. Default: opencode,claude.
+#                            --agents is an alias.
 #   --list-agents            List the available agents and exit.
 #   --rebuild                Bump the "# last changed" dates in the Dockerfile and the
 #                            selected agents' install fragments to today first, so the

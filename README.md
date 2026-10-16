@@ -32,6 +32,21 @@ runs it, offering to re-use your existing agent session state. Existing state is
 or symlinked or changed. Copied state will include your agent login in the container.
 The script waits for you to confirm y/n before doing anything.
 
+You can also run it yourself, e.g. to add another image later:
+
+```bash
+./code-it-first-run.sh                      # interactive
+./code-it-first-run.sh --toolchain python --agents claude --yes   # no questions
+./code-it-first-run.sh --dry-run            # show what it would do
+```
+
+```powershell
+.\Code-It-FirstRun.ps1 -toolchain python -agents claude -yes
+```
+
+It takes `--save-dir`/`-saveDir`, `--work-dir`/`-workDir`, `--toolchain`, `--agents`,
+`--image`, `--dockerfile-dir`, `--runtime`, `--yes` and `--dry-run`; see `--help`.
+
 ## Adding a new agent
 
 `code-it-add-agent NAME [--url URL]` will use code-it to attempt to add agent NAME 
@@ -90,14 +105,14 @@ package cache, tests, and a commit.
 | `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image`, `-i` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
-| `--build-image`, `-b` | `-buildImage` | off | Build the image before running |
-| `--rebuild-image`, `-B` | `-rebuildImage` | off | Build the image, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
+| `--build-image`, `-b` | `-buildImage` | off | Deprecated: use `code-it-build`. Build the image before running, with only the selected agent |
+| `--rebuild-image`, `-B` | `-rebuildImage` | off | Deprecated: use `code-it-build --rebuild`. As `--build-image`, first bumping the Dockerfile's `# last changed` dates to today so the agents are updated |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--toolchain LIST`, `-t` | `-toolchain LIST` | remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
+| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
@@ -114,9 +129,9 @@ chains and package caches). They accept the same logical parameters:
 
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
-| `--toolchain LIST`, `-t` | `-toolchain LIST` |   | Toolchains to build (aliases as above) |
+| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | `dotnet,node` | Toolchains to build (aliases as above) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Package repos to support; an explicit empty list means none |
-| `--agent, -a LIST` | `-agent LIST` | `opencode,claude` | Agents to install |
+| `--agent`, `--agents`, `-a LIST` | `-agent`, `-agents LIST` | `opencode,claude` | Agents to install |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
 | `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today, to force agent curl-install refreshes. |
 | `--locale`, `-l` | `-locale` | `like-host` | The image's locale (`LANG`). See [Locale](#locale) |
@@ -187,23 +202,30 @@ Subsequent calls to `code-it` with no --toolchain specified will reuse your most
 ```bash
 
 # A Bun-only sandbox with a read-only host Bun cache
-./code-it.sh --build-image --toolchain bun --package-caches bun
+./code-it-build.sh --toolchain bun --package-caches bun
+./code-it.sh --toolchain bun
 
 # Node.js and Bun, but npm only (e.g. you drive Bun through npm)
-./code-it.sh --build-image --toolchain node,bun --package-caches npm
+./code-it-build.sh --toolchain node,bun --package-caches npm
 
 # Python 3 with uv ( --stack is an alias for --toolchain )
 ./code-it-build.sh --stack python
 ```
 
 ```powershell
-.\Code-It.ps1 -buildImage -toolchain 'node,bun' -packageCaches npm
+.\Code-It-Build.ps1 -toolchain 'node,bun' -packageCaches npm
+.\Code-It.ps1 -toolchain 'node,bun'
 ```
 
 ### Included toolchains
 
-`--toolchain dotnet` installs dotnet10 and dotnet8 from Alpine repos.
+`--toolchain dotnet` installs dotnet10 and dotnet8 SDKs and Mono from Alpine repos.
+`--toolchain node` installs Node.js from Alpine repos, and npm when `npm` is a package cache.
+`--toolchain bun` installs Bun with its official installer.
 `--toolchain python` adds Python 3, uv and uvx from Alpine's repos.
+
+Every image also has PowerShell 7: on x86_64 from Microsoft's musl build; on aarch64
+only with `dotnet`, as a dotnet tool, since Microsoft ships no musl build for it.
 
 
 ## Agents
@@ -221,6 +243,31 @@ OpenCode v1 and v2 can be built into the same image: v2's binary is moved to
 data paths, and v1 exits at once on v2's `opencode.json`, so v2 sets
 `AGENT_SAVE_SUBDIR=opencode-v2` in its config and keeps its state under
 `<save dir>/opencode-v2/` instead of the save dir itself.
+
+### Agent definitions
+
+Each agent is a directory, `agents/<name>/`, so adding one needs no script changes
+(`code-it-add-agent` writes one for you):
+
+- `config`: `KEY=value` lines, sourced by bash and parsed by PowerShell, one per line:
+
+  | Key | Meaning |
+  |---|---|
+  | `AGENT_NAME` | The agent's name, the same as its directory |
+  | `AGENT_SHORT` | Its shortcut letter, shown by `--list-agents` (may be empty) |
+  | `AGENT_COMMAND` | Its command on the host, used by first-run to detect it |
+  | `AGENT_BINARY` | Its absolute path in the image |
+  | `AGENT_INSTALL` | The Dockerfile fragment that installs it, usually `install.dockerfile` |
+  | `AGENT_CONFIG_LABEL` | How messages name its config, e.g. `'Claude Code settings'` |
+  | `AGENT_STATE_DIRS`, `AGENT_STATE_FILES` | `:`-separated paths, relative to home, kept under the save dir and mounted into the container |
+  | `AGENT_SAVE_SUBDIR` | Optional subdirectory of the save dir for its state, when it would clash with another agent's |
+  | `AGENT_CMD_INTERACTIVE_PROMPT`, `AGENT_CMD_INTERACTIVE_NO_PROMPT`, `AGENT_CMD_HEADLESS_PROMPT`, `AGENT_CMD_HEADLESS_NO_PROMPT` | Its command line in each mode, where `{args}` is the arguments after `--` and `{prompt}` the opening prompt |
+
+- `install.dockerfile`: the layers that install it, run as `agent1`. `code-it-build`
+  splices the selected agents' fragments into the Dockerfile. Keep a `# last changed
+  yyyy-mm-dd` comment on the install line, so `--rebuild` can bump it.
+- `default-config/` (optional): files copied into the agent's save dir on first run,
+  if not already there, keeping their layout.
 
 ## Agent-specific Prompts, parameters and flags
 
@@ -357,13 +404,20 @@ Something like this:
 docker run -it --rm \
     -p 0:3000 \
     -e CODE_AGENT=opencode \
+    -e LANG=en_GB.UTF-8 \
     -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
     -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
+    -e GIT_COMMITTER_NAME="Agent1 for $(git config --get user.name)" \
+    -e GIT_COMMITTER_EMAIL="$(git config --get user.email)" \
     -v ~/my-repos:/work \
     -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \
     -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
+    -v ~/.nuget/packages:/home/agent1/.nuget/packages-host:ro \
+    -v ~/.npm:/home/agent1/.npm-host:ro \
     code-it-alpine-dotnet-node:latest
 ```
+
+`--dry-run` prints the exact command.
 
 ## Rough Edges
 
@@ -389,7 +443,7 @@ docker run -it --rm \
 
 1. On **macOS**, they use the **Apple container CLI** (`container`) if installed
 2. Otherwise they use **Docker** if installed
-3. Otherwise they exits with a suggestion for the best runtime to install on your platform
+3. Otherwise they exit with a suggestion for the best runtime to install on your platform
 
 Or on MacOs, specify `--runtime docker` or `--runtime container` (`-runtime` in PowerShell).
 
@@ -437,7 +491,7 @@ git push
 `UseIsolatedAgentRepos.ps1` caters to this workflow, using a mostly-one-way dataflow.
 
 ```
-. UseIsolatedAgentRepos.ps1 -originBranch <defaults to main> -agentBranch <defaults to agent1>
+. UseIsolatedAgentRepos.ps1 -defaultOriginalBranchName <defaults to main> -defaultAgentBranchName <defaults to agent1>
 cd ~/ReposForAgents/Project1
 updateAgentFromOrigin
 cd ~/Repos/Project1

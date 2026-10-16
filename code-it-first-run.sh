@@ -13,7 +13,7 @@
 # Options:
 #   --save-dir, -s DIR       Where agent state is kept/copied. Default: ~/.config/code-it
 #   --work-dir, -w DIR       Host directory mounted as /work. Default: .
-#   --toolchain, -t LIST   Preselect toolchains (skips the question).
+#   --toolchain, -t LIST     Preselect toolchains (skips the question).
 #   --agents, -a LIST        Preselect agents (skips the question).
 #   --image, -i NAME         Image name to build.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile.

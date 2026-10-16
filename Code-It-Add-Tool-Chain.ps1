@@ -32,7 +32,7 @@
     Print the prompt and the code-it command, and do nothing else.
 
 .EXAMPLE
-    .\Code-It-Add-Tool-Chain.ps1 java --url https://openjdk.org/install/
+    .\Code-It-Add-Tool-Chain.ps1 java -url https://openjdk.org/install/
 #>
 
 [CmdletBinding(PositionalBinding = $false)]

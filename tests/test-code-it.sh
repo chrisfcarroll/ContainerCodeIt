@@ -134,6 +134,10 @@ assert_contains "--help documents --prompt" "$out" "--prompt, -p TEXT"
 assert_contains "--help documents --headless" "$out" "--headless"
 assert_contains "--help documents the -- separator" "$out" "-- AGENT-ARGS..."
 assert_contains "--help documents --locale" "$out" "--locale, -l LOCALE"
+assert_contains "--help marks --build-image deprecated" "$out" "Deprecated: use code-it-build.sh"
+assert_contains "--help documents the remembered toolchain default" "$out" "SAVE-DIR/image-history"
+out=$(PATH="$stub_docker:$PATH" "$script_dir/code-it-build.sh" --help)
+assert_contains "code-it-build --help documents the toolchain default" "$out" "--toolchain, -t LIST     Comma-separated toolchains to build. Default: dotnet,node."
 
 # ---------------------------------------------------------------------------
 echo "3. Default dry-run with docker: opencode agent, only its state mounted"
@@ -499,9 +503,10 @@ PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest" \
 [[ "$?" != "0" ]]; assert "requires every requested chain to be present" "$?"
 
 # No image contains the requested chain: still an error
-PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest" \
-    "$code_it" --toolchain python "${super_args[@]}" >/dev/null 2>&1
+out=$(PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest" \
+    "$code_it" --toolchain python "${super_args[@]}" 2>&1)
 [[ "$?" != "0" ]]; assert "errors when no image contains the requested chain" "$?"
+assert_contains "advises code-it-build for the missing image" "$out" "Build it with code-it-build.sh --toolchain python"
 
 # An explicit --image is never substituted, and errors if missing
 PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-bun:latest" \

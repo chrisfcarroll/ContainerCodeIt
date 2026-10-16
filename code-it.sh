@@ -63,10 +63,14 @@
 #                            label contains every requested tool chain is used instead.
 #                            Set it explicitly to force a particular image (an error if it
 #                            does not exist).
-#   --build-image, -b        If specified, builds the image from the Dockerfile before running.
+#   --build-image, -b        Deprecated: use code-it-build.sh. Builds the image before
+#                            running, by delegating to code-it-build.sh with this run's
+#                            toolchains, package caches, locale and image name, and only
+#                            the selected agent.
 #   --rebuild-image, -B      Like --build-image, but first updates the "# last changed"
 #                            cache-bust dates in the Dockerfile to today, forcing the
 #                            agent install layers to rerun so the agents are updated.
+#                            Deprecated: use code-it-build.sh --rebuild.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile. Used with --build-image.
 #                            Defaults to this script's own directory.
 #   --runtime, -r NAME       Container runtime to use: "docker" or "container".
@@ -90,8 +94,12 @@
 # decide which host package caches are mounted read-only). Passing a list
 # REPLACES the default set, so there are no on/off flags to clash with future
 # tech names:
-#   --toolchain, -t LIST   Comma-separated toolchains to build. --stack is an alias.
-#                            Default: dotnet,node.
+#   --toolchain, -t LIST     Comma-separated toolchains. --stack is an alias.
+#                            Default: those of the remembered image, the most recent in
+#                            SAVE-DIR/image-history whose toolchains cover 70% of your
+#                            recent runs; else of the most recently used, or else built,
+#                            code-it image. With no SAVE-DIR or no code-it image,
+#                            code-it-first-run.sh runs instead.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun), python (alias uv).
 #   --package-caches LIST    Comma-separated package repos whose host cache is mounted
@@ -133,8 +141,9 @@
 #
 # Notes:
 #   - The prompt and any pass-through arguments are translated into each agent's own
-#     command line: --prompt becomes `claude PROMPT` or `opencode --prompt PROMPT`, and
-#     with --headless it becomes `claude -p PROMPT` or `opencode run PROMPT`
+#     command line, from the AGENT_CMD_* templates in agents/NAME/config: --prompt
+#     becomes `claude PROMPT` or `opencode --prompt PROMPT`, and with --headless it
+#     becomes `claude -p PROMPT` or `opencode run PROMPT`
 #   - SAVE-DIR/run-args (default ~/.config/code-it/run-args), if it exists, holds run
 #     arguments for every run, like devcontainer.json's runArgs: one argument per line,
 #     not quoted; blank lines and lines starting with # are ignored. e.g.
@@ -145,8 +154,10 @@
 #     They come before --env, --env-file and --run-arg, which come after code-it's own,
 #     so with docker a later -e of the same name wins.
 #   - Git author name and email are automatically captured from environment or git config
-#   - Volume mounts preserve both Claude and OpenCode state between container runs, so you
-#     can destroy the container and create a new one without logging in again
+#   - Volume mounts preserve the selected agent's state between container runs, so you
+#     can destroy the container and create a new one without logging in again. Only
+#     the paths in AGENT_STATE_DIRS and AGENT_STATE_FILES of agents/NAME/config are
+#     mounted, under SAVE-DIR (or SAVE-DIR/AGENT_SAVE_SUBDIR, e.g. for opencode-v2)
 #   - Alternatively, use ANTHROPIC_API_KEY (claude) or a provider API key env var (opencode)
 #     to avoid volume mounts for credentials
 #   - Host package caches are mounted read-only (never written) for the package
@@ -582,8 +593,8 @@ if [[ "$build_image" == false ]]; then
             echo "    '$image' does not exist; using '$superset_image', which contains ${enabled_toolchain// /,}"
             image="$superset_image"
         else
-            echo "Warning: $runtime image '$image' does not exist and --build-image was not specified." >&2
-            echo "Either build the image with the --build-image flag or ensure the image is available locally." >&2
+            echo "Warning: $runtime image '$image' does not exist." >&2
+            echo "Build it with code-it-build.sh --toolchain $(ci_join , "$enabled_toolchain"), or set --image to an image that exists." >&2
             exit 1
         fi
     fi

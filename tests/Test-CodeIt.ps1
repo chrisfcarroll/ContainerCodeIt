@@ -186,6 +186,12 @@ Assert "-help exit code 0" ($r.code -eq 0)
 Assert-Contains "-help shows the synopsis" $r.out 'Launches an Alpine Linux container'
 Assert-Contains "-help documents -agent" $r.out 'Run the agent defined in agents/<name>'
 Assert-Contains "-help documents -locale" $r.out "The container's locale (its LANG)"
+Assert-Contains "-help marks -buildImage deprecated" $r.out 'Deprecated: use Code-It-Build.ps1'
+Assert-Contains "-help documents the remembered toolchain default" $r.out '<saveDir>/image-history'
+foreach ($f in @('Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1')) {
+    $help = Get-Help (Join-Path $scriptDir $f) -Full | Out-String
+    Assert "help examples use PowerShell's -url: $f" (-not $help.Contains(' --url '))
+}
 
 # ---------------------------------------------------------------------------
 "2. Default dry-run: opencode agent, only its state mounted"
@@ -518,6 +524,7 @@ $env:STUB_IMAGES = 'code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:
 try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'python') + $commonArgs) $superPath }
 finally { $env:STUB_IMAGES = $null }
 Assert "errors when no image contains the requested chain" ($r.code -ne 0)
+Assert-Contains "advises Code-It-Build for the missing image" $r.out 'Build it with Code-It-Build.ps1 -toolchain python'
 
 # An explicit -image is never substituted
 $env:STUB_IMAGES = 'code-it-alpine-dotnet-bun:latest'

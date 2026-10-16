@@ -26,7 +26,7 @@
     node->npm). An explicit, empty list means no package caches.
 
 .PARAMETER agent
-    Comma-separated agents to install. Default: opencode,claude.
+    Comma-separated agents to install. Default: opencode,claude. Alias: -agents
 
 .PARAMETER listAgents
     List the available agents and exit.
