@@ -1064,11 +1064,12 @@ histbin="$tmp/histbin"; mkdir -p "$histbin"
 cat > "$histbin/docker" <<'EOF'
 #!/bin/sh
 case "$1" in
-    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest ;;
+    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest code-it-alpine-dotnet-node-powershell:latest ;;
     image)
         for a in "$@"; do last="$a"; done
         case "$last" in
             *python*)      echo python ;;
+            *powershell*)  echo dotnet,node,powershell ;;
             *dotnet-node*) echo dotnet,node ;;
             *dotnet*)      echo dotnet ;;
             *)             echo "" ;;
@@ -1110,6 +1111,17 @@ case "$out" in
     *"Using remembered image"*|*"Using existing image"*) assert "explicit --image bypasses the default" 1 ;;
     *)                                                   assert "explicit --image bypasses the default" 0 ;;
 esac
+
+# (k) a remembered image labelled with a tool chain this checkout does not know (built
+# by another branch) is still used, for the chains that are known
+hunk="$tmp/histunknown"; mkdir -p "$hunk"
+printf '20260101 code-it-alpine-dotnet-node-powershell\n' > "$hunk/image-history"
+out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hunk" 2>&1)
+assert "an unknown chain in the remembered image's label is not an error" "$?"
+[[ "$out" != *"Unknown tech stack"* ]]; assert "an unknown label chain gives no unknown-tech warning" "$?"
+assert_contains "notes the unknown label chain" "$out" "has tool chains this code-it does not know (dotnet,node,powershell); using dotnet,node"
+assert_contains "runs the image with the unknown label chain" "$out" "code-it-alpine-dotnet-node-powershell:latest"
+assert_contains "the known label chains decide the package caches" "$out" "NuGet package cache"
 
 # (d) save dir exists but no history: the most recently built existing code-it image
 hnone="$tmp/histnone"; mkdir -p "$hnone"

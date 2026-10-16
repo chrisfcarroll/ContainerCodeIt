@@ -461,7 +461,10 @@ if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then
     if [[ -z "$default_chains" ]]; then
         run_first_run
     else
-        enabled_toolchain=$(ci_resolve_toolchain "$default_chains") || exit 1
+        enabled_toolchain=$(ci_known_toolchain "$default_chains")
+        if [[ "$(ci_join , "$enabled_toolchain")" != "$default_chains" ]]; then
+            echo "    Note: image '$default_image' has tool chains this code-it does not know ($default_chains); using $(ci_join , "${enabled_toolchain:-none}")."
+        fi
         if [[ "$package_caches_explicit" == false ]]; then
             enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain") || exit 1
         fi

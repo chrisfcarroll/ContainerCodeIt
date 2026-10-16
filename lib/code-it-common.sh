@@ -6,6 +6,7 @@
 #   ci_comma_list_add LIST ITEM                       append ITEM to a space list
 #   ci_toolchain_alias NAME                          canonical name for an alias
 #   ci_resolve_toolchain RAW                        -> space-separated canonical list
+#   ci_known_toolchain LABEL                        -> the known chains only, space-separated
 #   ci_resolve_package_caches RAW TOOL_CHAINS         -> space-separated list
 #   ci_default_image_name TOOL_CHAINS                 -> code-it-alpine-<chains>
 #   ci_has LIST ITEM                                  return 0 if ITEM is in LIST
@@ -72,6 +73,21 @@ ci_resolve_toolchain() {
                 return 1
                 ;;
         esac
+    done
+    printf '%s' "$out"
+}
+
+# ci_known_toolchain LIST: the comma-separated LIST, read from an image label, as a
+# space-separated canonical list of the tool chains this checkout knows. Unlike
+# ci_resolve_toolchain, unknown names are dropped, not errors: the image may have been
+# built by another version or branch of code-it.
+ci_known_toolchain() {
+    local out="" t
+    local -a requested=()
+    [[ -n "$1" ]] && IFS=',' read -r -a requested <<< "$1"
+    for t in ${requested[@]+"${requested[@]}"}; do
+        t=$(ci_toolchain_alias "$t")
+        ci_has "$CI_KNOWN_TOOLCHAIN" "$t" && out=$(ci_comma_list_add "$out" "$t")
     done
     printf '%s' "$out"
 }

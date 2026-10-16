@@ -972,10 +972,12 @@ if "%~1"=="images" (
   echo code-it-alpine-dotnet:latest
   echo code-it-alpine-dotnet-node:latest
   echo code-it-alpine-python:latest
+  echo code-it-alpine-dotnet-node-powershell:latest
   goto :eof
 )
 if "%~1"=="image" (
   echo %* | findstr /C:"python" >nul && (echo python& goto :eof)
+  echo %* | findstr /C:"powershell" >nul && (echo dotnet,node,powershell& goto :eof)
   echo %* | findstr /C:"dotnet-node" >nul && (echo dotnet,node& goto :eof)
   echo %* | findstr /C:"dotnet" >nul && (echo dotnet& goto :eof)
   echo.
@@ -989,11 +991,12 @@ echo STUB %*
     Set-Content -Path (Join-Path $histDocker 'docker') -Value @'
 #!/bin/sh
 case "$1" in
-    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest ;;
+    images) printf '%s\n' code-it-alpine-dotnet:latest code-it-alpine-dotnet-node:latest code-it-alpine-python:latest code-it-alpine-dotnet-node-powershell:latest ;;
     image)
         for a in "$@"; do last="$a"; done
         case "$last" in
             *python*)      echo python ;;
+            *powershell*)  echo dotnet,node,powershell ;;
             *dotnet-node*) echo dotnet,node ;;
             *dotnet*)      echo dotnet ;;
             *)             echo "" ;;
@@ -1036,6 +1039,16 @@ Assert-Contains "explicit -toolchain is honoured" $r.out 'code-it-alpine-dotnet:
 # explicit -image bypasses the default selection
 $r = Invoke-Scenario $codeIt @('-dryRun', '-image', 'code-it-alpine-dotnet-node', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
 Assert "explicit -image bypasses the default" (-not ($r.out.Contains('Using remembered image') -or $r.out.Contains('Using existing image')))
+
+# a remembered image labelled with a tool chain this checkout does not know (built by
+# another branch) is still used, for the chains that are known
+$hunk = Join-Path $tmp 'histunknown'; $null = New-Item -ItemType Directory -Force -Path $hunk
+'20260101 code-it-alpine-dotnet-node-powershell' | Set-Content -Path (Join-Path $hunk 'image-history')
+$r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hunk) $histPath
+Assert "an unknown chain in the remembered image's label is not an error" ($r.code -eq 0)
+Assert "an unknown label chain gives no unknown-tech warning" (-not $r.out.Contains('Unknown tech stack'))
+Assert-Contains "notes the unknown label chain" $r.out 'has tool chains this code-it does not know (dotnet,node,powershell); using dotnet,node'
+Assert-Contains "runs the image with the unknown label chain" $r.out 'code-it-alpine-dotnet-node-powershell:latest'
 
 # save dir exists but no history: the most recently built existing code-it image
 $hnone = Join-Path $tmp 'histnone'; $null = New-Item -ItemType Directory -Force -Path $hnone

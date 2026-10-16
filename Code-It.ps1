@@ -388,9 +388,10 @@ if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameter
         & $firstRun -saveDir $saveDir -workDir $WorkDirToMount -runtime $runtime
         exit $LASTEXITCODE
     }
-    $resolvedDefaultChains = Resolve-CodeItToolchain $defaultChains
-    if ($null -eq $resolvedDefaultChains) { exit 1 }
-    $enabledToolchain = $resolvedDefaultChains
+    $enabledToolchain = Select-CodeItKnownToolchain $defaultChains
+    if (($enabledToolchain -join ',') -ne $defaultChains) {
+        "    Note: image '$defaultImage' has tool chains this code-it does not know ($defaultChains); using $(if ($enabledToolchain) { $enabledToolchain -join ',' } else { 'none' })."
+    }
     if (-not $PSBoundParameters.ContainsKey('packageCaches')) {
         $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolchain
     }

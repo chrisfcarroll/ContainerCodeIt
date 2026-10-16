@@ -4,6 +4,7 @@
 
         Split-CodeItList LIST                  comma string -> trimmed array
         Resolve-CodeItToolchain RAW           -> canonical array, or $null on error
+        Select-CodeItKnownToolchain LABEL      -> canonical array of the known chains only
         Resolve-CodeItPackageCaches RAW CHAINS -> array, or $null on error
         CodeIt-ImageName CHAINS                -> code-it-alpine-<chains>
         Detect-CodeItRuntime REQUESTED         -> docker|container, or $null on error
@@ -44,6 +45,16 @@ function Resolve-CodeItToolchain([string]$raw) {
         }
     }
     return ,$resolved
+}
+
+# The comma-separated LIST, read from an image label, as the canonical tool chains this
+# checkout knows. Unlike Resolve-CodeItToolchain, unknown names are dropped, not errors:
+# the image may have been built by another version or branch of code-it.
+function Select-CodeItKnownToolchain([string]$list) {
+    $known = @(Split-CodeItList $list | ForEach-Object {
+        if ($script:CodeItToolChainAliases.ContainsKey($_)) { $script:CodeItToolChainAliases[$_] } else { $_ }
+    } | Where-Object { $_ -in $script:CodeItKnownToolchain } | Select-Object -Unique)
+    return ,$known
 }
 
 function Resolve-CodeItPackageCaches([string]$raw, [string[]]$toolchain) {
