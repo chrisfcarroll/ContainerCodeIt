@@ -25,8 +25,9 @@
 #
 # Options:
 #   --agent, -a NAME         Run the agent defined in agents/NAME. Only that agent's
-#                            state is mounted.
-#   --opencode, -o           Shortcut for --agent opencode (the default).
+#                            state is mounted. Default: opencode, or the agent saved
+#                            by code-it-defaults.
+#   --opencode, -o           Shortcut for --agent opencode.
 #   --claude, -c             Shortcut for --agent claude.
 #   --list-agents            List the available agents and exit.
 #   --prompt, -p TEXT        Open the agent with TEXT as its first prompt. A single bare
@@ -84,11 +85,13 @@
 # flags to clash with future toolchain names:
 #   --toolchain, -t LIST     Comma-separated toolchains. --stack is an alias.
 #                            There is no default list. Without --toolchain, they are
-#                            those of the --image given; else of the remembered image,
-#                            the most recent in SAVE-DIR/image-history whose toolchains
-#                            cover 70% of your recent runs; else of the most recently
-#                            used, or else built, code-it image. With no SAVE-DIR or no
-#                            code-it image, code-it-first-run.sh runs instead.
+#                            those of the --image given; else of the saved default
+#                            toolchain (see code-it-defaults); else of the remembered
+#                            image, the most recent in SAVE-DIR/image-history whose
+#                            toolchains cover 70% of your recent runs; else of the most
+#                            recently used, or else built, code-it image. With no
+#                            SAVE-DIR or no code-it image, code-it-first-run.sh runs
+#                            instead.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun), python (alias uv),
 #                            powershell (alias pwsh).
@@ -130,6 +133,11 @@
 #       Passes those flags straight through to Claude Code.
 #
 # Notes:
+#   - Defaults saved by code-it-defaults fill in whatever the command line does not
+#     say: the agent (its options win over the default) and the toolchain (the
+#     default beats the remembered-image heuristic; --toolchain and --image win over
+#     it). Each agent's model comes from its own configuration under the save dir;
+#     run code-it-defaults to set it there.
 #   - The prompt and any pass-through arguments are translated into each agent's own
 #     command line, from the AGENT_CMD_* templates in agents/NAME/config: --prompt
 #     becomes `claude PROMPT` or `opencode --prompt PROMPT`, and with --headless it
@@ -220,6 +228,7 @@ nuget_config_global_packages_folder() {
 
 # Defaults
 code_agent="opencode"
+agent_explicit=false
 work_dir_to_mount="."
 save_dir="$HOME/.config/code-it"
 image=""
@@ -254,14 +263,17 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --claude|-c)
             code_agent="claude"
+            agent_explicit=true
             shift
             ;;
         --opencode|-o)
             code_agent="opencode"
+            agent_explicit=true
             shift
             ;;
         --agent|-a)
             code_agent="$2"
+            agent_explicit=true
             shift 2
             ;;
         --list-agents)
@@ -387,6 +399,31 @@ if [[ "$list_agents" == true ]]; then
         fi
     done < <(ci_list_agents "$agents_dir")
     exit 0
+fi
+
+# Defaults saved by code-it-defaults (Spec 13) fill in whatever the command line
+# does not say: the agent, and the toolchain, which then beats the remembered-image
+# heuristic below. Explicit options always win over the saved defaults.
+saved_agent=""
+saved_toolchain=""
+if [[ "$agent_explicit" == false ]]; then
+    saved_agent=$(ci_config_value "$save_dir/defaults" "default-agent") || saved_agent=""
+    if [[ -n "$saved_agent" ]]; then
+        code_agent="$saved_agent"
+        # Say so: the agent's own state comes with it, and v2's login lives
+        # elsewhere from v1's, so the switch is otherwise invisible
+        echo "    Using saved default agent: $saved_agent"
+    fi
+fi
+toolchain_from_defaults=false
+if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then
+    saved_toolchain=$(ci_config_value "$save_dir/defaults" "default-toolchain") || saved_toolchain=""
+    if [[ -n "$saved_toolchain" ]]; then
+        toolchain="$saved_toolchain"
+        toolchain_explicit=true
+        toolchain_from_defaults=true
+        echo "    Using saved default toolchain: $saved_toolchain"
+    fi
 fi
 
 # Load the chosen agent's definition. The agent name is data: shortcut flags are

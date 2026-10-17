@@ -1,0 +1,21 @@
+#compdef code-it-defaults.sh
+# Zsh completion for code-it-defaults.sh.
+#
+# Install by putting this directory on your fpath before compinit.
+
+_code_it_defaults() {
+    local prev
+    prev=${words[CURRENT-1]}
+
+    case $prev in
+        (--save-dir|-s) _files -/; return ;;
+        (--agent|-a) compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null) none; return ;;
+        (--model) compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null | sed 's/$/=/'); return ;;
+        (--toolchain|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
+    esac
+
+    compadd -- --agent -a --model --toolchain -t --show --refresh-models \
+        --save-dir -s --dry-run -d --help -h
+}
+
+_code_it_defaults "$@"

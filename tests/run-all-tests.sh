@@ -11,6 +11,10 @@ echo
 echo "=== bash: test-code-it-doctor.sh ==="
 bash "$tests_dir/test-code-it-doctor.sh" || rc=1
 
+echo
+echo "=== bash: test-code-it-defaults.sh ==="
+bash "$tests_dir/test-code-it-defaults.sh" || rc=1
+
 # Find a pwsh that actually runs on this machine (e.g. /usr/bin/pwsh may be for
 # the wrong architecture; a dotnet global tool install may work instead).
 pwsh_bin=""
@@ -28,6 +32,9 @@ if [[ -n "$pwsh_bin" ]]; then
     echo
     echo "=== pwsh: Test-CodeItDoctor.ps1 (using $pwsh_bin) ==="
     "$pwsh_bin" -NoProfile -File "$tests_dir/Test-CodeItDoctor.ps1" || rc=1
+    echo
+    echo "=== pwsh: Test-CodeItDefaults.ps1 (using $pwsh_bin) ==="
+    "$pwsh_bin" -NoProfile -File "$tests_dir/Test-CodeItDefaults.ps1" || rc=1
 else
     echo "No working pwsh found: skipping PowerShell tests"
 fi

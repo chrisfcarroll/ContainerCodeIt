@@ -6,6 +6,9 @@ AGENT_COMMAND=opencode
 AGENT_BINARY=/home/agent1/.opencode-v2/bin/opencode
 AGENT_INSTALL=install.dockerfile
 AGENT_CONFIG_LABEL='OpenCode v2 configuration'
+# How code-it-defaults sets the agent's default model: a JSON file under its save
+# dir (which is AGENT_SAVE_SUBDIR below), and the top-level key to set there
+AGENT_MODEL_FILE='.config/opencode/opencode.json:model'
 # V1 reads the same paths and refuses V2's config, so keep V2's state under its own
 # subdirectory of --save-dir.
 AGENT_SAVE_SUBDIR=opencode-v2

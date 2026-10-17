@@ -96,7 +96,7 @@ from their directories.
 
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
-| `--agent`, `-a` | `-agent`, `-a` | `opencode` | Run the agent defined in `agents/NAME`; only its state is mounted |
+| `--agent`, `-a` | `-agent`, `-a` | `opencode`, or the saved default agent (`code-it-defaults`) | Run the agent defined in `agents/NAME`; only its state is mounted |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
 | `--claude`, `-c` | `-claude`, `-c` | off | Shortcut for `--agent claude` |
 | `--opencode`, `-o` | `-opencode`, `-o` | on (default) | Shortcut for `--agent opencode` |
@@ -113,7 +113,7 @@ from their directories.
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none: those of `--image`, else of the remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`; see `code-it-build --list-toolchains`) |
+| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none: those of `--image`, else of the saved default toolchain (`code-it-defaults`), else of the remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`; see `code-it-build --list-toolchains`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
@@ -165,7 +165,50 @@ wrong binary. Images that predate the binaries label get a warning instead.
 The included Dockerfile is based on alpine3.24, which uses musl, and the architecture (amd64 or aarch64)
 of your host machine.
 
-### Locale
+### code-it-defaults options
+
+`code-it-defaults.sh` and `Code-It-Defaults.ps1` save your usual choices in
+`<save dir>/defaults` (default `~/.config/code-it/defaults`), and each agent's default
+model in the agent's own configuration under the save dir, where every run picks it up:
+
+```bash
+./code-it-defaults.sh                 # interactive: agent, models, toolchain
+./code-it-defaults.sh --agent claude --toolchain node,bun
+./code-it-defaults.sh --model 'opencode=anthropic/claude-sonnet-4-5' --model 'claude=opus'
+./code-it-defaults.sh --show          # print the saved defaults
+./code-it-defaults.sh --refresh-models   # update the model list from https://models.dev
+```
+
+```powershell
+.\Code-It-Defaults.ps1                # interactive
+.\Code-It-Defaults.ps1 -agent claude -toolchain node,bun
+.\Code-It-Defaults.ps1 -model 'claude=opus'
+.\Code-It-Defaults.ps1 -show
+.\Code-It-Defaults.ps1 -refreshModels
+```
+
+They accept `--agent/-agent`, `--model/-model AGENT=MODEL` (an empty MODEL clears it),
+`--toolchain/-toolchain`, `--show/-show`, `--refresh-models/-refreshModels`,
+`--save-dir/-saveDir` and `--dry-run/-dryRun`; see `--help`.
+
+With no parameters code-it-defaults asks, reading answers from stdin (so they can be
+scripted); a blank answer keeps the current value. With any of `--agent`, `--model`,
+`--toolchain`, it asks nothing and sets exactly those.
+
+`code-it` uses the saved defaults only when its own options do not say:
+`--agent`/`-c`/`-o` beats the saved agent, and `--toolchain` and `--image` beat the
+saved toolchain — which in turn beats the remembered-image heuristic of
+[Specs 09/10](Specs/10-default-first-run-or-existing-image.md). When it launches the
+saved agent it says so (`Using saved default agent: …`), because the agent brings its
+own state with it: each agent's state, and its login, live in its own directory under
+the save dir, so switching the default agent switches those too — opencode-v2 keeps
+its login in its own state directory, and its first run there can ask you to log in
+again. Models are data: the catalog offered by the interactive picker (from
+`lib/models.txt`, or `<save dir>/model-catalog.txt` after `--refresh-models`) is best
+effort and always incomplete, and any model string is accepted. `--show` names the
+file each agent's model was set in.
+
+## Locale
 
 By default the container gets the host's locale, so .NET, Node.js and other tools
 that read `LANG` format dates and numbers the way they do on your host.
@@ -310,6 +353,7 @@ Each agent is a directory, `agents/<name>/`, so adding one needs no script chang
   | `AGENT_CONFIG_LABEL` | How messages name its config, e.g. `'Claude Code settings'` |
   | `AGENT_STATE_DIRS`, `AGENT_STATE_FILES` | `:`-separated paths, relative to home, kept under the save dir and mounted into the container |
   | `AGENT_SAVE_SUBDIR` | Optional subdirectory of the save dir for its state, when it would clash with another agent's |
+  | `AGENT_MODEL_FILE` | Optional `path:key`: the JSON file, under the agent's save dir, whose top-level `key` holds its default model; how `code-it-defaults` sets the model. Claude: `.claude/settings.json:model`; opencode: `.config/opencode/config.json:model` |
   | `AGENT_EXCLUSIVE_DIRS` | Optional `:`-separated directories, from `AGENT_STATE_DIRS`, that only one container at a time may use. See [Several containers at once](#several-containers-at-once) |
   | `AGENT_EXCLUSIVE_CARRY` | Optional `:`-separated files, relative to home, inside those directories (credentials), copied into a run's own copy |
   | `AGENT_CMD_INTERACTIVE_PROMPT`, `AGENT_CMD_INTERACTIVE_NO_PROMPT`, `AGENT_CMD_HEADLESS_PROMPT`, `AGENT_CMD_HEADLESS_NO_PROMPT` | Its command line in each mode, where `{args}` is the arguments after `--` and `{prompt}` the opening prompt |
@@ -439,6 +483,7 @@ source /path/to/ContainerCodeIt/completions/code-it-add-agent.bash
 source /path/to/ContainerCodeIt/completions/code-it-add-tool-chain.bash
 source /path/to/ContainerCodeIt/completions/code-it-first-run.bash
 source /path/to/ContainerCodeIt/completions/code-it-doctor.bash
+source /path/to/ContainerCodeIt/completions/code-it-defaults.bash
 ```
 
 ```zsh
@@ -449,7 +494,8 @@ autoload -Uz compinit && compinit
 
 ```powershell
 # PowerShell: in $PROFILE. Parameters such as -claude, -prompt, -headless and -runtime
-# complete without this; it adds the agent's own flags after -agentArgs.
+# complete without this; it adds the agent's own flags after -agentArgs, and the agent
+# names of -agent / AGENT= prefixes of -model in Code-It-Defaults.ps1.
 . /path/to/ContainerCodeIt/completions/CodeItCompletion.ps1
 ```
 
