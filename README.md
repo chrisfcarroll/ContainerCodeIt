@@ -100,6 +100,7 @@ from their directories.
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
 | `--claude`, `-c` | `-claude`, `-c` | off | Shortcut for `--agent claude` |
 | `--opencode`, `-o` | `-opencode`, `-o` | on (default) | Shortcut for `--agent opencode` |
+| `--no-agent`, `--zsh` | `-noAgent`, `-zsh` | off | Run a plain interactive zsh in the container instead of a coding agent: no agent state is mounted and no login is needed. A prompt, `--headless`, or combining it with an agent selection is an error |
 | `--prompt`, `-p`, or a bare argument | `-prompt`, or a bare argument | none | Opening prompt for the agent |
 | `--headless` | `-headless` | off | Run the agent one-shot in the foreground instead of in tmux: no TTY, and the container exits with the agent's exit code |
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |

@@ -878,6 +878,26 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -c "one" "two" "${common_args[@]}" 2>
 assert_contains "two bare prompts explains itself" "$out" "Only one prompt"
 
 # ---------------------------------------------------------------------------
+echo "13b. --no-agent: a plain zsh shell instead of a coding agent"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --no-agent "${common_args[@]}")
+assert_contains "--no-agent passes CODE_AGENT_SHELL" "$out" "-e CODE_AGENT_SHELL=1"
+[[ "$out" != *CODE_AGENT=* ]]; assert "--no-agent passes no CODE_AGENT" "$?"
+[[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "--no-agent appends nothing after the image" "$?"
+assert_contains "--no-agent stays interactive" "$out" "docker run -it"
+assert_contains "--no-agent says it runs no agent" "$out" "Using code agent: none (zsh shell)"
+case "$out" in
+    *.config/opencode*) assert "--no-agent mounts no agent state" 1 ;;
+    *)                  assert "--no-agent mounts no agent state" 0 ;;
+esac
+out=$(PATH="$stub_docker:$PATH" "$code_it" --zsh "${common_args[@]}")
+assert_contains "--zsh is --no-agent" "$out" "-e CODE_AGENT_SHELL=1"
+# No agent to give a prompt to, and nothing to run headlessly
+out=$(PATH="$stub_docker:$PATH" "$code_it" --no-agent "explain this repo" "${common_args[@]}" 2>&1)
+[[ "$?" != "0" ]]; assert "--no-agent with a prompt fails" "$?"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --no-agent --headless "${common_args[@]}" 2>&1)
+[[ "$?" != "0" ]]; assert "--no-agent with --headless fails" "$?"
+
+# ---------------------------------------------------------------------------
 echo "14. Bash tab completion"
 completions_out=$(
     source "$script_dir/completions/code-it.bash"
@@ -900,8 +920,10 @@ completions_out=$(
     echo "OPENCODEDEF:$(comp ./code-it.sh -- --se | tr '\n' ' ')"
     echo "OPENCODEALIAS:$(comp ./opencode-it.sh -- --th | tr '\n' ' ')"
     echo "OPENCODEV2:$(comp ./code-it.sh --agent opencode-v2 -- --sta | tr '\n' ' ')"
+    echo "NOAGENT:$(comp ./code-it.sh --no- | tr '\n' ' ')"
 )
 assert_contains "completes launcher options" "$completions_out" "OPTS:--headless"
+assert_contains "completes --no-agent and --zsh" "$completions_out" "NOAGENT:--no-agent"
 assert_contains "completes --runtime values" "$completions_out" "RUNTIME:docker container"
 assert_contains "offers nothing for a free-text --prompt" "$completions_out" "FREETEXT:
 "
@@ -968,6 +990,18 @@ EOF
     out=$(PATH="$gobin:$PATH" CODE_AGENT=claude CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" -p "fix it; rm -rf /" 2>&1)
     assert_contains "headless go.sh runs the agent directly" "$out" "AGENT-claude[-p][fix it; rm -rf /]"
     [[ "$out" != *AGENT-claude*AGENT-claude* ]]; assert "headless go.sh does not also start tmux" "$?"
+    # CODE_AGENT_SHELL=1 (code-it --no-agent) runs a plain zsh, never an installed agent.
+    # This tmux stub prints the shell command instead of running it.
+    shellstub="$tmp/goshell"; mkdir -p "$shellstub"
+    cat > "$shellstub/tmux" <<'EOF'
+#!/bin/sh
+for a in "$@"; do last="$a"; done
+printf 'TMUX-CMD:%s\n' "$last"
+EOF
+    chmod +x "$shellstub/tmux"
+    out=$(PATH="$shellstub:$gobin:$PATH" CODE_AGENT_SHELL=1 zsh "$tmp/go.sh" 2>&1)
+    assert_contains "go.sh --no-agent runs zsh in tmux" "$out" "TMUX-CMD:zsh"
+    [[ "$out" != *AGENT-* ]]; assert "go.sh --no-agent runs no agent" "$?"
     # an agent missing from the image is an error, never another agent given its arguments
     printf 'claude=%s/claude\n' "$gobin" > "$gobin/agents"
     out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "hi" 2>&1)

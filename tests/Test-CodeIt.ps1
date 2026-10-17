@@ -929,6 +929,26 @@ $r = Invoke-Scenario (Join-Path $scriptDir 'OpenCode-It.ps1') ($commonArgs + @('
 Assert-Contains "OpenCode-It.ps1 forwards agent flags" $r.out 'code-it-alpine-dotnet-node:latest --model opus'
 
 # ---------------------------------------------------------------------------
+"12a. -noAgent: a plain zsh shell instead of a coding agent"
+$r = Invoke-Scenario $codeIt (@('-noAgent') + $commonArgs) $stubPath
+Assert "-noAgent exit code 0" ($r.code -eq 0)
+Assert-Contains "-noAgent passes CODE_AGENT_SHELL" $r.out '-e CODE_AGENT_SHELL=1'
+Assert "-noAgent passes no CODE_AGENT" (-not $r.out.Contains('CODE_AGENT='))
+Assert "-noAgent appends nothing after the image" ($r.out.TrimEnd().EndsWith('code-it-alpine-dotnet-node:latest'))
+Assert-Contains "-noAgent stays interactive" $r.out 'docker run -it'
+Assert-Contains "-noAgent says it runs no agent" $r.out 'Using code agent: none (zsh shell)'
+Assert "-noAgent mounts no agent state" (-not $r.out.Contains('.config/opencode'))
+$r = Invoke-Scenario $codeIt (@('-zsh') + $commonArgs) $stubPath
+Assert-Contains "-zsh is -noAgent" $r.out '-e CODE_AGENT_SHELL=1'
+# No agent to give a prompt to, nothing to run headlessly, and no agent to select
+$r = Invoke-Scenario $codeIt (@('-noAgent','explain this repo') + $commonArgs) $stubPath
+Assert "-noAgent with a prompt fails" ($r.code -ne 0)
+$r = Invoke-Scenario $codeIt (@('-noAgent','-headless') + $commonArgs) $stubPath
+Assert "-noAgent with -headless fails" ($r.code -ne 0)
+$r = Invoke-Scenario $codeIt (@('-noAgent','-claude') + $commonArgs) $stubPath
+Assert "-noAgent with -claude fails" ($r.code -ne 0)
+
+# ---------------------------------------------------------------------------
 "12b. Code-It-Add-Agent.ps1"
 $addAgent = Join-Path $scriptDir 'Code-It-Add-Agent.ps1'
 $stubCi = Join-Path $tmp 'stub-code-it.ps1'

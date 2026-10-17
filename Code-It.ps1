@@ -56,6 +56,11 @@
 .PARAMETER claude
     Shortcut for -agent claude. Alias: -c
 
+.PARAMETER noAgent
+    Runs a plain interactive zsh instead of a coding agent: no agent state is mounted
+    and no login is needed. A prompt or -headless would have no agent to run it, and
+    combining it with -claude, -opencode or -agent is an error. Alias: -zsh
+
 .PARAMETER saveDir
     Host directory for storing agent configuration and state volumes. Created if missing.
     Default: ~/.config/code-it
@@ -228,6 +233,8 @@ param (
     [switch]$claude         = $false,
     [Alias('o')]
     [switch]$opencode       = $false,
+    [Alias('zsh')]
+    [switch]$noAgent        = $false,
     [Alias('a')]
     [string]$agent          = "",
     [switch]$listAgents     = $false,
@@ -280,42 +287,64 @@ if ($listAgents) {
 
 # Resolve which agent to run: -c / -o are shortcuts, else -agent NAME, else the agent
 # saved by Code-It-Defaults.ps1 (Spec 15), else opencode. Explicit options beat the
-# saved default.
+# saved default. -noAgent runs a plain zsh, so no agent is resolved or loaded.
 if ($claude -and $opencode) {
     Write-Warning "Specify only one of -claude or -opencode."
     exit 1
 }
-$codeAgent = if ($claude) { "claude" } elseif ($opencode) { "opencode" } elseif ($agent) { $agent } else { "" }
-if (-not $codeAgent) {
-    $savedAgent = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-agent'
-    if ($savedAgent) {
-        $codeAgent = $savedAgent
-        # Say so: the agent's own state comes with it, and v2's login lives
-        # elsewhere from v1's, so the switch is otherwise invisible
-        "    Using saved default agent: $savedAgent"
-    } else {
-        $codeAgent = "opencode"
+if ($noAgent) {
+    if ($claude -or $opencode -or $PSBoundParameters.ContainsKey('agent')) {
+        Write-Warning "-noAgent runs a plain zsh shell; do not combine it with -claude, -opencode or -agent."
+        exit 1
+    }
+    $codeAgent = ""
+} else {
+    $codeAgent = if ($claude) { "claude" } elseif ($opencode) { "opencode" } elseif ($agent) { $agent } else { "" }
+    if (-not $codeAgent) {
+        $savedAgent = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-agent'
+        if ($savedAgent) {
+            $codeAgent = $savedAgent
+            # Say so: the agent's own state comes with it, and v2's login lives
+            # elsewhere from v1's, so the switch is otherwise invisible
+            "    Using saved default agent: $savedAgent"
+        } else {
+            $codeAgent = "opencode"
+        }
     }
 }
 
 # Load the chosen agent's definition. The agent name is data: shortcut flags are
-# resolved here, but every other detail comes from agents/<name>/config.
-if (-not (Test-CodeItAgentExists $agentsDir $codeAgent)) {
-    Write-Warning "Unknown agent '$codeAgent'. Known agents: $((Get-CodeItListAgents $agentsDir) -join ' ')"
-    Write-Warning "Run .\Code-It.ps1 -listAgents to see them."
-    exit 1
+# resolved here, but every other detail comes from agents/<name>/config. -noAgent
+# loads nothing: no state to mount, no exclusive dirs to lock, no command templates.
+$agentBinary = ""
+$agentStateDirs = ""
+$agentStateFiles = ""
+$agentSaveSubdir = ""
+$agentExclusiveDirs = ""
+$agentExclusiveCarry = ""
+$agentConfigLabel = ""
+$agentCmdInteractivePrompt = ""
+$agentCmdInteractiveNoPrompt = ""
+$agentCmdHeadlessPrompt = ""
+$agentCmdHeadlessNoPrompt = ""
+if (-not $noAgent) {
+    if (-not (Test-CodeItAgentExists $agentsDir $codeAgent)) {
+        Write-Warning "Unknown agent '$codeAgent'. Known agents: $((Get-CodeItListAgents $agentsDir) -join ' ')"
+        Write-Warning "Run .\Code-It.ps1 -listAgents to see them."
+        exit 1
+    }
+    $agentBinary      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_BINARY'
+    $agentStateDirs   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_DIRS'
+    $agentStateFiles  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_FILES'
+    $agentSaveSubdir  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_SAVE_SUBDIR'
+    $agentExclusiveDirs  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_EXCLUSIVE_DIRS'
+    $agentExclusiveCarry = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_EXCLUSIVE_CARRY'
+    $agentConfigLabel = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CONFIG_LABEL'
+    $agentCmdInteractivePrompt   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_PROMPT'
+    $agentCmdInteractiveNoPrompt = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_NO_PROMPT'
+    $agentCmdHeadlessPrompt      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_HEADLESS_PROMPT'
+    $agentCmdHeadlessNoPrompt    = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_HEADLESS_NO_PROMPT'
 }
-$agentBinary      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_BINARY'
-$agentStateDirs   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_DIRS'
-$agentStateFiles  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_FILES'
-$agentSaveSubdir  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_SAVE_SUBDIR'
-$agentExclusiveDirs  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_EXCLUSIVE_DIRS'
-$agentExclusiveCarry = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_EXCLUSIVE_CARRY'
-$agentConfigLabel = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CONFIG_LABEL'
-$agentCmdInteractivePrompt   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_PROMPT'
-$agentCmdInteractiveNoPrompt = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_NO_PROMPT'
-$agentCmdHeadlessPrompt      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_HEADLESS_PROMPT'
-$agentCmdHeadlessNoPrompt    = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_HEADLESS_NO_PROMPT'
 
 # A leading bare argument is the agent's opening prompt, as in `.\Code-It.ps1 -c "do it"`;
 # anything else goes to the agent verbatim
@@ -327,6 +356,12 @@ if (-not $prompt -and $agentArgs.Count -ge 1 -and -not $agentArgs[0].StartsWith(
     }
 }
 $promptSet = [bool]$prompt
+
+# -noAgent runs an interactive zsh: a prompt or -headless would have no agent to run it
+if ($noAgent -and ($promptSet -or $headless)) {
+    Write-Warning "-noAgent runs an interactive zsh shell; a prompt or -headless would have no agent to run it."
+    exit 1
+}
 
 # -environment, -envFile and -runArgs, in that order, as container run arguments
 $cliRunArgs = @()
@@ -391,7 +426,7 @@ if (-not $image -and $enabledToolchain.Count) { $image = CodeIt-ImageName $enabl
 $runtime = Detect-CodeItRuntime $runtime
 if ($null -eq $runtime) { exit 1 }
 "    Using container runtime: $runtime"
-"    Using code agent: $codeAgent"
+"    Using code agent: $(if ($noAgent) { 'none (zsh shell)' } else { $codeAgent })"
 
 # List existing images in a runtime-appropriate way. Done up front so the default
 # selection below can use them, and a broken daemon is reported before first-run.
@@ -569,7 +604,9 @@ if ($imageToolchain -and -not (Test-CodeItToolchainInclude $imageToolchain $enab
 }
 
 # The image must contain the chosen agent: go.sh cannot run one it lacks. Check here,
-# where the error is readable, rather than in the container.
+# where the error is readable, rather than in the container. -noAgent runs no agent,
+# so neither check applies.
+if (-not $noAgent) {
 $imageAgents = Get-CodeItImageAgents $runtime $image $agentsDir
 $rebuildToolchain = if ($imageToolchain) { $imageToolchain } else { $enabledToolchain -join ',' }
 if ($imageAgents -and (($imageAgents -split ',') -notcontains $codeAgent)) {
@@ -591,6 +628,7 @@ if ($imageAgents) {
         Write-Warning "The image is out of date; rebuild it with Code-It-Build.ps1 -toolchain $rebuildToolchain -agent $imageAgents"
         exit 1
     }
+}
 }
 
 # Git author info
@@ -681,16 +719,20 @@ if ($enabledPackageCaches -contains 'bun') {
 #   https://code.claude.com/docs/en/cli-reference
 #   https://opencode.ai/docs/cli/
 $agentCmd = @()
-if ($headless) {
-    $template = if ($promptSet) { $agentCmdHeadlessPrompt } else { $agentCmdHeadlessNoPrompt }
-} else {
-    $template = if ($promptSet) { $agentCmdInteractivePrompt } else { $agentCmdInteractiveNoPrompt }
-}
-foreach ($token in ($template -split '\s+' | Where-Object { $_ })) {
-    switch ($token) {
-        '{args}'   { $agentCmd += $agentArgs }
-        '{prompt}' { if ($promptSet) { $agentCmd += $prompt } }
-        default    { $agentCmd += $token }
+if (-not $noAgent) {
+    # A plain zsh (-noAgent): nothing is appended after the image, and
+    # CODE_AGENT_SHELL=1 (below) tells go.sh to run the shell instead of an agent.
+    if ($headless) {
+        $template = if ($promptSet) { $agentCmdHeadlessPrompt } else { $agentCmdHeadlessNoPrompt }
+    } else {
+        $template = if ($promptSet) { $agentCmdInteractivePrompt } else { $agentCmdInteractiveNoPrompt }
+    }
+    foreach ($token in ($template -split '\s+' | Where-Object { $_ })) {
+        switch ($token) {
+            '{args}'   { $agentCmd += $agentArgs }
+            '{prompt}' { if ($promptSet) { $agentCmd += $prompt } }
+            default    { $agentCmd += $token }
+        }
     }
 }
 
@@ -765,6 +807,16 @@ $ttyArgs     = if ($headless) { @('-i') }                        else { @('-it')
 $headlessEnv = if ($headless) { @('-e', 'CODE_AGENT_HEADLESS=1') } else { @() }
 $headlessEnvPrint = if ($headless) { "`n                -e CODE_AGENT_HEADLESS=1" } else { "" }
 
+# The agent selector environment: CODE_AGENT names the agent for go.sh; -noAgent
+# replaces it with CODE_AGENT_SHELL, which runs a plain interactive zsh.
+if ($noAgent) {
+    $agentEnvArgs = @('-e', 'CODE_AGENT_SHELL=1')
+    $agentEnvPrint = "`n                -e CODE_AGENT_SHELL=1"
+} else {
+    $agentEnvArgs = @('-e', "CODE_AGENT=$codeAgent") + $headlessEnv
+    $agentEnvPrint = "`n                -e CODE_AGENT=`"$codeAgent`"$headlessEnvPrint"
+}
+
 # Extra run arguments: <saveDir>/run-args, then -environment, -envFile and -runArgs.
 # They follow Code-It's own, so they can override them. Docker reads a bare `-e NAME`
 # from the host's environment itself; for the Apple container CLI, Code-It does, keeping
@@ -803,8 +855,7 @@ $agentCmdPrint = ($agentCmd | ForEach-Object {
 if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
 
 @"
-    $runtime run $ttyArgs --rm -p $portMapping $containerArgs `
-                -e CODE_AGENT=`"$codeAgent`"$headlessEnvPrint `
+    $runtime run $ttyArgs --rm -p $portMapping $containerArgs$agentEnvPrint `
                 -e LANG=`"$containerLocale`" `
                 -e GIT_AUTHOR_NAME=`"$gitAuthorName`" `
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
@@ -822,8 +873,7 @@ $runRc = 0
 try {
     & $runtime run $ttyArgs --rm -p $portMapping `
                 $containerArgs `
-                $headlessEnv `
-                -e CODE_AGENT="$codeAgent" `
+                $agentEnvArgs `
                 -e LANG="$containerLocale" `
                 -e GIT_AUTHOR_NAME="$gitAuthorName" `
                 -e GIT_AUTHOR_EMAIL="$gitAuthorEmail" `

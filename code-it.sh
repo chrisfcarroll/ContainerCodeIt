@@ -29,6 +29,10 @@
 #                            by code-it-defaults.
 #   --opencode, -o           Shortcut for --agent opencode.
 #   --claude, -c             Shortcut for --agent claude.
+#   --no-agent, --zsh        Run a plain interactive zsh instead of a coding agent:
+#                            no agent state is mounted and no login is needed. A
+#                            prompt or --headless would have no agent to run it,
+#                            and is an error.
 #   --list-agents            List the available agents and exit.
 #   --prompt, -p TEXT        Open the agent with TEXT as its first prompt. A single bare
 #                            argument means the same thing, so these are equivalent:
@@ -229,6 +233,7 @@ nuget_config_global_packages_folder() {
 # Defaults
 code_agent="opencode"
 agent_explicit=false
+no_agent=false
 work_dir_to_mount="."
 save_dir="$HOME/.config/code-it"
 image=""
@@ -269,6 +274,10 @@ while [[ $# -gt 0 ]]; do
         --opencode|-o)
             code_agent="opencode"
             agent_explicit=true
+            shift
+            ;;
+        --no-agent|--zsh)
+            no_agent=true
             shift
             ;;
         --agent|-a)
@@ -388,6 +397,18 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# --no-agent runs a plain zsh: a prompt or --headless would have no agent to run it
+if [[ "$no_agent" == true ]]; then
+    if [[ "$prompt_set" == true ]]; then
+        echo "--no-agent runs a plain zsh shell; there is no agent to give a prompt to." >&2
+        exit 1
+    fi
+    if [[ "$headless" == true ]]; then
+        echo "--no-agent runs an interactive zsh; --headless applies to agents." >&2
+        exit 1
+    fi
+fi
+
 # --list-agents lists the available agent definitions and exits.
 if [[ "$list_agents" == true ]]; then
     while IFS= read -r name; do
@@ -403,10 +424,11 @@ fi
 
 # Defaults saved by code-it-defaults (Spec 15) fill in whatever the command line
 # does not say: the agent, and the toolchain, which then beats the remembered-image
-# heuristic below. Explicit options always win over the saved defaults.
+# heuristic below. Explicit options always win over the saved defaults. --no-agent
+# runs no agent, so no saved default agent applies.
 saved_agent=""
 saved_toolchain=""
-if [[ "$agent_explicit" == false ]]; then
+if [[ "$no_agent" == false && "$agent_explicit" == false ]]; then
     saved_agent=$(ci_config_value "$save_dir/defaults" "default-agent") || saved_agent=""
     if [[ -n "$saved_agent" ]]; then
         code_agent="$saved_agent"
@@ -427,17 +449,25 @@ if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then
 fi
 
 # Load the chosen agent's definition. The agent name is data: shortcut flags are
-# resolved here, but every other detail comes from agents/<name>/config.
-if ! ci_agent_exists "$agents_dir" "$code_agent"; then
-    echo "Warning: Unknown agent '$code_agent'. Known agents: $(ci_list_agents "$agents_dir" | tr '\n' ' ')" >&2
-    echo "Run $0 --list-agents to see them." >&2
-    exit 1
-fi
+# resolved here, but every other detail comes from agents/<name>/config. --no-agent
+# loads nothing: no state to mount, no exclusive dirs to lock, no command templates.
 AGENT_SAVE_SUBDIR=""
 AGENT_EXCLUSIVE_DIRS=""
 AGENT_EXCLUSIVE_CARRY=""
-# shellcheck disable=SC1090
-. "$agents_dir/$code_agent/config"
+if [[ "$no_agent" == false ]]; then
+    if ! ci_agent_exists "$agents_dir" "$code_agent"; then
+        echo "Warning: Unknown agent '$code_agent'. Known agents: $(ci_list_agents "$agents_dir" | tr '\n' ' ')" >&2
+        echo "Run $0 --list-agents to see them." >&2
+        exit 1
+    fi
+    # shellcheck disable=SC1090
+    . "$agents_dir/$code_agent/config"
+else
+    AGENT_STATE_DIRS=""
+    AGENT_STATE_FILES=""
+    AGENT_CONFIG_LABEL=""
+    AGENT_BINARY=""
+fi
 
 # Resolve --toolchain / --package-caches into a set of known toolchain names (space-
 # separated in $enabled_toolchain) and known package repo names (in
@@ -473,7 +503,11 @@ if [[ "$runtime" == "container" ]]; then
     container_args="--memory 3g"
 fi
 echo "    Using container runtime: $runtime"
-echo "    Using code agent: $code_agent"
+if [[ "$no_agent" == true ]]; then
+    echo "    Using code agent: none (zsh shell)"
+else
+    echo "    Using code agent: $code_agent"
+fi
 
 # List existing images in a runtime-appropriate way. Done up front so the default
 # selection below can use them, and a broken daemon is reported before first-run.
@@ -608,7 +642,7 @@ done
 
 # Write the agent's default configuration file(s) on first run, preserving layout.
 default_config_dir="$agents_dir/$code_agent/default-config"
-if [[ -d "$default_config_dir" ]]; then
+if [[ "$no_agent" == false && -d "$default_config_dir" ]]; then
     while IFS= read -r src; do
         rel=${src#"$default_config_dir"/}
         dest="$agent_save_dir/$rel"
@@ -662,7 +696,9 @@ elif [[ -n "$image_toolchain" && "$image_toolchain" != "$(ci_join , "$enabled_to
 fi
 
 # The image must contain the chosen agent: go.sh cannot run one it lacks. Check here,
-# where the error is readable, rather than in the container.
+# where the error is readable, rather than in the container. --no-agent runs no agent,
+# so neither check applies.
+if [[ "$no_agent" == false ]]; then
 image_agents=$(ci_image_agents "$runtime" "$image" "$agents_dir")
 rebuild_toolchain=${image_toolchain:-$(ci_join , "$enabled_toolchain")}
 if [[ -n "$image_agents" ]] && ! ci_has "${image_agents//,/ }" "$code_agent"; then
@@ -684,6 +720,7 @@ if [[ -n "$image_agents" ]]; then
         echo "Warning: image '$image' predates code-it recording its agents' binaries, so it may run an out-of-date '$code_agent'." >&2
         echo "    If the agent is not the one you expect, rebuild with code-it-build.sh --toolchain $rebuild_toolchain --agent $image_agents" >&2
     fi
+fi
 fi
 
 # Git author info
@@ -786,24 +823,30 @@ fi
 # hands to the agent. {args} expands to the agent args, {prompt} to the opening prompt.
 # See https://code.claude.com/docs/en/cli-reference and https://opencode.ai/docs/cli/
 agent_cmd=()
-if [[ "$headless" == true ]]; then
-    if [[ "$prompt_set" == true ]]; then
-        agent_cmd_template="$AGENT_CMD_HEADLESS_PROMPT"
-    else
-        agent_cmd_template="$AGENT_CMD_HEADLESS_NO_PROMPT"
-    fi
-elif [[ "$prompt_set" == true ]]; then
-    agent_cmd_template="$AGENT_CMD_INTERACTIVE_PROMPT"
+if [[ "$no_agent" == true ]]; then
+    # A plain zsh: nothing is appended after the image, and CODE_AGENT_SHELL=1
+    # (below) tells go.sh to run the shell instead of an agent.
+    :
 else
-    agent_cmd_template="$AGENT_CMD_INTERACTIVE_NO_PROMPT"
+    if [[ "$headless" == true ]]; then
+        if [[ "$prompt_set" == true ]]; then
+            agent_cmd_template="$AGENT_CMD_HEADLESS_PROMPT"
+        else
+            agent_cmd_template="$AGENT_CMD_HEADLESS_NO_PROMPT"
+        fi
+    elif [[ "$prompt_set" == true ]]; then
+        agent_cmd_template="$AGENT_CMD_INTERACTIVE_PROMPT"
+    else
+        agent_cmd_template="$AGENT_CMD_INTERACTIVE_NO_PROMPT"
+    fi
+    for token in $agent_cmd_template; do
+        case "$token" in
+            '{args}')   agent_cmd+=(${agent_args[@]+"${agent_args[@]}"}) ;;
+            '{prompt}') [[ "$prompt_set" == true ]] && agent_cmd+=("$prompt") ;;
+            *)          agent_cmd+=("$token") ;;
+        esac
+    done
 fi
-for token in $agent_cmd_template; do
-    case "$token" in
-        '{args}')   agent_cmd+=(${agent_args[@]+"${agent_args[@]}"}) ;;
-        '{prompt}') [[ "$prompt_set" == true ]] && agent_cmd+=("$prompt") ;;
-        *)          agent_cmd+=("$token") ;;
-    esac
-done
 
 # Headless runs are one-shot: no tmux and no TTY, so the container exits when the
 # agent does, and its output can be piped or redirected.
@@ -816,6 +859,18 @@ else
     tty_args=(-it)
     headless_env=()
     headless_env_print=""
+fi
+
+# The agent selector environment: CODE_AGENT names the agent for go.sh; --no-agent
+# replaces it with CODE_AGENT_SHELL, which runs a plain interactive zsh.
+if [[ "$no_agent" == true ]]; then
+    agent_env=(-e CODE_AGENT_SHELL=1)
+    agent_env_print="
+                -e CODE_AGENT_SHELL=1 \\"
+else
+    agent_env=(-e "CODE_AGENT=$code_agent" ${headless_env[@]+"${headless_env[@]}"})
+    agent_env_print="
+                -e CODE_AGENT=\"$code_agent\"\\$headless_env_print"
 fi
 
 # Extra run arguments: SAVE-DIR/run-args, then --env, --env-file and --run-arg. They
@@ -955,8 +1010,7 @@ done
 # Print the command
 cat <<EOF
     $runtime run ${tty_args[*]} --rm -p $port_mapping \\
-                $container_args \\
-                -e CODE_AGENT="$code_agent" \\$headless_env_print
+                $container_args \\$agent_env_print
                 -e LANG="$container_locale" \\
                 -e GIT_AUTHOR_NAME="$git_author_name" \\
                 -e GIT_AUTHOR_EMAIL="$git_author_email" \\
@@ -973,8 +1027,7 @@ fi
 run_rc=0
 "$runtime" run "${tty_args[@]}" --rm -p "$port_mapping" \
             $container_args \
-            ${headless_env[@]+"${headless_env[@]}"} \
-            -e CODE_AGENT="$code_agent" \
+            "${agent_env[@]}" \
             -e LANG="$container_locale" \
             -e GIT_AUTHOR_NAME="$git_author_name" \
             -e GIT_AUTHOR_EMAIL="$git_author_email" \

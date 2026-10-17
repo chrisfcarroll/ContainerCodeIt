@@ -139,9 +139,13 @@ fi
 # so the binary is data, not a hardcoded case. With no CODE_AGENT, use the first one
 # listed. A CODE_AGENT the image lacks is an error, not a fallback: another agent
 # would get this agent's arguments and exit, and tmux would hide why.
+# CODE_AGENT_SHELL=1 (code-it --no-agent) skips the map entirely: it runs a plain
+# interactive zsh in tmux, so the image need not contain any agent at all.
 agent_file=/etc/code-it-agents
 agent_bin=""
-if [ -f "$agent_file" ] && [ -n "${CODE_AGENT:-}" ] ; then
+if [ "${CODE_AGENT_SHELL:-}" = "1" ] ; then
+    agent_bin=zsh
+elif [ -f "$agent_file" ] && [ -n "${CODE_AGENT:-}" ] ; then
     agent_bin=$(sed -n "s/^${CODE_AGENT}=//p" "$agent_file" | head -n 1)
     if [ -z "$agent_bin" ] ; then
         echo "Agent '$CODE_AGENT' is not installed in this image. It has: $(cut -d= -f1 "$agent_file" | tr '\n' ' ')" >&2
@@ -156,7 +160,7 @@ if [ -z "$agent_bin" ] ; then
     echo "No coding agent configured in $agent_file" >&2
     exit 1
 fi
-if [ ! -x "$agent_bin" ] ; then
+if [ "${CODE_AGENT_SHELL:-}" != "1" ] && [ ! -x "$agent_bin" ] ; then
     echo "Agent binary $agent_bin is missing from this image: its install step failed. Rebuild with code-it-build --toolchain <chains> --rebuild." >&2
     exit 1
 fi

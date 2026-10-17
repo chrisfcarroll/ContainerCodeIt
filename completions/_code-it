@@ -88,7 +88,7 @@ _code_it() {
         (--prompt|-p|--port|--run-arg|--docker-arg) return ;;   # free text: leave it to the user
     esac
 
-    compadd -- --agent -a --list-agents --opencode -o --claude -c --prompt -p --headless \
+    compadd -- --agent -a --list-agents --opencode -o --claude -c --no-agent --zsh --prompt -p --headless \
         --work-dir -w --save-dir -s --image -i \
         --runtime -r --port --locale -l --agent-name --toolchain -t --stack \
         --package-caches --env -e --env-file --run-arg --docker-arg --dry-run -d --help -h --
