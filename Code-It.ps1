@@ -45,7 +45,7 @@
 
 .PARAMETER agent
     Run the agent defined in agents/<name>. Only that agent's state is mounted.
-    Default: opencode. Alias: -a
+    Default: opencode, or the agent saved by Code-It-Defaults.ps1. Alias: -a
 
 .PARAMETER listAgents
     List the available agents and exit.
@@ -110,7 +110,8 @@
     Comma-separated toolchains. Known: dotnet, node (aliases js-node, ts-node), bun
     (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh). Alias: -stack.
     There is no default list. Without -toolchain, they are those of the -image given;
-    else of the remembered image, the most recent in <saveDir>/image-history whose
+    else of the saved default toolchain (see Code-It-Defaults.ps1); else of the
+    remembered image, the most recent in <saveDir>/image-history whose
     toolchains cover 70% of your recent runs; else of the most recently used, or else
     built, code-it image. With no <saveDir> or no code-it image, Code-It-FirstRun.ps1
     runs instead.
@@ -163,6 +164,11 @@
     Passes those flags straight through to Claude Code.
 
 .NOTES
+    - Defaults saved by Code-It-Defaults.ps1 fill in whatever the command line does
+      not say: the agent (-agent/-claude/-opencode win over the default) and the
+      toolchain (-toolchain and -image win over it; the default beats the
+      remembered-image heuristic). Each agent's model comes from its own
+      configuration under the save dir; run Code-It-Defaults.ps1 to set it there.
     - The prompt and any pass-through arguments are translated into each agent's own
       command line, from the AGENT_CMD_* templates in agents/<name>/config: -prompt
       becomes `claude PROMPT` or `opencode --prompt PROMPT`, and with -headless it
@@ -270,12 +276,18 @@ if ($listAgents) {
     exit 0
 }
 
-# Resolve which agent to run: -c / -o are shortcuts, else -agent NAME, else opencode.
+# Resolve which agent to run: -c / -o are shortcuts, else -agent NAME, else the agent
+# saved by Code-It-Defaults.ps1 (Spec 13), else opencode. Explicit options beat the
+# saved default.
 if ($claude -and $opencode) {
     Write-Warning "Specify only one of -claude or -opencode."
     exit 1
 }
-$codeAgent = if ($claude) { "claude" } elseif ($opencode) { "opencode" } elseif ($agent) { $agent } else { "opencode" }
+$codeAgent = if ($claude) { "claude" } elseif ($opencode) { "opencode" } elseif ($agent) { $agent } else { "" }
+if (-not $codeAgent) {
+    $savedAgent = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-agent'
+    $codeAgent = if ($savedAgent) { $savedAgent } else { "opencode" }
+}
 
 # Load the chosen agent's definition. The agent name is data: shortcut flags are
 # resolved here, but every other detail comes from agents/<name>/config.
@@ -335,10 +347,21 @@ if ($removed) {
 # Resolve -toolchain / -packageCaches. Each takes a list, so there are no per-toolchain
 # on/off parameters to clash with future toolchain names. -packageCaches defaults to
 # the repos implied by the toolchains (dotnet->nuget, node->npm). Without -toolchain
-# the list stays empty until the image is chosen, below.
+# the list stays empty until the image is chosen, below. The toolchain saved by
+# Code-It-Defaults.ps1 beats the remembered-image heuristic below, while -toolchain
+# and -image beat it. Explicit options always win over the saved default.
+$toolchainFromDefaults = $false
+if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameters.ContainsKey('image')) {
+    $savedToolchain = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-toolchain'
+    if ($savedToolchain) {
+        $toolchain = $savedToolchain
+        $toolchainFromDefaults = $true
+        "    Using saved default toolchain: $savedToolchain"
+    }
+}
 $enabledToolchain = Resolve-CodeItToolchain $toolchain
 if ($null -eq $enabledToolchain) { exit 1 }
-if ($PSBoundParameters.ContainsKey('toolchain') -and $enabledToolchain.Count -eq 0) {
+if (($PSBoundParameters.ContainsKey('toolchain') -or $toolchainFromDefaults) -and $enabledToolchain.Count -eq 0) {
     Write-Warning "-toolchain needs at least one toolchain."
     exit 1
 }
@@ -373,8 +396,9 @@ if ($LASTEXITCODE -ne 0) {
 # yet, or no code-it image at all, there is no setup, so run first-run. With a save dir
 # and history, the 70% weighted rule of Spec 09 applies; without history (or if it
 # selects nothing), the most recent existing code-it image. See Spec 10, which amends
-# Spec 09's final paragraph.
-if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameters.ContainsKey('image')) {
+# Spec 09's final paragraph. A saved default toolchain beats the heuristic, having
+# been handled above.
+if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameters.ContainsKey('image') -and -not $toolchainFromDefaults) {
     $firstRun = if ($env:CODE_IT_FIRST_RUN) { $env:CODE_IT_FIRST_RUN } else { Join-Path $PSScriptRoot 'Code-It-FirstRun.ps1' }
     $defaultHistory = Join-Path $saveDir 'image-history'
     $defaultImage = ""

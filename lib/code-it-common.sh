@@ -327,12 +327,13 @@ ci_choose_default_image() {
     return 0
 }
 
-# ci_agent_config AGENTS_DIR NAME KEY: the (unquoted) value of KEY in an agent's
-# config, or return 1. Keys are uppercase and appear once per line.
-ci_agent_config() {
-    local file="$1/$2/config" line
+# ci_config_value FILE KEY: the (unquoted) value of KEY in a KEY=value FILE, or
+# return 1. Keys are uppercase (agent configs) or dotted (defaults), one per line;
+# CRLF endings and quoted values are tolerated.
+ci_config_value() {
+    local file="$1" line
     [[ -f "$file" ]] || return 1
-    line=$(grep -m1 "^$3=" "$file" 2>/dev/null) || return 1
+    line=$(grep -m1 "^$2=" "$file" 2>/dev/null) || return 1
     [[ -n "$line" ]] || return 1
     line=${line#*=}
     line=${line%$'\r'}
@@ -342,6 +343,10 @@ ci_agent_config() {
     esac
     printf '%s' "$line"
 }
+
+# ci_agent_config AGENTS_DIR NAME KEY: the (unquoted) value of KEY in an agent's
+# config, or return 1.
+ci_agent_config() { ci_config_value "$1/$2/config" "$3"; }
 
 # ci_read_run_args FILE: the extra container run arguments in FILE, one per line, as
 # devcontainer.json's runArgs: one argument per line, so nothing is word-split and

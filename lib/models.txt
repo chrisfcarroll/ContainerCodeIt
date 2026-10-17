@@ -1,0 +1,35 @@
+# Model catalog for code-it-defaults, one provider/model per line.
+# Best effort and always incomplete: the interactive picker accepts any model
+# string as free text. Refresh this list from https://models.dev, the registry
+# OpenCode itself reads, with:
+#     code-it-defaults --refresh-models
+# which saves the current catalog as SAVE-DIR/model-catalog.txt (used in place of
+# this file when present). Claude Code also accepts the aliases opus, sonnet,
+# haiku and opusplan; the picker offers them separately.
+
+anthropic/claude-opus-4-5
+anthropic/claude-sonnet-4-5
+anthropic/claude-haiku-4-5
+anthropic/claude-opus-4-1
+anthropic/claude-sonnet-4
+anthropic/claude-3-7-sonnet
+anthropic/claude-3-5-haiku
+deepseek/deepseek-chat
+deepseek/deepseek-reasoner
+google/gemini-3-pro
+google/gemini-2.5-pro
+google/gemini-2.5-flash
+moonshotai/kimi-k2
+openai/gpt-5
+openai/gpt-5-codex
+openai/gpt-5-mini
+openai/gpt-5-nano
+openai/gpt-4.1
+openai/gpt-4o
+openai/o3
+openai/o4-mini
+opencode/grok-code
+qwen/qwen3-coder
+xai/grok-4
+xai/grok-code-fast-1
+zhipuai/glm-4.6

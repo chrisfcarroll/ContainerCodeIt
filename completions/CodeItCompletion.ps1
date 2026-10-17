@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    Tab completion for Code-It.ps1, Claude-It.ps1 and OpenCode-It.ps1.
+    Tab completion for Code-It.ps1, Claude-It.ps1, OpenCode-It.ps1 and
+    Code-It-Defaults.ps1.
 
 .DESCRIPTION
     PowerShell already completes the launchers' own parameters (-claude, -prompt,
@@ -10,6 +11,9 @@
         https://code.claude.com/docs/en/cli-reference
         https://opencode.ai/docs/cli/
         https://opencode.ai/v2/docs/cli/
+
+    and, for Code-It-Defaults.ps1, the agents to install next to -agent and the
+    AGENT= prefix next to -model.
 
     Dot-source it from your profile:
         . /path/to/ContainerCodeIt/completions/CodeItCompletion.ps1
@@ -61,7 +65,32 @@ Register-ArgumentCompleter -CommandName $codeItCommands -ParameterName agentArgs
     if ($fakeBoundParameters.ContainsKey('opencode')) { $agent = 'opencode' }
 
     $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'opencode-v2') { $script:CodeItOpenCodeV2Args } else { $script:CodeItOpenCodeArgs }
-    $candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "$agent $_")
+$candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'opencode-v2') { $script:CodeItOpenCodeV2Args } else { $script:CodeItOpenCodeArgs }
+$candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "$agent $_")
+}
+}
+
+# Code-It-Defaults.ps1: the agents of its agents/ directory next to -agent, and the
+# AGENT= prefix of each next to -model (the model itself is free text: the catalog is
+# always incomplete). $PSScriptRoot here is completions/, so the agents/ directory
+# next to the scripts is its parent's.
+$script:CodeItAgentsDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'agents'
+$defaultsScript = Join-Path (Split-Path $PSScriptRoot -Parent) 'Code-It-Defaults.ps1'
+if (Test-Path -Path $defaultsScript) {
+    $script:defaultsCommands = @('Code-It-Defaults.ps1', './Code-It-Defaults.ps1', '.\Code-It-Defaults.ps1')
+    Register-ArgumentCompleter -CommandName $script:defaultsCommands -ParameterName agent -ScriptBlock {
+        param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+        @($script:CodeItAgentsDir | ForEach-Object { [IO.Directory]::GetDirectories($_) } |
+            ForEach-Object { Split-Path $_ -Leaf }) + @('none') |
+            Where-Object { $_ -like "$wordToComplete*" } |
+            ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
+    }
+    Register-ArgumentCompleter -CommandName $script:defaultsCommands -ParameterName model -ScriptBlock {
+        param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+        @($script:CodeItAgentsDir | ForEach-Object { [IO.Directory]::GetDirectories($_) } |
+            ForEach-Object { "$((Split-Path $_ -Leaf))='model'" }) |
+            Where-Object { $_ -like "$wordToComplete*" } |
+            ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
     }
 }

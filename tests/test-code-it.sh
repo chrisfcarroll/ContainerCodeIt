@@ -105,16 +105,18 @@ common_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
 # ---------------------------------------------------------------------------
 echo "1. Syntax checks (bash -n)"
 for f in code-it.sh code-it-build.sh code-it-first-run.sh code-it-add-agent.sh \
-         code-it-add-tool-chain.sh lib/code-it-common.sh claude-it.sh opencode-it.sh \
-         tests/test-code-it.sh completions/code-it.bash completions/code-it-build.bash \
+         code-it-add-tool-chain.sh code-it-defaults.sh lib/code-it-common.sh claude-it.sh opencode-it.sh \
+         tests/test-code-it.sh tests/test-code-it-defaults.sh \
+         completions/code-it.bash completions/code-it-build.bash \
          completions/code-it-add-agent.bash completions/code-it-add-tool-chain.bash \
-         completions/code-it-first-run.bash; do
+         completions/code-it-first-run.bash completions/code-it-defaults.bash; do
     bash -n "$script_dir/$f"
     assert "bash -n $f" "$?"
 done
 if command -v zsh &>/dev/null; then
     for f in completions/_code-it completions/_code-it-build completions/_code-it-add-agent \
-             completions/_code-it-add-tool-chain completions/_code-it-first-run; do
+             completions/_code-it-add-tool-chain completions/_code-it-first-run \
+             completions/_code-it-defaults; do
         zsh -n "$script_dir/$f"
         assert "zsh -n $f" "$?"
     done

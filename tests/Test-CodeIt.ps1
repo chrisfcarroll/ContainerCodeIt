@@ -168,14 +168,14 @@ $commonArgs = @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $save)
 
 # ---------------------------------------------------------------------------
 "1. Parse checks"
-foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
+foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','Code-It-Defaults.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
     $parseErrors = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptDir $f), [ref]$null, [ref]$parseErrors)
     Assert "parses: $f" ($parseErrors.Count -eq 0)
 }
 # Comment-based help needs a blank line after the shebang: with the shebang directly
 # above it, Get-Help finds no help and prints only the one-line syntax.
-foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1')) {
+foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','Code-It-Defaults.ps1')) {
     $path = Join-Path $scriptDir $f
     Assert "keeps its shebang: $f" ((Get-Content $path -TotalCount 1) -eq '#! /usr/bin/env pwsh')
     $help = Get-Help $path -Full | Out-String

@@ -311,10 +311,9 @@ function Test-CodeItAgentDetected([string]$dir, [string]$name) {
     return $false
 }
 
-# Get-CodeItAgentConfig DIR NAME KEY: the (unquoted) value of KEY in an agent's
-# config, or $null. Keys are uppercase and appear once per line.
-function Get-CodeItAgentConfig([string]$dir, [string]$name, [string]$key) {
-    $file = Join-Path $dir (Join-Path $name 'config')
+# Get-CodeItKeyValue FILE KEY: the (unquoted) value of KEY in a KEY=value FILE, or
+# $null. Keys appear once per line; CRLF endings and quoted values are tolerated.
+function Get-CodeItKeyValue([string]$file, [string]$key) {
     if (-not (Test-Path -Path $file -PathType Leaf)) { return $null }
     foreach ($line in Get-Content $file) {
         if ($line -match "^$([regex]::Escape($key))=(.*)$") {
@@ -326,6 +325,17 @@ function Get-CodeItAgentConfig([string]$dir, [string]$name, [string]$key) {
         }
     }
     return $null
+}
+
+# Get-CodeItAgentConfig DIR NAME KEY: the (unquoted) value of KEY in an agent's
+# config, or $null. Keys are uppercase and appear once per line.
+function Get-CodeItAgentConfig([string]$dir, [string]$name, [string]$key) {
+    return (Get-CodeItKeyValue (Join-Path $dir (Join-Path $name 'config')) $key)
+}
+
+# Get-CodeItDefault FILE KEY: the value of KEY in a code-it-defaults file, or $null.
+function Get-CodeItDefault([string]$file, [string]$key) {
+    return (Get-CodeItKeyValue $file $key)
 }
 
 # Get-CodeItRunArgs FILE: the extra container run arguments in FILE, as
@@ -383,8 +393,8 @@ function Test-CodeItAgentExists([string]$dir, [string]$name) {
 }
 
 function Get-CodeItListAgents([string]$dir) {
-    if (-not (Test-Path -Path $dir -PathType Container)) { return ,@() }
-    return ,@(Get-ChildItem -Directory -Path $dir |
+    if (-not (Test-Path -Path $dir -PathType Container)) { return @() }
+    return @(Get-ChildItem -Directory -Path $dir |
         Where-Object { Test-Path -Path (Join-Path $_.FullName 'config') -PathType Leaf } |
         ForEach-Object { $_.Name })
 }
