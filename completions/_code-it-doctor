@@ -1,0 +1,20 @@
+#compdef code-it-doctor.sh
+# Zsh completion for code-it-doctor.sh.
+#
+# Install by putting this directory on your fpath before compinit.
+
+_code_it_doctor() {
+    local prev
+    prev=${words[CURRENT-1]}
+
+    case $prev in
+        (--runtime|-r)                        compadd -- docker container; return ;;
+        (--save-dir|-s|--repo|--code-it)      _files -/; return ;;
+        (--image|-i|--branch)                 return ;;   # free text
+    esac
+
+    compadd -- --runtime -r --image -i --save-dir -s --no-live-test --yes -y --fix \
+        --repo --code-it --branch --dry-run -d --help -h
+}
+
+_code_it_doctor "$@"

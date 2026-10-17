@@ -438,6 +438,7 @@ source /path/to/ContainerCodeIt/completions/code-it-build.bash
 source /path/to/ContainerCodeIt/completions/code-it-add-agent.bash
 source /path/to/ContainerCodeIt/completions/code-it-add-tool-chain.bash
 source /path/to/ContainerCodeIt/completions/code-it-first-run.bash
+source /path/to/ContainerCodeIt/completions/code-it-doctor.bash
 ```
 
 ```zsh
@@ -587,6 +588,78 @@ seeded at startup into `~/.bun/install/cache` in the same way.
 
 To do.
 
+## Copying to the clipboard
+
+Nothing in the container can reach your clipboard directly: there is no `pbcopy` in
+there, and no display. A copy travels as an escape sequence, OSC 52, along this path:
+
+```
+agent (Claude Code /copy, opencode's select) or tmux mouse selection
+  -> tmux in the container (set-clipboard on: passes OSC 52 on)
+  -> docker / Apple container (a plain terminal stream)
+  -> tmux on your host, if any (needs set -s set-clipboard on; the default drops it)
+  -> your terminal, which must accept OSC 52
+```
+
+The image already does its part. When copying fails, the cause is almost always the
+host end:
+
+| Terminal | OSC 52 | To copy from the container |
+|---|---|---|
+| macOS Terminal.app | **not supported** | turn mouse reporting off with View > Allow Mouse Reporting (⌘R), drag, ⌘C, ⌘R again; or `Ctrl-B :set mouse off` in the container; or use another terminal |
+| iTerm2 | off by default | Settings > General > Selection > *Applications in terminal may access clipboard*, or `defaults write com.googlecode.iterm2 AllowClipboardAccess -bool true` and restart iTerm2 |
+| Ghostty, WezTerm, kitty, Alacritty, VS Code, Windows Terminal | on | select with the mouse: tmux copies on release, no ⌘C needed |
+| mintty (Git Bash) | off by default | `AllowSetSelection=yes` in `~/.minttyrc` |
+
+`code-it-doctor` checks all of this for you, and can try the round trip itself.
+
+## code-it-doctor
+
+`code-it-doctor` checks your setup and says how to fix each problem it finds: the
+container runtime and its service, the image (and its tmux settings), the save dir
+(including opencode's database), your git identity, and the clipboard path above: which
+terminal you use and whether it accepts OSC 52, and tmux or screen on the host.
+
+The clipboard round trip (asked for first, or `--yes`) puts a marker on your clipboard
+with OSC 52, from the shell and then from tmux inside the image, and reads it back with
+`pbpaste`, `wl-paste`, `xclip`, `xsel` or PowerShell; text that was on the clipboard is
+restored. It is skipped over ssh, where this host's clipboard is not yours.
+
+It exits 0 if it found no problem and 1 if it did.
+
+```bash
+./code-it-doctor.sh
+./code-it-doctor.sh --yes                          # run the clipboard round trip without asking
+./code-it-doctor.sh "opencode can't create a session"   # then have an agent fix it
+./code-it-doctor.sh --fix --dry-run               # show the prompt and command only
+```
+
+```powershell
+.\Code-It-Doctor.ps1
+.\Code-It-Doctor.ps1 "opencode can't create a session"
+```
+
+With `--fix`, or a problem described in words, it then runs code-it headless on this
+repository, like `code-it-add-agent`, handing the agent the problem and the report (the
+agent cannot see your host). The agent investigates inside a code-it container, and
+either fixes the repository, with tests and a commit, on a new branch
+`doctor/<timestamp>`, or tells you exactly what to change on the host. It refuses a
+dirty repository, never commits to your current branch and never pushes.
+
+| bash | PowerShell | Default | Description |
+|---|---|---|---|
+| *PROBLEM* | *Problem* | none | The problem, in words; implies `--fix` |
+| `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
+| `--image`, `-i` | `-image` | the most recently used code-it image | Image to check |
+| `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | code-it's save dir |
+| `--no-live-test` | `-noLiveTest` | off | Skip the clipboard round trip |
+| `--yes`, `-y` | `-yes` | off | Run the clipboard round trip without asking |
+| `--fix` | `-fix` | off | Have code-it investigate and fix what was found |
+| `--repo` | `-repo` | script's directory | Repository for `--fix` |
+| `--code-it` | `-codeIt` | `code-it.sh` / `Code-It.ps1` | Launcher for `--fix` |
+| `--branch` | `-branch` | `doctor/<yyyymmdd-HHMMSS>` | Branch for `--fix` |
+| `--dry-run`, `-d` | `-dryRun` | off | With `--fix`, print the prompt and command only |
+
 ## Tests
 
 No container runtime needed. The tests stub `docker`/`container`/`uname` on the PATH and assert on `--dry-run` output, so they run on any machine, not just inside a container.
@@ -598,6 +671,7 @@ No container runtime needed. The tests stub `docker`/`container`/`uname` on the 
 
 ```powershell
 pwsh -NoProfile -File tests/Test-CodeIt.ps1
+pwsh -NoProfile -File tests/Test-CodeItDoctor.ps1
 ```
 
 - **macOS**: `./tests/run-all-tests.sh` works with the stock bash 3.2; the Apple-container detection paths are exercised via stubs, so neither Docker nor the `container` CLI needs to be installed.

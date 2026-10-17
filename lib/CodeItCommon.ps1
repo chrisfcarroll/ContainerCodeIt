@@ -498,7 +498,7 @@ function Invoke-CodeItAdder([string]$name, [string]$branch, [string]$repo, [stri
     & git -C $repo diff --stat "$baseRev..HEAD" 2>$null | ForEach-Object { Write-Host "      $_" }
 
     if ($rc -ne 0) {
-        Write-Warning "code-it exited $rc (the agent may have refused the gate or failed)."
+        Write-Warning "code-it exited $rc (the agent may have refused, or failed)."
     }
     return [int]$rc
 }

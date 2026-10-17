@@ -589,7 +589,7 @@ ci_add_via_code_it() {
     git -C "$repo" diff --stat "$base_rev..HEAD" 2>/dev/null | sed 's/^/      /' || true
 
     if [[ "$rc" != "0" ]]; then
-        echo "Warning: code-it exited $rc (the agent may have refused the gate or failed)." >&2
+        echo "Warning: code-it exited $rc (the agent may have refused, or failed)." >&2
     fi
     return "$rc"
 }
