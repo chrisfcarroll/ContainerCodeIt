@@ -9,6 +9,10 @@ AGENT_CONFIG_LABEL='OpenCode configuration'
 # State created under --save-dir and mounted into the container home
 AGENT_STATE_DIRS='.config/opencode:.local/share/opencode'
 AGENT_STATE_FILES=''
+# One container at a time: concurrent containers corrupt its SQLite session database.
+# A second container gets its own copy, with auth.json carried over.
+AGENT_EXCLUSIVE_DIRS='.local/share/opencode'
+AGENT_EXCLUSIVE_CARRY='.local/share/opencode/auth.json'
 # Prompt translation: {args} is the agent arguments, {prompt} the opening prompt
 AGENT_CMD_INTERACTIVE_PROMPT='--prompt {prompt} {args}'
 AGENT_CMD_INTERACTIVE_NO_PROMPT='{args}'

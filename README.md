@@ -249,6 +249,18 @@ data paths, and v1 exits at once on v2's `opencode.json`, so v2 sets
 `AGENT_SAVE_SUBDIR=opencode-v2` in its config and keeps its state under
 `<save dir>/opencode-v2/` instead of the save dir itself.
 
+### Several containers at once
+
+OpenCode keeps its sessions in a SQLite database in `~/.local/share/opencode`. Two
+containers writing it at once corrupt it ("can't create session", `database disk
+image is malformed`), especially with Apple `container`, which runs each container in
+its own VM. So code-it locks that directory while a container uses it. A second
+opencode run started while the first is still going gets a warning and its own copy,
+`<save dir>/.code-it-instances/opencode/2/.local/share/opencode`, with `auth.json`
+copied in so it needs no new login. Sessions made in a copy stay in that copy, and a
+later run that gets the same copy carries on with them. A lock left by a run that
+crashed is ignored. Agents opt in with `AGENT_EXCLUSIVE_DIRS` (below).
+
 ### Agent definitions
 
 Each agent is a directory, `agents/<name>/`, so adding one needs no script changes
@@ -266,6 +278,8 @@ Each agent is a directory, `agents/<name>/`, so adding one needs no script chang
   | `AGENT_CONFIG_LABEL` | How messages name its config, e.g. `'Claude Code settings'` |
   | `AGENT_STATE_DIRS`, `AGENT_STATE_FILES` | `:`-separated paths, relative to home, kept under the save dir and mounted into the container |
   | `AGENT_SAVE_SUBDIR` | Optional subdirectory of the save dir for its state, when it would clash with another agent's |
+  | `AGENT_EXCLUSIVE_DIRS` | Optional `:`-separated directories, from `AGENT_STATE_DIRS`, that only one container at a time may use. See [Several containers at once](#several-containers-at-once) |
+  | `AGENT_EXCLUSIVE_CARRY` | Optional `:`-separated files, relative to home, inside those directories (credentials), copied into a run's own copy |
   | `AGENT_CMD_INTERACTIVE_PROMPT`, `AGENT_CMD_INTERACTIVE_NO_PROMPT`, `AGENT_CMD_HEADLESS_PROMPT`, `AGENT_CMD_HEADLESS_NO_PROMPT` | Its command line in each mode, where `{args}` is the arguments after `--` and `{prompt}` the opening prompt |
 
 - `install.dockerfile`: the layers that install it, run as `agent1`. `code-it-build`

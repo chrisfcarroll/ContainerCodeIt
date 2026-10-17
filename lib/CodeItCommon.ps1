@@ -12,6 +12,8 @@
         Resolve-CodeItLocale RAW               -> e.g. en_GB.UTF-8, or $null on error
         Get-CodeItRunArgs FILE                 -> the file's run args, as an array
         Test-CodeItEnvSpec SPEC                -> $true if SPEC is NAME[=VALUE]
+        Test-CodeItPidAlive PID                -> $true if process PID is running
+        Get-CodeItSlot LOCKDIR PID TAKE        -> lowest free slot number, locked if TAKE
 #>
 
 $script:CodeItKnownToolchain    = @('dotnet', 'node', 'bun', 'python', 'powershell')
@@ -339,6 +341,41 @@ function Get-CodeItRunArgs([string]$file) {
 # environment variable name.
 function Test-CodeItEnvSpec([string]$spec) {
     return ($spec -match '^[A-Za-z_][A-Za-z0-9_]*(=.*)?$')
+}
+
+# Test-CodeItPidAlive PID: $true if process PID is running
+function Test-CodeItPidAlive([string]$id) {
+    if ($id -notmatch '^\d+$') { return $false }
+    return ($null -ne (Get-Process -Id ([int]$id) -ErrorAction SilentlyContinue))
+}
+
+# Get-CodeItSlot LOCKDIR PID TAKE: the lowest slot number N whose lock,
+# LOCKDIR/N.lock, is absent or stale (its process has exited). With TAKE, also take
+# it: remove a stale lock and create N.lock holding PID, atomically, so two runs
+# starting together never get the same slot. $null if no slot could be had.
+function Get-CodeItSlot([string]$dir, [string]$ownPid, [bool]$take) {
+    if ($take) {
+        try { $null = New-Item -ItemType Directory -Force -Path $dir -ErrorAction Stop } catch { return $null }
+    }
+    for ($n = 1; $n -lt 100; $n++) {
+        $lock = Join-Path $dir "$n.lock"
+        if (Test-Path -Path $lock) {
+            $held = "$(Get-Content -Path $lock -TotalCount 1 -ErrorAction SilentlyContinue)".Trim()
+            # An empty lock is one being written right now: treat it as held
+            if (-not $held -or (Test-CodeItPidAlive $held)) { continue }
+            if ($take) { Remove-Item -Force -Path $lock -ErrorAction SilentlyContinue }
+        }
+        if (-not $take) { return $n }
+        try {
+            $stream = [System.IO.File]::Open($lock, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write)
+            try {
+                $bytes = [System.Text.Encoding]::ASCII.GetBytes("$ownPid`n")
+                $stream.Write($bytes, 0, $bytes.Length)
+            } finally { $stream.Dispose() }
+            return $n
+        } catch { continue }
+    }
+    return $null
 }
 
 function Test-CodeItAgentExists([string]$dir, [string]$name) {

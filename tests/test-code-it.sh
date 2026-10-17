@@ -1407,5 +1407,88 @@ assert_contains "--help documents the run-args file" "$out" "SAVE-DIR/run-args"
 
 # ---------------------------------------------------------------------------
 echo
+echo "22. Exclusive agent state: one container per opencode session database"
+excl="$tmp/save-excl"; mkdir -p "$excl"
+excl_args=(--work-dir "$script_dir" --save-dir "$excl")
+excl_locks="$excl/.code-it-instances/opencode"
+slot1_mount="-v \"$excl/.local/share/opencode:/home/agent1/.local/share/opencode\""
+# A pid that is certainly not running: a child that has already exited
+sh -c 'exit 0' & dead_pid=$!; wait "$dead_pid"
+
+# (a) no lock: slot 1, no warning, and a dry run takes no lock
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o --dry-run "${excl_args[@]}" 2>&1)
+assert_contains "no lock: slot 1 is mounted" "$out" "$slot1_mount"
+[[ "$out" != *"Another opencode container"* ]]; assert "no lock: no warning" "$?"
+[[ ! -e "$excl_locks/1.lock" ]]; assert "dry run takes no lock" "$?"
+
+# (b) slot 1 held by a live process (this test): warn and mount slot 2
+mkdir -p "$excl_locks" "$excl/.local/share/opencode"
+echo '{"anthropic":{"type":"api"}}' > "$excl/.local/share/opencode/auth.json"
+echo "$$" > "$excl_locks/1.lock"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o --dry-run "${excl_args[@]}" 2>&1)
+assert_contains "held lock: warns of the other container" "$out" "Warning: Another opencode container is using $excl/.local/share/opencode"
+assert_contains "held lock: slot 2 is mounted" "$out" "-v \"$excl_locks/2/.local/share/opencode:/home/agent1/.local/share/opencode\""
+assert_contains "held lock: config is still shared" "$out" "-v \"$excl/.config/opencode:/home/agent1/.config/opencode\""
+[[ ! -e "$excl_locks/2" ]]; assert "dry run copies nothing" "$?"
+
+# (c) a real (stub) run holds slot 2's lock while the container runs, carries auth.json
+# over, and frees the lock afterwards
+stub_locks="$tmp/stub-locks"; mkdir -p "$stub_locks"
+cat > "$stub_locks/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+    images) echo "code-it-alpine-dotnet-node:latest" ;;
+    image)  echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;;
+    run)    echo "STUB-DOCKER-RUN $*"; echo "LOCKS-DURING-RUN: $(cd "$STUB_LOCK_DIR" && ls *.lock | tr '\n' ' ')" ;;
+    *)      echo "stub docker: $*" ;;
+esac
+EOF
+chmod +x "$stub_locks/docker"
+out=$(STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" -o "${excl_args[@]}" 2>&1)
+assert_contains "real run mounts slot 2" "$out" "-v $excl_locks/2/.local/share/opencode:/home/agent1/.local/share/opencode"
+assert_contains "real run holds slot 2's lock while running" "$out" "LOCKS-DURING-RUN: 1.lock 2.lock"
+[[ ! -e "$excl_locks/2.lock" ]]; assert "real run frees its lock afterwards" "$?"
+[[ -e "$excl_locks/1.lock" ]]; assert "real run leaves the other run's lock alone" "$?"
+cmp -s "$excl/.local/share/opencode/auth.json" "$excl_locks/2/.local/share/opencode/auth.json"
+assert "auth.json is carried into the copy" "$?"
+
+# (d) a newer auth.json in slot 1 refreshes the copy's; an older one does not
+echo '{"anthropic":{"type":"oauth"}}' > "$excl/.local/share/opencode/auth.json"
+touch -t 203001010000 "$excl/.local/share/opencode/auth.json"
+STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" -o "${excl_args[@]}" >/dev/null 2>&1
+cmp -s "$excl/.local/share/opencode/auth.json" "$excl_locks/2/.local/share/opencode/auth.json"
+assert "a newer auth.json refreshes the copy" "$?"
+echo '{"in":"copy"}' > "$excl_locks/2/.local/share/opencode/auth.json"
+touch -t 203101010000 "$excl_locks/2/.local/share/opencode/auth.json"
+STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" -o "${excl_args[@]}" >/dev/null 2>&1
+grep -q '"in":"copy"' "$excl_locks/2/.local/share/opencode/auth.json"
+assert "an older auth.json leaves the copy's alone" "$?"
+
+# (e) slots 1 and 2 held: slot 3
+echo "$$" > "$excl_locks/2.lock"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o --dry-run "${excl_args[@]}" 2>&1)
+assert_contains "slots 1 and 2 held: slot 3 is mounted" "$out" "$excl_locks/3/.local/share/opencode:/home/agent1/.local/share/opencode"
+rm -f "$excl_locks/2.lock"
+
+# (f) a stale lock (its process has exited): slot 1, no warning; a real run replaces it
+echo "$dead_pid" > "$excl_locks/1.lock"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o --dry-run "${excl_args[@]}" 2>&1)
+assert_contains "stale lock: slot 1 is mounted" "$out" "$slot1_mount"
+[[ "$out" != *"Another opencode container"* ]]; assert "stale lock: no warning" "$?"
+out=$(STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" -o "${excl_args[@]}" 2>&1)
+assert_contains "stale lock: a real run takes slot 1" "$out" "LOCKS-DURING-RUN: 1.lock"
+[[ ! -e "$excl_locks/1.lock" ]]; assert "stale lock: removed after the run" "$?"
+
+# (g) an agent without AGENT_EXCLUSIVE_DIRS takes no lock
+rm -rf "$excl/.code-it-instances"
+PATH="$stub_docker:$PATH" "$code_it" -c "${excl_args[@]}" >/dev/null 2>&1
+[[ ! -e "$excl/.code-it-instances" ]]; assert "claude takes no lock" "$?"
+
+# (h) help documents it
+out=$(PATH="$stub_docker:$PATH" "$code_it" --help)
+assert_contains "--help documents exclusive state" "$out" "AGENT_EXCLUSIVE_DIRS"
+
+# ---------------------------------------------------------------------------
+echo
 echo "Results: $pass passed, $fail failed"
 [[ "$fail" == "0" ]] || exit 1

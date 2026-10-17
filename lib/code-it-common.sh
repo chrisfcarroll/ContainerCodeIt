@@ -15,6 +15,9 @@
 #   ci_resolve_locale RAW                             -> e.g. en_GB.UTF-8, or return 1
 #   ci_read_run_args FILE                             -> the file's run args, one per line
 #   ci_valid_env_spec SPEC                            return 0 if SPEC is NAME[=VALUE]
+#   ci_self_pid                                       -> this shell's pid (Windows pid on Windows)
+#   ci_pid_alive PID                                  return 0 if process PID is running
+#   ci_claim_slot LOCK_DIR PID TAKE                   -> lowest free slot number, locked if TAKE=true
 #
 # There is no default toolchain: an empty toolchain RAW resolves to an empty list.
 # An empty package-cache RAW means the caches the toolchains imply. An unknown name
@@ -359,6 +362,44 @@ ci_read_run_args() {
 # ci_valid_env_spec SPEC: true if SPEC is NAME or NAME=VALUE, NAME being a valid
 # environment variable name.
 ci_valid_env_spec() { [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*(=.*)?$ ]]; }
+
+# ci_self_pid: this shell's process id, as ci_pid_alive and PowerShell's Get-Process
+# see it. Git Bash and Cygwin number their own processes, so use the Windows pid there.
+ci_self_pid() {
+    if [[ -r /proc/$$/winpid ]]; then cat "/proc/$$/winpid"; else printf '%s' "$$"; fi
+}
+
+# ci_pid_alive PID: true if process PID is running
+ci_pid_alive() {
+    [[ "$1" =~ ^[0-9]+$ ]] || return 1
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) tasklist //FI "PID eq $1" //NH 2>/dev/null | grep -q " $1 " ;;
+        *)                    kill -0 "$1" 2>/dev/null ;;
+    esac
+}
+
+# ci_claim_slot LOCK_DIR PID TAKE: print the lowest slot number N whose lock,
+# LOCK_DIR/N.lock, is absent or stale (its process has exited). With TAKE=true, also
+# take it: remove a stale lock and create N.lock holding PID, atomically, so two runs
+# starting together never get the same slot. Return 1 if no slot could be had.
+ci_claim_slot() {
+    local dir="$1" pid="$2" take="$3" n lock held
+    [[ "$take" == true ]] && { mkdir -p "$dir" || return 1; }
+    for ((n = 1; n < 100; n++)); do
+        lock="$dir/$n.lock"
+        if [[ -e "$lock" ]]; then
+            held=$(head -n 1 "$lock" 2>/dev/null | tr -d '[:space:]')
+            # An empty lock is one being written right now: treat it as held
+            [[ -z "$held" ]] || ci_pid_alive "$held" && continue
+            [[ "$take" == true ]] && rm -f "$lock"
+        fi
+        if [[ "$take" != true ]]; then printf '%s' "$n"; return 0; fi
+        if ( set -o noclobber; printf '%s\n' "$pid" > "$lock" ) 2>/dev/null; then
+            printf '%s' "$n"; return 0
+        fi
+    done
+    return 1
+}
 
 # ci_agent_exists AGENTS_DIR NAME
 ci_agent_exists() { [[ -f "$1/$2/config" ]]; }

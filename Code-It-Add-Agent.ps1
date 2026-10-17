@@ -92,6 +92,9 @@ If it passes the gate:
      four AGENT_CMD_* prompt-translation templates.
      If its state paths are the same as another agent's (as opencode-v2 shares
      opencode's), also set AGENT_SAVE_SUBDIR so its state is kept separately.
+     If it keeps a database in a state directory that two containers must not
+     use at once (as opencode's SQLite sessions), list that directory in
+     AGENT_EXCLUSIVE_DIRS and its credential files in AGENT_EXCLUSIVE_CARRY.
    - install.dockerfile: install from the official channel only, as user agent1,
      pinning versions where possible, keeping a "# last changed YYYY-MM-DD"
      cache-bust line. If the agent binary needs shared libraries the base image

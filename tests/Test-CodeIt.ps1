@@ -1334,6 +1334,107 @@ Assert-Contains "-runtime completes its values" $r.out 'RUNTIME:docker container
 Assert-Contains "-locale completes like-host" $r.out 'LOCALE:like-host C.UTF-8'
 
 # ---------------------------------------------------------------------------
+"14. Exclusive agent state: one container per opencode session database"
+$excl = Join-Path $tmp 'save-excl'
+$null = New-Item -ItemType Directory -Force -Path $excl
+$exclArgs  = @('-WorkDirToMount', $scriptDir, '-saveDir', $excl)
+$exclLocks = "$excl/.code-it-instances/opencode"
+$slot1Mount = "-v `"$excl/.local/share/opencode:/home/agent1/.local/share/opencode`""
+# A pid that is certainly not running: a child that has already exited
+$deadPid = (Start-Process -FilePath $pwshExe -ArgumentList '-NoProfile', '-Command', 'exit 0' -PassThru -Wait).Id
+
+# (a) no lock: slot 1, no warning, and a dry run takes no lock
+$r = Invoke-Scenario $codeIt (@('-o', '-dryRun') + $exclArgs) $stubPath
+Assert-Contains "no lock: slot 1 is mounted" $r.out $slot1Mount
+Assert "no lock: no warning" (-not $r.out.Contains('Another opencode container'))
+Assert "dry run takes no lock" (-not (Test-Path "$exclLocks/1.lock"))
+
+# (b) slot 1 held by a live process (this test): warn and mount slot 2
+$null = New-Item -ItemType Directory -Force -Path $exclLocks, "$excl/.local/share/opencode"
+Set-Content -Path "$excl/.local/share/opencode/auth.json" -Value '{"anthropic":{"type":"api"}}'
+Set-Content -Path "$exclLocks/1.lock" -Value "$PID"
+$r = Invoke-Scenario $codeIt (@('-o', '-dryRun') + $exclArgs) $stubPath
+Assert-Contains "held lock: warns of the other container" $r.out "Another opencode container is using $excl/.local/share/opencode"
+Assert-Contains "held lock: slot 2 is mounted" $r.out "-v `"$exclLocks/2/.local/share/opencode:/home/agent1/.local/share/opencode`""
+Assert-Contains "held lock: config is still shared" $r.out "-v `"$excl/.config/opencode:/home/agent1/.config/opencode`""
+Assert "dry run copies nothing" (-not (Test-Path "$exclLocks/2"))
+
+# (c) a real (stub) run holds slot 2's lock while the container runs, carries auth.json
+# over, and frees the lock afterwards
+$stubLocks = Join-Path $tmp 'stub-locks'
+$null = New-Item -ItemType Directory -Force -Path $stubLocks
+if ($onWindows) {
+    Set-Content -Path (Join-Path $stubLocks 'docker.cmd') -Value @'
+@echo off
+if "%~1"=="images" echo code-it-alpine-dotnet-node:latest& goto :eof
+if "%~1"=="image" echo dotnet,node& goto :eof
+if "%~1"=="run" (
+    echo STUB-DOCKER-RUN %*
+    for %%f in ("%STUB_LOCK_DIR%\*.lock") do echo LOCK-DURING-RUN: %%~nxf
+    goto :eof
+)
+echo stub docker: %*
+'@
+} else {
+    Set-Content -Path (Join-Path $stubLocks 'docker') -Value @'
+#!/bin/sh
+case "$1" in
+    images) echo "code-it-alpine-dotnet-node:latest" ;;
+    image)  echo "dotnet,node" ;;
+    run)    echo "STUB-DOCKER-RUN $*"; for f in "$STUB_LOCK_DIR"/*.lock; do echo "LOCK-DURING-RUN: ${f##*/}"; done ;;
+    *)      echo "stub docker: $*" ;;
+esac
+'@
+    chmod +x (Join-Path $stubLocks 'docker')
+}
+$stubLocksPath = "$stubLocks$sep$origPath"
+$env:STUB_LOCK_DIR = $exclLocks
+$r = Invoke-Scenario $codeIt (@('-o') + $exclArgs) $stubLocksPath
+Assert-Contains "real run mounts slot 2" $r.out "$exclLocks/2/.local/share/opencode:/home/agent1/.local/share/opencode"
+Assert-Contains "real run holds slot 2's lock while running" $r.out 'LOCK-DURING-RUN: 2.lock'
+Assert-Contains "real run sees the other run's lock" $r.out 'LOCK-DURING-RUN: 1.lock'
+Assert "real run frees its lock afterwards" (-not (Test-Path "$exclLocks/2.lock"))
+Assert "real run leaves the other run's lock alone" (Test-Path "$exclLocks/1.lock")
+$slot2Auth = "$exclLocks/2/.local/share/opencode/auth.json"
+Assert "auth.json is carried into the copy" ((Test-Path $slot2Auth) -and
+    (Get-Content $slot2Auth -Raw) -eq (Get-Content "$excl/.local/share/opencode/auth.json" -Raw))
+
+# (d) a newer auth.json in slot 1 refreshes the copy's; an older one does not
+Set-Content -Path "$excl/.local/share/opencode/auth.json" -Value '{"anthropic":{"type":"oauth"}}'
+(Get-Item "$excl/.local/share/opencode/auth.json").LastWriteTimeUtc = [datetime]'2030-01-01'
+$null = Invoke-Scenario $codeIt (@('-o') + $exclArgs) $stubLocksPath
+Assert "a newer auth.json refreshes the copy" ((Get-Content $slot2Auth -Raw).Contains('oauth'))
+Set-Content -Path $slot2Auth -Value '{"in":"copy"}'
+(Get-Item $slot2Auth).LastWriteTimeUtc = [datetime]'2031-01-01'
+$null = Invoke-Scenario $codeIt (@('-o') + $exclArgs) $stubLocksPath
+Assert "an older auth.json leaves the copy's alone" ((Get-Content $slot2Auth -Raw).Contains('"in":"copy"'))
+
+# (e) slots 1 and 2 held: slot 3
+Set-Content -Path "$exclLocks/2.lock" -Value "$PID"
+$r = Invoke-Scenario $codeIt (@('-o', '-dryRun') + $exclArgs) $stubPath
+Assert-Contains "slots 1 and 2 held: slot 3 is mounted" $r.out "$exclLocks/3/.local/share/opencode:/home/agent1/.local/share/opencode"
+Remove-Item -Force "$exclLocks/2.lock"
+
+# (f) a stale lock (its process has exited): slot 1, no warning; a real run replaces it
+Set-Content -Path "$exclLocks/1.lock" -Value "$deadPid"
+$r = Invoke-Scenario $codeIt (@('-o', '-dryRun') + $exclArgs) $stubPath
+Assert-Contains "stale lock: slot 1 is mounted" $r.out $slot1Mount
+Assert "stale lock: no warning" (-not $r.out.Contains('Another opencode container'))
+$r = Invoke-Scenario $codeIt (@('-o') + $exclArgs) $stubLocksPath
+Assert-Contains "stale lock: a real run takes slot 1" $r.out 'LOCK-DURING-RUN: 1.lock'
+Assert "stale lock: removed after the run" (-not (Test-Path "$exclLocks/1.lock"))
+Remove-Item Env:STUB_LOCK_DIR
+
+# (g) an agent without AGENT_EXCLUSIVE_DIRS takes no lock
+Remove-Item -Recurse -Force "$excl/.code-it-instances"
+$null = Invoke-Scenario $codeIt (@('-c') + $exclArgs) $stubPath
+Assert "claude takes no lock" (-not (Test-Path "$excl/.code-it-instances"))
+
+# (h) help documents it
+$r = Invoke-ScenarioCommand "Get-Help '$codeIt' -Full | Out-String -Width 200" $stubPath
+Assert-Contains "help documents exclusive state" $r.out 'AGENT_EXCLUSIVE_DIRS'
+
+# ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $tmp -EA Silent
 ""
 "Results: $script:pass passed, $script:fail failed"

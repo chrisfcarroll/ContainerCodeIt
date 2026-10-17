@@ -148,6 +148,11 @@
 #     can destroy the container and create a new one without logging in again. Only
 #     the paths in AGENT_STATE_DIRS and AGENT_STATE_FILES of agents/NAME/config are
 #     mounted, under SAVE-DIR (or SAVE-DIR/AGENT_SAVE_SUBDIR, e.g. for opencode-v2)
+#   - Only one container at a time may use an agent's AGENT_EXCLUSIVE_DIRS (opencode's
+#     session database, ~/.local/share/opencode, is corrupted if two share it). When
+#     another code-it run is using them, code-it warns and mounts a copy of its own,
+#     SAVE-DIR/.code-it-instances/AGENT/N/..., with the agent's credentials
+#     (AGENT_EXCLUSIVE_CARRY) copied in. Sessions made there stay in that copy.
 #   - Alternatively, use ANTHROPIC_API_KEY (claude) or a provider API key env var (opencode)
 #     to avoid volume mounts for credentials
 #   - Host package caches are mounted read-only (never written) for the package
@@ -385,6 +390,8 @@ if ! ci_agent_exists "$agents_dir" "$code_agent"; then
     exit 1
 fi
 AGENT_SAVE_SUBDIR=""
+AGENT_EXCLUSIVE_DIRS=""
+AGENT_EXCLUSIVE_CARRY=""
 # shellcheck disable=SC1090
 . "$agents_dir/$code_agent/config"
 
@@ -810,14 +817,72 @@ for arg in ${agent_cmd[@]+"${agent_cmd[@]}"}; do
     agent_cmd_print+=" $(printf '%q' "$arg")"
 done
 
+# One container at a time may use the AGENT_EXCLUSIVE_DIRS (opencode's SQLite session
+# database corrupts when containers in different VMs share it). Slot 1 is the usual
+# directory; when its lock is held by a running code-it, take the next free slot, an
+# empty copy under .code-it-instances/AGENT, carrying over AGENT_EXCLUSIVE_CARRY
+# (credentials). A dry run takes no lock and copies nothing.
+instance_root=""
+exclusive_lock=""
+if [[ -n "${AGENT_EXCLUSIVE_DIRS:-}" ]]; then
+    lock_dir="$agent_save_dir/.code-it-instances/$code_agent"
+    take_lock=true
+    [[ "$dry_run" == true ]] && take_lock=false
+    if slot=$(ci_claim_slot "$lock_dir" "$(ci_self_pid)" "$take_lock"); then
+        [[ "$take_lock" == true ]] && exclusive_lock="$lock_dir/$slot.lock"
+        if [[ "$slot" != 1 ]]; then
+            instance_root="$lock_dir/$slot"
+            IFS=':' read -r -a exclusive_dirs <<< "$AGENT_EXCLUSIVE_DIRS"
+            for d in "${exclusive_dirs[@]}"; do
+                [[ -n "$d" ]] || continue
+                echo "Warning: Another $code_agent container is using $agent_save_dir/$d." >&2
+                echo "    Containers cannot share it (its session database would be corrupted), so this one uses its own copy:" >&2
+                echo "    $instance_root/$d" >&2
+            done
+            if [[ "$dry_run" != true ]]; then
+                for d in "${exclusive_dirs[@]}"; do
+                    [[ -n "$d" ]] && mkdir -p "$instance_root/$d"
+                done
+                IFS=':' read -r -a carry_files <<< "${AGENT_EXCLUSIVE_CARRY:-}"
+                for f in ${carry_files[@]+"${carry_files[@]}"}; do
+                    [[ -n "$f" && -f "$agent_save_dir/$f" ]] || continue
+                    if [[ ! -e "$instance_root/$f" || "$agent_save_dir/$f" -nt "$instance_root/$f" ]]; then
+                        mkdir -p "$(dirname "$instance_root/$f")"
+                        cp -p "$agent_save_dir/$f" "$instance_root/$f"
+                    fi
+                done
+            fi
+        fi
+    else
+        echo "Warning: Could not lock $lock_dir; sharing $AGENT_EXCLUSIVE_DIRS with any other running container." >&2
+    fi
+fi
+if [[ -n "$exclusive_lock" ]]; then
+    trap 'rm -f "$exclusive_lock"' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+fi
+
+# state_dir_source DIR: the host directory mounted at ~/DIR, the instance copy for
+# an exclusive directory when this run has one
+state_dir_source() {
+    if [[ -n "$instance_root" ]] && ci_has "$(printf '%s' "$AGENT_EXCLUSIVE_DIRS" | tr ':' ' ')" "$1"; then
+        printf '%s' "$instance_root/$1"
+    else
+        printf '%s' "$agent_save_dir/$1"
+    fi
+}
+
 # Mount only the chosen agent's state, read from its definition.
 agent_mounts=()
 agent_mounts_print=""
 for d in ${agent_state_dirs[@]+"${agent_state_dirs[@]}"}; do
     [[ -n "$d" ]] || continue
-    agent_mounts+=(-v "$agent_save_dir/$d:$container_home/$d")
+    src=$(state_dir_source "$d")
+    agent_mounts+=(-v "$src:$container_home/$d")
     agent_mounts_print+="
-                -v \"$agent_save_dir/$d:$container_home/$d\" \\"
+                -v \"$src:$container_home/$d\" \\"
 done
 for f in ${agent_state_files[@]+"${agent_state_files[@]}"}; do
     [[ -n "$f" ]] || continue

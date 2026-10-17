@@ -181,6 +181,11 @@
       can destroy the container and create a new one without logging in again. Only
       the paths in AGENT_STATE_DIRS and AGENT_STATE_FILES of agents/<name>/config are
       mounted, under <saveDir> (or <saveDir>/AGENT_SAVE_SUBDIR, e.g. for opencode-v2)
+    - Only one container at a time may use an agent's AGENT_EXCLUSIVE_DIRS (opencode's
+      session database, ~/.local/share/opencode, is corrupted if two share it). When
+      another Code-It run is using them, Code-It warns and mounts a copy of its own,
+      <saveDir>/.code-it-instances/<agent>/<n>/..., with the agent's credentials
+      (AGENT_EXCLUSIVE_CARRY) copied in. Sessions made there stay in that copy.
     - Alternatively, use ANTHROPIC_API_KEY (claude) or a provider API key env var (opencode)
       to avoid volume mounts for credentials
     - Host package caches are mounted read-only (never written) for the package
@@ -283,6 +288,8 @@ $agentBinary      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_BINARY'
 $agentStateDirs   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_DIRS'
 $agentStateFiles  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_STATE_FILES'
 $agentSaveSubdir  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_SAVE_SUBDIR'
+$agentExclusiveDirs  = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_EXCLUSIVE_DIRS'
+$agentExclusiveCarry = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_EXCLUSIVE_CARRY'
 $agentConfigLabel = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CONFIG_LABEL'
 $agentCmdInteractivePrompt   = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_PROMPT'
 $agentCmdInteractiveNoPrompt = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_NO_PROMPT'
@@ -650,12 +657,54 @@ foreach ($token in ($template -split '\s+' | Where-Object { $_ })) {
     }
 }
 
-# Mount only the chosen agent's state, from its definition.
+# One container at a time may use the AGENT_EXCLUSIVE_DIRS (opencode's SQLite session
+# database corrupts when containers in different VMs share it). Slot 1 is the usual
+# directory; when its lock is held by a running Code-It, take the next free slot, an
+# empty copy under .code-it-instances/<agent>, carrying over AGENT_EXCLUSIVE_CARRY
+# (credentials). A dry run takes no lock and copies nothing.
+$exclusiveDirList = Split-CodeItList ($agentExclusiveDirs -replace ':', ',')
+$instanceRoot  = $null
+$exclusiveLock = $null
+if ($exclusiveDirList.Count -gt 0) {
+    $lockDir = "$agentSaveDir/.code-it-instances/$codeAgent"
+    $slot = Get-CodeItSlot $lockDir "$PID" (-not $dryRun)
+    if ($null -eq $slot) {
+        Write-Warning "Could not lock $lockDir; sharing $agentExclusiveDirs with any other running container."
+    } else {
+        if (-not $dryRun) { $exclusiveLock = "$lockDir/$slot.lock" }
+        if ($slot -ne 1) {
+            $instanceRoot = "$lockDir/$slot"
+            foreach ($d in $exclusiveDirList) {
+                Write-Warning ("Another $codeAgent container is using $agentSaveDir/$d.`n" +
+                    "    Containers cannot share it (its session database would be corrupted), so this one uses its own copy:`n" +
+                    "    $instanceRoot/$d")
+            }
+            if (-not $dryRun) {
+                foreach ($d in $exclusiveDirList) {
+                    $null = New-Item -ItemType Directory -Force -Path "$instanceRoot/$d"
+                }
+                foreach ($f in (Split-CodeItList ($agentExclusiveCarry -replace ':', ','))) {
+                    $src = "$agentSaveDir/$f"
+                    $dest = "$instanceRoot/$f"
+                    if (-not (Test-Path -Path $src -PathType Leaf)) { continue }
+                    if (-not (Test-Path -Path $dest) -or (Get-Item $src).LastWriteTimeUtc -gt (Get-Item $dest).LastWriteTimeUtc) {
+                        $null = New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent)
+                        Copy-Item -Path $src -Destination $dest -Force
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Mount only the chosen agent's state, from its definition. An exclusive directory
+# comes from this run's instance copy, when it has one.
 $agentMountArgs = @()
 $agentMountPrint = ""
 foreach ($d in $agentStateDirList) {
-    $agentMountArgs += @('-v', "$agentSaveDir/${d}:$containerHome/${d}")
-    $agentMountPrint += "`n                -v `"$agentSaveDir/${d}:$containerHome/${d}`""
+    $src = if ($instanceRoot -and $exclusiveDirList -contains $d) { "$instanceRoot/$d" } else { "$agentSaveDir/$d" }
+    $agentMountArgs += @('-v', "${src}:$containerHome/${d}")
+    $agentMountPrint += "`n                -v `"${src}:$containerHome/${d}`""
 }
 foreach ($f in $agentStateFileList) {
     $agentMountArgs += @('-v', "$agentSaveDir/${f}:$containerHome/${f}")
@@ -722,21 +771,26 @@ if ($dryRun) {
 }
 
 $runRc = 0
-& $runtime run $ttyArgs --rm -p $portMapping `
-            $containerArgs `
-            $headlessEnv `
-            -e CODE_AGENT="$codeAgent" `
-            -e LANG="$containerLocale" `
-            -e GIT_AUTHOR_NAME="$gitAuthorName" `
-            -e GIT_AUTHOR_EMAIL="$gitAuthorEmail" `
-            -e GIT_COMMITTER_NAME="$gitAuthorName" `
-            -e GIT_COMMITTER_EMAIL="$gitAuthorEmail" `
-            -v "$WorkDirToMount`:/work" `
-            $agentMountArgs `
-            $cacheMountArgs `
-            $runExtraArgs `
-    $image`:latest $agentCmd
-if ($LASTEXITCODE -ne 0) { $runRc = $LASTEXITCODE }
+try {
+    & $runtime run $ttyArgs --rm -p $portMapping `
+                $containerArgs `
+                $headlessEnv `
+                -e CODE_AGENT="$codeAgent" `
+                -e LANG="$containerLocale" `
+                -e GIT_AUTHOR_NAME="$gitAuthorName" `
+                -e GIT_AUTHOR_EMAIL="$gitAuthorEmail" `
+                -e GIT_COMMITTER_NAME="$gitAuthorName" `
+                -e GIT_COMMITTER_EMAIL="$gitAuthorEmail" `
+                -v "$WorkDirToMount`:/work" `
+                $agentMountArgs `
+                $cacheMountArgs `
+                $runExtraArgs `
+        $image`:latest $agentCmd
+    if ($LASTEXITCODE -ne 0) { $runRc = $LASTEXITCODE }
+} finally {
+    # Free this run's exclusive slot, even on Ctrl-C
+    if ($exclusiveLock) { Remove-Item -Force -Path $exclusiveLock -ErrorAction SilentlyContinue }
+}
 
 # Remember the image used, so later runs can take their toolchains from it.
 Add-CodeItHistory $historyFile $image
