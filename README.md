@@ -27,8 +27,9 @@ Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succ
 
 `code-it` first run does interactive setup. it checks the container runtime
 and git, attempts to detect if you have at least one toolchain and agent already, asks which to
-include (pre-selecting what it found, else `dotnet,node`; and `powershell` when `pwsh`
-or `powershell` is found, on Windows, or always from `Code-It-FirstRun.ps1`), shows the resulting `code-it-build` command and
+include (pre-selecting what it found, `powershell` among them when `pwsh` or `powershell`
+is found, and `powershell` on Windows or always from `Code-It-FirstRun.ps1`; there is no
+default toolchain, so if nothing is found you choose at least one), shows the resulting `code-it-build` command and
 runs it, offering to re-use your existing agent session state. Existing state is copied, not moved 
 or symlinked or changed. Copied state will include your agent login in the container.
 The script waits for you to confirm y/n before doing anything.
@@ -105,12 +106,12 @@ package cache, tests, and a commit.
 | `--run-arg ARG`, `--docker-arg ARG` (repeatable) | `-runArgs`, `-dockerArgs` *array* | none, plus `<save dir>/run-args` | One argument passed verbatim to `docker run` / `container run` |
 | `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
-| `--image`, `-i` | `-image` | `code-it-alpine-<tech>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
+| `--image`, `-i` | `-image` | `code-it-alpine-<toolchains>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
 | `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`) |
+| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none: those of `--image`, else of the remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
@@ -127,8 +128,8 @@ building from `code-it` rebuilt images without their other agents.)
 
 ## code-it-build options
 
-`code-it-build.sh` and `Code-It-Build.ps1` build the image (and label it with its tool
-chains and package caches). They accept the same logical parameters:
+`code-it-build.sh` and `Code-It-Build.ps1` build the image (and label it with its
+toolchains and package caches). They accept the same logical parameters:
 
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
@@ -145,7 +146,7 @@ chains and package caches). They accept the same logical parameters:
 
 The image is labelled `code-it.tool-chains=<chains>` and
 `code-it.package-caches=<caches>`; `code-it` reads that label to warn if the image was
-built for a different tool-chain set, falling back to the image-name guess for images
+built for a different toolchain set, falling back to the image-name guess for images
 that predate the label.
 It is also labelled `code-it.agents=<agents>` and
 `code-it.agent-binaries=<agent>=<path>,...`. `code-it` refuses to run an agent the image
@@ -187,8 +188,9 @@ launchers expose them as two comma-separated lists, passed to `docker build` as
 `--build-arg`s:
 
 - `--toolchain` / `-toolchain` (alias `--stack` / `-stack`) — toolchains to build:
-  `dotnet`, `node`, `bun`, `python`, `powershell`. Default: the remembered image, else an existing
-  code-it image, else the first-run setup (see below).
+  `dotnet`, `node`, `bun`, `python`, `powershell`. There is no default list: without it,
+  `code-it` uses those of `--image`, else of the remembered image, else of an existing
+  code-it image, else runs the first-run setup (see below), and `code-it-build` stops.
   `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
   `bun`; `uv` is an alias for `python`; `pwsh` is an alias for `powershell`. Aliases resolve to the canonical name, so
   `--toolchain ts-node` is `--toolchain node` and produces the same image name.

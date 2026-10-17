@@ -91,7 +91,7 @@ _code_it() {
         --env-file)
             COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
         --image|-i)
-            COMPREPLY=( $(compgen -W "code-it-alpine-dotnet-node $(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "$(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
         --agent-name)
             COMPREPLY=( $(compgen -W "Agent1" -- "$cur") ); return ;;
         --locale|-l)

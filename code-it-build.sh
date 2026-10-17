@@ -269,7 +269,7 @@ for a in $enabled_agents; do
 done
 build_args+=(--label "code-it.agent-binaries=$(ci_join , "$agent_binaries")")
 
-echo "    Building with tech ${enabled_toolchain// /,}; package repos ${enabled_package_caches// /,}; agents ${enabled_agents// /,}; locale $container_locale"
+echo "    Building with toolchains ${enabled_toolchain// /,}; package repos ${enabled_package_caches// /,}; agents ${enabled_agents// /,}; locale $container_locale"
 
 # Print the command
 echo "    $runtime build ${build_args[*]} -t ${image}:latest $build_context"

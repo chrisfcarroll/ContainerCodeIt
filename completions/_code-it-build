@@ -13,7 +13,7 @@ _code_it_build() {
     case $prev in
         (--dockerfile-dir) _files -/; return ;;
         (--runtime|-r)     compadd -- docker container; return ;;
-        (--image|-i)       compadd -- code-it-alpine-dotnet-node; return ;;
+        (--image|-i)       compadd -- $(docker images --format '{{.Repository}}' 2>/dev/null); return ;;
         (--toolchain|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
         (--locale|-l)      compadd -- like-host C.UTF-8; return ;;

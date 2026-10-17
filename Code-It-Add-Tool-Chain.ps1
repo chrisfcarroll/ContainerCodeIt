@@ -2,7 +2,7 @@
 
 <#
 .SYNOPSIS
-    Adds a new tool chain to this repository using code-it headless.
+    Adds a new toolchain to this repository using code-it headless.
 
 .DESCRIPTION
     Runs code-it headless on this repository with a built-in prompt. The in-container
@@ -14,13 +14,13 @@
     commits to the current branch and never pushes.
 
 .PARAMETER Name
-    The tool chain name to add, e.g. "java".
+    The toolchain name to add, e.g. "java".
 
 .PARAMETER url
     URL of the language/runtime's official documentation (optional).
 
 .PARAMETER repo
-    Repository to add the tool chain to. Default: this script's directory.
+    Repository to add the toolchain to. Default: this script's directory.
 
 .PARAMETER codeIt
     code-it launcher to invoke. Default: Code-It.ps1 next to this script.
@@ -58,7 +58,7 @@ if (-not $Name) {
     exit 1
 }
 if ($Name -notmatch '^[a-z][a-z0-9-]*$') {
-    Write-Warning "'$Name' is not a valid tool chain name; use lowercase letters, digits and dashes."
+    Write-Warning "'$Name' is not a valid toolchain name; use lowercase letters, digits and dashes."
     exit 1
 }
 if (-not $branch) { $branch = "add-tool-chain/$Name" }
@@ -69,15 +69,15 @@ if (-not (Test-Path -Path (Join-Path $repo '.git'))) {
 }
 
 $prompt = @"
-You are adding a new tool chain to this ContainerCodeIt repository.
+You are adding a new toolchain to this ContainerCodeIt repository.
 
-Tool chain to add: $Name
+Toolchain to add: $Name
 "@
 if ($url) { $prompt += "`nOfficial documentation URL: $url" }
 $prompt += @'
 
 Gate first. Proceed ONLY if that name is a reasonably well-known language or runtime
-AND its tool chain installs securely:
+AND its toolchain installs securely:
 - from Alpine's own repositories, or from the vendor's official HTTPS distribution,
   with checksum or signature verification where one is published;
 - ships musl builds for x86_64 and aarch64, or fails the build clearly on
@@ -86,21 +86,21 @@ AND its tool chain installs securely:
 Otherwise stop, write the reason to stdout, make no changes, and exit non-zero.
 
 If it passes the gate, follow how bun was added (commit 49b3ee7) as the template:
-1. Dockerfile: declare ARG <UPPER>=false, normalise it into /etc/code-it-tech.env,
+1. Dockerfile: declare ARG <UPPER>=false, normalise it into /etc/code-it-toolchain.env,
    add an install layer guarded by it, and a minimal passwordless doas permit.
 2. Add the known name and any aliases to the shared library (lib/code-it-common.sh
    and lib/CodeItCommon.ps1), so code-it-build, code-it and image naming all pick it
    up.
 3. Add completions (bash, zsh, PowerShell) and the README tables and "Toolchains"
    section.
-4. If the tool chain has a package manager with a well-known global cache, add it to
+4. If the toolchain has a package manager with a well-known global cache, add it to
    --package-caches: find the host cache (environment variable, then config, then
    default path, as NuGet does), mount it read-only at ~/.<name>-host, and either
    seed the container's writable cache from it (as npm and bun do in go.sh) or
    register it as a read-only fallback (as NuGet does). Never let the container write
    to the host cache.
 5. Add tests to tests/test-code-it.sh and tests/Test-CodeIt.ps1 mirroring the bun
-   ones. Build the image and run the tool chain's --version headlessly.
+   ones. Build the image and run the toolchain's --version headlessly.
 6. Commit with a conventional commit message.
 
 Do not push. Work only on the current branch.

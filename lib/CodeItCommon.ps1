@@ -14,11 +14,10 @@
         Test-CodeItEnvSpec SPEC                -> $true if SPEC is NAME[=VALUE]
 #>
 
-$script:CodeItDefaultToolchain  = @('dotnet', 'node')
 $script:CodeItKnownToolchain    = @('dotnet', 'node', 'bun', 'python', 'powershell')
 $script:CodeItKnownPackageCaches = @('nuget', 'npm', 'bun')
-# js-/ts- spellings are aliases for the one runtime tech (Node.js or Bun runs both);
-# uv is Python's package manager here, so it selects the python tool chain
+# js-/ts- spellings are aliases for the one runtime (Node.js or Bun runs both);
+# uv is Python's package manager here, so it selects the python toolchain
 $script:CodeItToolChainAliases   = @{ 'js-node' = 'node'; 'ts-node' = 'node'; 'js-bun' = 'bun'; 'ts-bun' = 'bun'; 'uv' = 'python'; 'pwsh' = 'powershell' }
 $script:CodeItContainerPort      = 3000
 $script:CodeItDefaultAgents      = @('opencode', 'claude')
@@ -33,13 +32,14 @@ function Split-CodeItList([string]$list) {
 }
 
 function Resolve-CodeItToolchain([string]$raw) {
-    $requested = if ($raw) { Split-CodeItList $raw } else { $script:CodeItDefaultToolchain }
+    # There is no default toolchain: an empty RAW resolves to an empty list
+    $requested = Split-CodeItList $raw
     $resolved = @($requested | ForEach-Object {
         if ($script:CodeItToolChainAliases.ContainsKey($_)) { $script:CodeItToolChainAliases[$_] } else { $_ }
     } | Where-Object { $_ } | Select-Object -Unique)
     foreach ($t in $resolved) {
         if ($t -notmatch '^[a-z][a-z0-9-]*$' -or $t -notin $script:CodeItKnownToolchain) {
-            Write-Warning "Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh)."
+            Write-Warning "Unknown toolchain '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh)."
             Write-Warning "A comma-separated list is expected, e.g. -toolchain 'node,bun'."
             return $null
         }
@@ -47,7 +47,7 @@ function Resolve-CodeItToolchain([string]$raw) {
     return ,$resolved
 }
 
-# The comma-separated LIST, read from an image label, as the canonical tool chains this
+# The comma-separated LIST, read from an image label, as the canonical toolchains this
 # checkout knows. Unlike Resolve-CodeItToolchain, unknown names are dropped, not errors:
 # the image may have been built by another version or branch of code-it.
 function Select-CodeItKnownToolchain([string]$list) {
@@ -76,7 +76,7 @@ function CodeIt-ImageName([string[]]$toolchain) {
 }
 
 # Test-CodeItToolchainInclude IMAGE_CHAINS_COMMA REQUESTED: true if every requested
-# tool chain is present in the image's chain list.
+# toolchain is present in the image's chain list.
 function Test-CodeItToolchainInclude([string]$imageChains, [string[]]$requested) {
     $have = @($imageChains -split ',')
     foreach ($r in $requested) {

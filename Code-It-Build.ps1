@@ -206,7 +206,7 @@ try {
     $agentBinaries = foreach ($a in $enabledAgents) { "$a=$(Get-CodeItAgentConfig $agentsDir $a 'AGENT_BINARY')" }
     $buildArgs += @('--label', "code-it.agent-binaries=$($agentBinaries -join ',')")
 
-    "    Building with tech $($enabledToolchain -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ','); locale $containerLocale"
+    "    Building with toolchains $($enabledToolchain -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ','); locale $containerLocale"
     "    $runtime build $($buildArgs -join ' ') -t $image`:latest $buildContext"
 
     if ($dryRun) { exit 0 }

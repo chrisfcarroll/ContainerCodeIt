@@ -327,7 +327,7 @@ assert_contains "build --package-caches nuget excludes NPM" "$out" "--build-arg 
 
 # Unknown names are hard errors
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain cobol >/dev/null 2>&1
-[[ "$?" != "0" ]]; assert "code-it-build unknown tool chain fails" "$?"
+[[ "$?" != "0" ]]; assert "code-it-build unknown toolchain fails" "$?"
 PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --package-caches pip >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build unknown package cache fails" "$?"
 
@@ -406,10 +406,19 @@ PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --docker
 [[ "$?" != "0" ]]; assert "code-it-build unknown agent fails" "$?"
 
 echo "10d. code-it reads the image label"
+out=$(STUB_IMAGE_TOOL_CHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --toolchain dotnet,node --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for toolchains 'node,bun'"
+# There is no default toolchain: --image alone takes the image's own toolchains
 out=$(STUB_IMAGE_TOOL_CHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
-assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for tech 'node,bun'"
+assert "--image without --toolchain runs" "$?"
+[[ "$out" != *"looks built for"* ]]; assert "--image without --toolchain does not assume dotnet,node" "$?"
+[[ "$out" != *NuGet* ]]; assert "--image without --toolchain mounts the caches of the image's toolchains" "$?"
+PATH="$stub_docker:$PATH" "$code_it" --toolchain , "${common_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "an empty --toolchain list fails" "$?"
+grep -qE '^ARG (DOTNET|NODE|BUN|PYTHON|POWERSHELL)=true' "$script_dir/Dockerfile"
+[[ "$?" != "0" ]]; assert "the Dockerfile switches every toolchain off by default" "$?"
 
-echo "10g. PowerShell tool chain (powershell / pwsh)"
+echo "10g. PowerShell toolchain (powershell / pwsh)"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain dotnet,node,powershell 2>&1)
 assert_contains "--toolchain powershell sets POWERSHELL=true" "$out" "--build-arg POWERSHELL=true"
 assert_contains "--toolchain powershell derives the image name" "$out" "-t code-it-alpine-dotnet-node-powershell:latest"
@@ -422,7 +431,7 @@ assert "Dockerfile switches PowerShell off by default" "$?"
 grep -q 'if \[ "\$POWERSHELL" != true \]; then' "$script_dir/Dockerfile"
 assert "Dockerfile gates PowerShell on POWERSHELL" "$?"
 
-echo "10e. Python tool chain (python / uv / --stack)"
+echo "10e. Python toolchain (python / uv / --stack)"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --stack python 2>&1)
 assert_contains "--stack python sets PYTHON=true" "$out" "--build-arg PYTHON=true"
 assert_contains "--stack python derives the image name" "$out" "-t code-it-alpine-python:latest"
@@ -619,7 +628,7 @@ case "$out" in
 esac
 
 # ---------------------------------------------------------------------------
-echo "12b. Tech stack: --toolchain / --package-caches build args and read-only caches"
+echo "12b. Toolchain: --toolchain / --package-caches build args and read-only caches"
 npm_cache="$tmp/npm-cache"; mkdir -p "$npm_cache"
 bun_cache="$tmp/bun-cache"; mkdir -p "$bun_cache"
 
@@ -630,7 +639,7 @@ assert_contains "default build passes NODE=true" "$out" "--build-arg NODE=true"
 assert_contains "default build passes BUN=false" "$out" "--build-arg BUN=false"
 assert_contains "dotnet implies NUGET=true" "$out" "--build-arg NUGET=true"
 assert_contains "node implies NPM=true" "$out" "--build-arg NPM=true"
-assert_contains "reports the resolved tech" "$out" "tech dotnet,node; package repos nuget,npm"
+assert_contains "reports the resolved toolchains" "$out" "toolchains dotnet,node; package repos nuget,npm"
 
 # --toolchain replaces the default set
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain node,bun)
@@ -660,7 +669,7 @@ assert_contains "image name derives from --toolchain" "$out" "-t code-it-alpine-
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tech bun)
 assert_contains "--tech alias selects BUN" "$out" "--build-arg BUN=true"
 
-# Tech aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
+# Toolchain aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain js-node)
 assert_contains "js-node aliases node (NODE=true)" "$out" "--build-arg NODE=true"
 assert_contains "js-node canonical image name" "$out" "-t code-it-alpine-node:latest"
@@ -680,7 +689,7 @@ PATH="$stub_docker:$PATH" "$code_it" --packages npm "${common_args[@]}" >/dev/nu
 
 # An image label that disagrees with --toolchain is called out
 out=$(STUB_IMAGE_TOOL_CHAINS=dotnet PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
-assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for tech 'dotnet'"
+assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for toolchains 'dotnet'"
 # An image whose agents label lacks the chosen agent stops before docker run, readably
 # (the stub answers the agents label lookup with STUB_IMAGE_AGENTS)
 out=$(STUB_IMAGE_AGENTS=claude PATH="$stub_docker:$PATH" "$code_it" --agent opencode "${common_args[@]}" 2>&1)
@@ -706,7 +715,7 @@ assert "image without agent-binaries label still runs" "$?"
 assert_contains "image without agent-binaries label warns it may be out of date" "$out" "predates code-it recording its agents' binaries"
 # Without a label (older images), fall back to the name-based guess
 out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
-assert_contains "falls back to the image-name guess without a label" "$out" "looks built for tech 'dotnet,node'"
+assert_contains "falls back to the image-name guess without a label" "$out" "looks built for toolchains 'dotnet,node'"
 
 # Unknown names are hard errors
 PATH="$stub_docker:$PATH" "$code_it" --toolchain cobol "${common_args[@]}" >/dev/null 2>&1
@@ -968,7 +977,7 @@ add_tc="$script_dir/code-it-add-tool-chain.sh"
 repo_d="$tmp/addtc-a"; mkrepo "$repo_d"
 out=$(PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_d" --code-it "$stub_ci" --dry-run 2>&1)
 assert "add-tool-chain --dry-run exit code" "$?"
-assert_contains "add-tool-chain prompt names the tool chain" "$out" "Tool chain to add: java"
+assert_contains "add-tool-chain prompt names the toolchain" "$out" "Toolchain to add: java"
 assert_contains "add-tool-chain prompt includes the gate" "$out" "Gate first"
 assert_contains "add-tool-chain prompt requires a secure install" "$out" "installs securely"
 assert_contains "add-tool-chain prompt requires musl builds" "$out" "musl builds for x86_64 and aarch64"
@@ -1038,7 +1047,7 @@ assert_contains "first-run offers powershell" "$out" "5) powershell"
 [[ "$out" != *"5) powershell *"* ]]; assert "first-run marks powershell undetected" "$?"
 
 # powershell is preselected when pwsh is found, on Windows, and alongside the usual
-# default when it is the only tool chain found
+# default when it is the only toolchain found
 pwshbin="$tmp/pwshbin"; mkdir -p "$pwshbin"
 printf '#!/bin/sh\necho PowerShell 7.6.6\n' > "$pwshbin/pwsh"; chmod +x "$pwshbin/pwsh"
 out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$firstbin:$pwshbin" bash "$first_run" --dry-run \
@@ -1048,7 +1057,14 @@ assert_contains "first-run preselects powershell when pwsh is found" "$out" "--t
 nodeless="$tmp/firstbin-nonode"; cp -R "$firstbin" "$nodeless"; rm -f "$nodeless/node"
 out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$nodeless:$pwshbin" bash "$first_run" --dry-run \
         --code-it-build "$stub_first_build" 2>&1)
-assert_contains "powershell alone is added to the usual default" "$out" "--toolchain dotnet,node,powershell"
+assert_contains "with only pwsh found, only powershell is preselected" "$out" "--toolchain powershell --agent"
+# Nothing found: there is no default, so nothing is preselected
+out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$nodeless" bash "$first_run" --dry-run \
+        --code-it-build "$stub_first_build" 2>&1)
+[[ "$?" != "0" ]]; assert "first-run with nothing found and nothing chosen fails" "$?"
+assert_contains "first-run with nothing found shows no preselection" "$out" "Choose Toolchains to build [none]"
+assert_contains "first-run with nothing found asks for a toolchain" "$out" "no toolchains selected. Choose at least one, or pass --toolchain"
+[[ "$out" != *"--toolchain dotnet"* ]]; assert "first-run does not fall back to dotnet,node" "$?"
 out=$(printf '\n\n\n' | STUB_UNAME_S=MINGW64_NT-10.0 HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
         --code-it-build "$stub_first_build" 2>&1)
 assert_contains "first-run preselects powershell on Windows" "$out" "--toolchain node,powershell"
@@ -1056,10 +1072,10 @@ out=$(HOME="$firsthome" PATH="$firstbin:$pwshbin" bash "$first_run" --dry-run --
         --code-it-build "$stub_first_build" 2>&1)
 assert_contains "an explicit first-run --toolchain is not extended" "$out" "--toolchain node --agent"
 
-# (b) answer parsing: pick tool chain 4 (python) and agent 2 (claude)
+# (b) answer parsing: pick toolchain 4 (python) and agent 2 (claude)
 out=$(printf '4\n2\n\n' | HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
         --code-it-build "$stub_first_build" 2>&1)
-assert_contains "first-run parses tool chain numbers" "$out" "--toolchain python"
+assert_contains "first-run parses toolchain numbers" "$out" "--toolchain python"
 assert_contains "first-run parses agent numbers" "$out" "--agent claude"
 
 # (c) --dry-run builds nothing
@@ -1151,14 +1167,14 @@ case "$out" in
     *)                                                   assert "explicit --image bypasses the default" 0 ;;
 esac
 
-# (k) a remembered image labelled with a tool chain this checkout does not know (built
+# (k) a remembered image labelled with a toolchain this checkout does not know (built
 # by another branch) is still used, for the chains that are known
 hunk="$tmp/histunknown"; mkdir -p "$hunk"
 printf '20260101 code-it-alpine-dotnet-node-cobol\n' > "$hunk/image-history"
 out=$(PATH="$histbin:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$hunk" 2>&1)
 assert "an unknown chain in the remembered image's label is not an error" "$?"
-[[ "$out" != *"Unknown tech stack"* ]]; assert "an unknown label chain gives no unknown-tech warning" "$?"
-assert_contains "notes the unknown label chain" "$out" "has tool chains this code-it does not know (dotnet,node,cobol); using dotnet,node"
+[[ "$out" != *"Unknown toolchain"* ]]; assert "an unknown label chain gives no unknown-toolchain warning" "$?"
+assert_contains "notes the unknown label chain" "$out" "has toolchains this code-it does not know (dotnet,node,cobol); using dotnet,node"
 assert_contains "runs the image with the unknown label chain" "$out" "code-it-alpine-dotnet-node-cobol:latest"
 assert_contains "the known label chains decide the package caches" "$out" "NuGet package cache"
 

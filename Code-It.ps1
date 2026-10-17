@@ -2,7 +2,7 @@
 
 <#
 .SYNOPSIS
-    Launches an Alpine Linux container with OpenCode, Claude Code, and a parameterisable tech stack.
+    Launches an Alpine Linux container with OpenCode, Claude Code, and a parameterisable set of toolchains.
 
 .DESCRIPTION
     Creates and runs a container for development using OpenCode or Claude Code as an agent.
@@ -61,10 +61,10 @@
     Default: ~/.config/code-it
 
 .PARAMETER image
-    Image name to run. Default: "code-it-alpine-<tech>", a slug of the resolved -toolchain
+    Image name to run. Default: "code-it-alpine-<toolchains>", a slug of the resolved -toolchain
     list, e.g. code-it-alpine-dotnet or code-it-alpine-node-bun. When that image does not
     exist, the most-recently built existing image whose code-it.tool-chains label contains
-    every requested tool chain is used instead. Set it explicitly to force a particular
+    every requested toolchain is used instead. Set it explicitly to force a particular
     image (an error if it does not exist).
 
 .PARAMETER runtime
@@ -109,10 +109,11 @@
 .PARAMETER toolchain
     Comma-separated toolchains. Known: dotnet, node (aliases js-node, ts-node), bun
     (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh). Alias: -stack.
-    Default: those of the remembered image, the most recent in <saveDir>/image-history
-    whose toolchains cover 70% of your recent runs; else of the most recently used, or
-    else built, code-it image. With no <saveDir> or no code-it image,
-    Code-It-FirstRun.ps1 runs instead.
+    There is no default list. Without -toolchain, they are those of the -image given;
+    else of the remembered image, the most recent in <saveDir>/image-history whose
+    toolchains cover 70% of your recent runs; else of the most recently used, or else
+    built, code-it image. With no <saveDir> or no code-it image, Code-It-FirstRun.ps1
+    runs instead.
 
 .PARAMETER packageCaches
     Comma-separated package repos whose host cache is mounted read-only. 
@@ -324,20 +325,24 @@ if ($removed) {
     exit 1
 }
 
-# Resolve -toolchain / -packageCaches. A list replaces the default set rather than
-# toggling it, so there are no per-tech on/off parameters to clash with future tech
-# names. -toolchain defaults to dotnet,node; -packageCaches defaults to the repos
-# implied by -toolchain (dotnet->nuget, node->npm).
+# Resolve -toolchain / -packageCaches. Each takes a list, so there are no per-toolchain
+# on/off parameters to clash with future toolchain names. -packageCaches defaults to
+# the repos implied by the toolchains (dotnet->nuget, node->npm). Without -toolchain
+# the list stays empty until the image is chosen, below.
 $enabledToolchain = Resolve-CodeItToolchain $toolchain
 if ($null -eq $enabledToolchain) { exit 1 }
+if ($PSBoundParameters.ContainsKey('toolchain') -and $enabledToolchain.Count -eq 0) {
+    Write-Warning "-toolchain needs at least one toolchain."
+    exit 1
+}
 $enabledPackageCaches = Resolve-CodeItPackageCaches $packageCaches $enabledToolchain
 if ($null -eq $enabledPackageCaches) { exit 1 }
 $containerLocale = Resolve-CodeItLocale $locale
 if (-not $containerLocale) { exit 1 }
 
-# Default image name from the tool-chain list, e.g. code-it-alpine-dotnet or
+# Default image name from the toolchain list, e.g. code-it-alpine-dotnet or
 # code-it-alpine-node-bun. An explicit -image overrides it.
-if (-not $image) { $image = CodeIt-ImageName $enabledToolchain }
+if (-not $image -and $enabledToolchain.Count) { $image = CodeIt-ImageName $enabledToolchain }
 
 # Detect / validate the container runtime.
 $runtime = Detect-CodeItRuntime $runtime
@@ -378,8 +383,8 @@ if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameter
             $defaultImage = Get-CodeItDefaultImage $runtime $defaultHistory
         }
     }
-    $defaultChains = if ($defaultImage) { Get-CodeItImageToolchain $runtime $defaultImage } else { "" }
-    if (-not $defaultChains) {
+    $selectedChains = if ($defaultImage) { Get-CodeItImageToolchain $runtime $defaultImage } else { "" }
+    if (-not $selectedChains) {
         "    No code-it image or setup found; running Code-It-FirstRun.ps1."
         if ($dryRun) {
             "    (dry run: would run $firstRun)"
@@ -388,15 +393,22 @@ if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameter
         & $firstRun -saveDir $saveDir -workDir $WorkDirToMount -runtime $runtime
         exit $LASTEXITCODE
     }
-    $enabledToolchain = Select-CodeItKnownToolchain $defaultChains
-    if (($enabledToolchain -join ',') -ne $defaultChains) {
-        "    Note: image '$defaultImage' has tool chains this code-it does not know ($defaultChains); using $(if ($enabledToolchain) { $enabledToolchain -join ',' } else { 'none' })."
+    $enabledToolchain = Select-CodeItKnownToolchain $selectedChains
+    if (($enabledToolchain -join ',') -ne $selectedChains) {
+        "    Note: image '$defaultImage' has toolchains this code-it does not know ($selectedChains); using $(if ($enabledToolchain) { $enabledToolchain -join ',' } else { 'none' })."
     }
     if (-not $PSBoundParameters.ContainsKey('packageCaches')) {
         $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolchain
     }
     $image = $defaultImage
     "    Using $defaultLabel`: $image"
+} elseif (-not $PSBoundParameters.ContainsKey('toolchain')) {
+    # -image without -toolchain: the image's own toolchains (its label, else its name)
+    # decide the package caches.
+    $enabledToolchain = Select-CodeItKnownToolchain (Get-CodeItImageToolchain $runtime $image)
+    if (-not $PSBoundParameters.ContainsKey('packageCaches')) {
+        $enabledPackageCaches = Resolve-CodeItPackageCaches "" $enabledToolchain
+    }
 }
 
 # Give the Apple container runtime enough memory for the agent to work with
@@ -499,13 +511,13 @@ if (-not $exactExists) {
     }
 }
 
-# Warn if the chosen image was built for a different tool-chain set than the one we
+# Warn if the chosen image was built for a different toolchain set than the one we
 # are about to run. Prefer the label Code-It-Build stamped on the image; fall back to
 # the name-based guess. A superset image is fine: only warn when it does not contain
 # every requested chain.
 $imageToolchain = Get-CodeItImageToolchain $runtime $image
 if ($imageToolchain -and -not (Test-CodeItToolchainInclude $imageToolchain $enabledToolchain)) {
-    Write-Warning "Image '$image' looks built for tech '$imageToolchain' but -toolchain is '$($enabledToolchain -join ',')'."
+    Write-Warning "Image '$image' looks built for toolchains '$imageToolchain' but -toolchain is '$($enabledToolchain -join ',')'."
     Write-Warning "Pass the same -toolchain used to build the image, or set -image explicitly."
 } elseif ($imageToolchain -and $imageToolchain -ne ($enabledToolchain -join ',')) {
     $extras = @($imageToolchain -split ',' | Where-Object { $enabledToolchain -notcontains $_ })
@@ -726,6 +738,6 @@ $runRc = 0
     $image`:latest $agentCmd
 if ($LASTEXITCODE -ne 0) { $runRc = $LASTEXITCODE }
 
-# Remember the image used, so later runs can default their toolchains to it.
+# Remember the image used, so later runs can take their toolchains from it.
 Add-CodeItHistory $historyFile $image
 exit $runRc

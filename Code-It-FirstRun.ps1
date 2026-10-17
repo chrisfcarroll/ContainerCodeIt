@@ -9,8 +9,8 @@
     runs Code-It-Build.ps1, offers to copy agent state into the save dir, and prints
     the Code-It.ps1 command to start.
 
-    The toolchains detected on the host are preselected, else dotnet,node, and
-    powershell always is: you are running PowerShell.
+    There is no default toolchain. The toolchains detected on the host are
+    preselected, and powershell always is: you are running PowerShell.
 
 .PARAMETER saveDir
     Where agent state is kept and copied. Default: ~/.config/code-it
@@ -115,7 +115,8 @@ function Read-CodeItChoice([string]$label, [string]$default, [string[]]$items) {
         if ($detectedToolchain -contains $items[$i] -or $detectedAgents -contains $items[$i]) { $flag = ' *' }
         Write-Host ("  {0}) {1}{2}" -f ($i + 1), $items[$i], $flag)
     }
-    $answer = Read-Host "Choose $label [$($default -replace ' ', ',')]"
+    $shown = if ($default) { $default -replace ' ', ',' } else { 'none' }
+    $answer = Read-Host "Choose $label [$shown]"
     if (-not $answer) { return $default }
     return ((ConvertTo-CodeItSelection $answer $items) -join ' ')
 }
@@ -127,16 +128,13 @@ if ($toolchain) {
     $chosenToolchain = Resolve-CodeItToolchain $toolchain
     if ($null -eq $chosenToolchain) { exit 1 }
 } else {
-    # PowerShell is an addition to the other tool chains, not a replacement for them,
-    # so the usual default applies when it is the only one detected. Running this
-    # script means PowerShell is here, so it is always in the default.
-    $defaultList = @($detectedToolchain | Where-Object { $_ -ne 'powershell' })
-    if (-not $defaultList.Count) { $defaultList = $script:CodeItDefaultToolchain }
-    $defaultTcs = (@($defaultList) + 'powershell') -join ' '
-    $chosenToolchain = Read-CodeItChoice "Toolchains to build" $defaultTcs $toolchainAvailable
+    # There is no default toolchain: preselect what was detected. Running this script
+    # means PowerShell is here, so powershell is always preselected.
+    $preselectedTcs = (@($detectedToolchain | Where-Object { $_ -ne 'powershell' }) + 'powershell') -join ' '
+    $chosenToolchain = Read-CodeItChoice "Toolchains to build" $preselectedTcs $toolchainAvailable
     $chosenToolchain = Split-CodeItList ($chosenToolchain -replace ' ', ',')
 }
-if (-not $chosenToolchain) { Write-Warning "no toolchains selected."; exit 1 }
+if (-not $chosenToolchain) { Write-Warning "no toolchains selected. Choose at least one, or pass -toolchain."; exit 1 }
 
 if ($agents) {
     $chosenAgents = Resolve-CodeItAgents $agents $agentsDir

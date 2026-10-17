@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Adds a new tool chain to this repository by running code-it headless with a built-in
+# Adds a new toolchain to this repository by running code-it headless with a built-in
 # prompt. The in-container agent applies a security gate, then follows how bun was
 # added, adds tests, and commits.
 #
@@ -9,7 +9,7 @@
 #
 # Options:
 #   --url URL         URL of the language/runtime's official documentation (optional).
-#   --repo DIR        Repository to add the tool chain to. Default: this script's directory.
+#   --repo DIR        Repository to add the toolchain to. Default: this script's directory.
 #   --code-it PATH    code-it launcher to invoke. Default: ./code-it.sh next to this
 #                     script. Mainly useful for testing.
 #   --branch NAME     Branch to create. Default: add-tool-chain/<name>.
@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             if [[ -n "$name" ]]; then
-                echo "Only one tool chain name can be given." >&2
+                echo "Only one toolchain name can be given." >&2
                 exit 1
             fi
             name="$1"
@@ -81,7 +81,7 @@ if [[ -z "$name" ]]; then
 fi
 
 if [[ ! "$name" =~ ^[a-z][a-z0-9-]*$ ]]; then
-    echo "Warning: '$name' is not a valid tool chain name; use lowercase letters, digits and dashes." >&2
+    echo "Warning: '$name' is not a valid toolchain name; use lowercase letters, digits and dashes." >&2
     exit 1
 fi
 
@@ -101,13 +101,13 @@ if [[ -n "$url" ]]; then
     url_line="Official documentation URL: $url"
 fi
 prompt=$(cat <<EOF
-You are adding a new tool chain to this ContainerCodeIt repository.
+You are adding a new toolchain to this ContainerCodeIt repository.
 
-Tool chain to add: $name
+Toolchain to add: $name
 $url_line
 
 Gate first. Proceed ONLY if that name is a reasonably well-known language or runtime
-AND its tool chain installs securely:
+AND its toolchain installs securely:
 - from Alpine's own repositories, or from the vendor's official HTTPS distribution,
   with checksum or signature verification where one is published;
 - ships musl builds for x86_64 and aarch64, or fails the build clearly on
@@ -116,21 +116,21 @@ AND its tool chain installs securely:
 Otherwise stop, write the reason to stdout, make no changes, and exit non-zero.
 
 If it passes the gate, follow how bun was added (commit 49b3ee7) as the template:
-1. Dockerfile: declare ARG <UPPER>=false, normalise it into /etc/code-it-tech.env,
+1. Dockerfile: declare ARG <UPPER>=false, normalise it into /etc/code-it-toolchain.env,
    add an install layer guarded by it, and a minimal passwordless doas permit.
 2. Add the known name and any aliases to the shared library (lib/code-it-common.sh
    and lib/CodeItCommon.ps1), so code-it-build, code-it and image naming all pick it
    up.
 3. Add completions (bash, zsh, PowerShell) and the README tables and "Toolchains"
    section.
-4. If the tool chain has a package manager with a well-known global cache, add it to
+4. If the toolchain has a package manager with a well-known global cache, add it to
    --package-caches: find the host cache (environment variable, then config, then
    default path, as NuGet does), mount it read-only at ~/.<name>-host, and either
    seed the container's writable cache from it (as npm and bun do in go.sh) or
    register it as a read-only fallback (as NuGet does). Never let the container write
    to the host cache.
 5. Add tests to tests/test-code-it.sh and tests/Test-CodeIt.ps1 mirroring the bun
-   ones. Build the image and run the tool chain's --version headlessly.
+   ones. Build the image and run the toolchain's --version headlessly.
 6. Commit with a conventional commit message.
 
 Do not push. Work only on the current branch.

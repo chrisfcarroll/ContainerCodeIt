@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Launches an Alpine Linux container with OpenCode, Claude Code, and a parameterisable tech stack.
+# Launches an Alpine Linux container with OpenCode, Claude Code, and a parameterisable set of toolchains.
 #
 # Picks a container runtime automatically:
 # - On macOS, uses the Apple container CLI (container) if installed
@@ -56,11 +56,11 @@
 #                            Defaults to "."
 #   --save-dir, -s DIR       Host directory for storing agent configuration and state volumes.
 #                            Created if missing. Defaults to ~/.config/code-it
-#   --image, -i NAME         Image name to run. Default: "code-it-alpine-<tech>", a
+#   --image, -i NAME         Image name to run. Default: "code-it-alpine-<toolchains>", a
 #                            slug of the resolved --toolchain list, e.g. code-it-alpine-dotnet,
 #                            code-it-alpine-node-bun. When that image does not exist, the
 #                            most-recently built existing image whose code-it.tool-chains
-#                            label contains every requested tool chain is used instead.
+#                            label contains every requested toolchain is used instead.
 #                            Set it explicitly to force a particular image (an error if it
 #                            does not exist).
 #   --runtime, -r NAME       Container runtime to use: "docker" or "container".
@@ -79,16 +79,16 @@
 #                            attribution and home directory naming. Must match the USER set in
 #                            the Dockerfile. Default: "Agent1"
 #
-# Tech stack (used for the default image name, and to decide which host package
-# caches are mounted read-only). Passing a list
-# REPLACES the default set, so there are no on/off flags to clash with future
-# tech names:
+# Toolchains (used for the default image name, and to decide which host package
+# caches are mounted read-only). Each option takes a list, so there are no on/off
+# flags to clash with future toolchain names:
 #   --toolchain, -t LIST     Comma-separated toolchains. --stack is an alias.
-#                            Default: those of the remembered image, the most recent in
-#                            SAVE-DIR/image-history whose toolchains cover 70% of your
-#                            recent runs; else of the most recently used, or else built,
-#                            code-it image. With no SAVE-DIR or no code-it image,
-#                            code-it-first-run.sh runs instead.
+#                            There is no default list. Without --toolchain, they are
+#                            those of the --image given; else of the remembered image,
+#                            the most recent in SAVE-DIR/image-history whose toolchains
+#                            cover 70% of your recent runs; else of the most recently
+#                            used, or else built, code-it image. With no SAVE-DIR or no
+#                            code-it image, code-it-first-run.sh runs instead.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun), python (alias uv),
 #                            powershell (alias pwsh).
@@ -233,8 +233,8 @@ list_agents=false
 # --env, --env-file and --run-arg, in command-line order, as container run arguments
 cli_run_args=()
 
-# Tech stack (see --help). Empty means "use the remembered image, else the defaults":
-# dotnet,node and the package repos they imply (dotnet->nuget, node->npm).
+# Toolchains (see --help). Empty means "those of --image, else of the remembered or
+# an existing image"; the package caches default to the ones they imply.
 toolchain=""
 toolchain_explicit=false
 package_caches=""
@@ -388,20 +388,25 @@ AGENT_SAVE_SUBDIR=""
 # shellcheck disable=SC1090
 . "$agents_dir/$code_agent/config"
 
-# Resolve --toolchain / --package-caches into a set of known tech names (space-separated
-# in $enabled_toolchain) and known package repo names (in $enabled_package_caches).
-# --toolchain replaces the default {dotnet,node}; --package-caches replaces the set implied
-# by --toolchain (dotnet->nuget, node->npm). An unknown name is a hard error.
+# Resolve --toolchain / --package-caches into a set of known toolchain names (space-
+# separated in $enabled_toolchain) and known package repo names (in
+# $enabled_package_caches). --package-caches replaces the set implied by the
+# toolchains (dotnet->nuget, node->npm). An unknown name is a hard error. Without
+# --toolchain the list stays empty until the image is chosen, below.
 enabled_toolchain=$(ci_resolve_toolchain "$toolchain") || exit 1
+if [[ "$toolchain_explicit" == true && -z "$enabled_toolchain" ]]; then
+    echo "Warning: --toolchain needs at least one toolchain." >&2
+    exit 1
+fi
 enabled_package_caches=$(ci_resolve_package_caches "$package_caches" "$enabled_toolchain") || exit 1
 container_locale=$(ci_resolve_locale "$locale") || exit 1
 
 toolchain_has()    { ci_has "$enabled_toolchain" "$1"; }
 package_cache_has() { ci_has "$enabled_package_caches" "$1"; }
 
-# Default image name from the tool-chain list, e.g. code-it-alpine-dotnet or
+# Default image name from the toolchain list, e.g. code-it-alpine-dotnet or
 # code-it-alpine-node-bun. --image overrides it.
-if [[ -z "$image" ]]; then
+if [[ -z "$image" && -n "$enabled_toolchain" ]]; then
     image=$(ci_default_image_name "$enabled_toolchain")
 fi
 
@@ -457,20 +462,27 @@ if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then
     if [[ -z "$default_image" ]]; then
         default_image=$(ci_choose_default_image "$runtime" "$default_history") || default_image=""
     fi
-    default_chains=""
-    [[ -n "$default_image" ]] && default_chains=$(ci_image_toolchain "$runtime" "$default_image")
-    if [[ -z "$default_chains" ]]; then
+    selected_chains=""
+    [[ -n "$default_image" ]] && selected_chains=$(ci_image_toolchain "$runtime" "$default_image")
+    if [[ -z "$selected_chains" ]]; then
         run_first_run
     else
-        enabled_toolchain=$(ci_known_toolchain "$default_chains")
-        if [[ "$(ci_join , "$enabled_toolchain")" != "$default_chains" ]]; then
-            echo "    Note: image '$default_image' has tool chains this code-it does not know ($default_chains); using $(ci_join , "${enabled_toolchain:-none}")."
+        enabled_toolchain=$(ci_known_toolchain "$selected_chains")
+        if [[ "$(ci_join , "$enabled_toolchain")" != "$selected_chains" ]]; then
+            echo "    Note: image '$default_image' has toolchains this code-it does not know ($selected_chains); using $(ci_join , "${enabled_toolchain:-none}")."
         fi
         if [[ "$package_caches_explicit" == false ]]; then
             enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain") || exit 1
         fi
         image="$default_image"
         echo "    Using $default_label: $image"
+    fi
+elif [[ "$toolchain_explicit" == false ]]; then
+    # --image without --toolchain: the image's own toolchains (its label, else its
+    # name) decide the package caches.
+    enabled_toolchain=$(ci_known_toolchain "$(ci_image_toolchain "$runtime" "$image")")
+    if [[ "$package_caches_explicit" == false ]]; then
+        enabled_package_caches=$(ci_resolve_package_caches "" "$enabled_toolchain") || exit 1
     fi
 fi
 
@@ -578,13 +590,13 @@ if ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
     fi
 fi
 
-# Warn if the chosen image was built for a different tool-chain set than the one we
+# Warn if the chosen image was built for a different toolchain set than the one we
 # are about to run. Prefer the label code-it-build stamped on the image; fall back to
 # the name-based guess. A superset image is fine: only warn when it does not contain
 # every requested chain.
 image_toolchain=$(ci_image_toolchain "$runtime" "$image")
 if [[ -n "$image_toolchain" ]] && ! ci_toolchain_include "$image_toolchain" "$enabled_toolchain"; then
-    echo "Warning: image '$image' looks built for tech '$image_toolchain' but --toolchain is '$(ci_join , "$enabled_toolchain")'." >&2
+    echo "Warning: image '$image' looks built for toolchains '$image_toolchain' but --toolchain is '$(ci_join , "$enabled_toolchain")'." >&2
     echo "    Pass the same --toolchain used to build the image, or set --image explicitly." >&2
 elif [[ -n "$image_toolchain" && "$image_toolchain" != "$(ci_join , "$enabled_toolchain")" ]]; then
     extras=""
@@ -848,6 +860,6 @@ run_rc=0
             ${run_extra_args[@]+"${run_extra_args[@]}"} \
     "${image}:latest" ${agent_cmd[@]+"${agent_cmd[@]}"} || run_rc=$?
 
-# Remember the image used, so later runs can default their toolchains to it.
+# Remember the image used, so later runs can take their toolchains from it.
 ci_history_record "$history_file" "$image"
 exit "$run_rc"

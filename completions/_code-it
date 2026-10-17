@@ -79,7 +79,7 @@ _code_it() {
         (--runtime|-r)    compadd -- docker container; return ;;
         (--env|-e)        _parameters; return ;;
         (--env-file)      _files; return ;;
-        (--image|-i)      compadd -- code-it-alpine-dotnet-node; return ;;
+        (--image|-i)      compadd -- $(docker images --format '{{.Repository}}' 2>/dev/null); return ;;
         (--agent-name) compadd -- Agent1; return ;;
         (--locale|-l)  compadd -- like-host C.UTF-8; return ;;
         (--agent|-a)   compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;

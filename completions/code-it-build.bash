@@ -17,7 +17,7 @@ _code_it_build() {
         --runtime|-r)
             COMPREPLY=( $(compgen -W "docker container" -- "$cur") ); return ;;
         --image|-i)
-            COMPREPLY=( $(compgen -W "code-it-alpine-dotnet-node $(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "$(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
         --toolchain|-t|--stack)
             COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh" -- "$cur") ); return ;;
         --package-caches)

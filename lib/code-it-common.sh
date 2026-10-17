@@ -16,10 +16,10 @@
 #   ci_read_run_args FILE                             -> the file's run args, one per line
 #   ci_valid_env_spec SPEC                            return 0 if SPEC is NAME[=VALUE]
 #
-# Empty RAW means "use the defaults"; an unknown name prints a warning to stderr
-# and returns 1, so the caller can exit.
+# There is no default toolchain: an empty toolchain RAW resolves to an empty list.
+# An empty package-cache RAW means the caches the toolchains imply. An unknown name
+# prints a warning to stderr and returns 1, so the caller can exit.
 
-CI_DEFAULT_TOOLCHAIN="dotnet node"
 CI_KNOWN_TOOLCHAIN="dotnet node bun python powershell"
 CI_KNOWN_PACKAGE_CACHES="nuget npm bun"
 CI_CONTAINER_PORT=3000
@@ -39,7 +39,7 @@ ci_toolchain_alias() {
     case "$1" in
         js-node|ts-node) printf 'node' ;;
         js-bun|ts-bun)   printf 'bun' ;;
-        # uv is Python's package manager here, so it selects the python tool chain
+        # uv is Python's package manager here, so it selects the python toolchain
         uv)              printf 'python' ;;
         pwsh)            printf 'powershell' ;;
         *)               printf '%s' "$1" ;;
@@ -58,19 +58,15 @@ ci_join() {
 
 ci_resolve_toolchain() {
     local raw="$1" out="" t
-    local -a requested
-    if [[ -n "$raw" ]]; then
-        IFS=',' read -r -a requested <<< "$raw"
-    else
-        read -r -a requested <<< "$CI_DEFAULT_TOOLCHAIN"
-    fi
+    local -a requested=()
+    [[ -n "$raw" ]] && IFS=',' read -r -a requested <<< "$raw"
     for t in ${requested[@]+"${requested[@]}"}; do
         t=$(ci_toolchain_alias "$t")
         case "$t" in
             "") ;;
             dotnet|node|bun|python|powershell) out=$(ci_comma_list_add "$out" "$t") ;;
             *)
-                echo "Warning: Unknown tech stack '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh)." >&2
+                echo "Warning: Unknown toolchain '$t'. Known: dotnet, node (aliases js-node, ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh)." >&2
                 return 1
                 ;;
         esac
@@ -79,7 +75,7 @@ ci_resolve_toolchain() {
 }
 
 # ci_known_toolchain LIST: the comma-separated LIST, read from an image label, as a
-# space-separated canonical list of the tool chains this checkout knows. Unlike
+# space-separated canonical list of the toolchains this checkout knows. Unlike
 # ci_resolve_toolchain, unknown names are dropped, not errors: the image may have been
 # built by another version or branch of code-it.
 ci_known_toolchain() {
@@ -122,7 +118,7 @@ ci_default_image_name() {
 }
 
 # ci_toolchain_include IMAGE_CHAINS_COMMA REQUESTED_SPACE: true if every requested
-# tool chain is present in the image's comma-separated chain list.
+# toolchain is present in the image's comma-separated chain list.
 ci_toolchain_include() {
     local image_chains="${1//,/ }" req
     for req in $2; do
@@ -141,7 +137,7 @@ ci_image_toolchain() {
         container) chains=$(container image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image" 2>/dev/null || true) ;;
     esac
     # A runtime that does not know the format prints its own error text to stdout; keep
-    # only a plausible comma-separated tool-chain list.
+    # only a plausible comma-separated toolchain list.
     case "$chains" in
         *[!a-z,]*|"") chains="" ;;
     esac
@@ -439,7 +435,7 @@ ci_toolchain_commands() {
     esac
 }
 
-# ci_toolchain_detected NAME: true if any of the tool chain's host commands works.
+# ci_toolchain_detected NAME: true if any of the toolchain's host commands works.
 ci_toolchain_detected() {
     local cmd
     while IFS= read -r cmd; do

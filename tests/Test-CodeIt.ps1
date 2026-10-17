@@ -353,7 +353,7 @@ Assert-Contains "build -packageCaches nuget excludes NPM" $r.out '--build-arg NP
 
 # Unknown names are hard errors
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'cobol') $stubPath
-Assert "Code-It-Build unknown tool chain fails" ($r.code -ne 0)
+Assert "Code-It-Build unknown toolchain fails" ($r.code -ne 0)
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir, '-packageCaches', 'pip') $stubPath
 Assert "Code-It-Build unknown package cache fails" ($r.code -ne 0)
 
@@ -404,11 +404,20 @@ Assert "Code-It-Build unknown agent fails" ($r.code -ne 0)
 
 "9d. Code-It reads the image label"
 $env:STUB_IMAGE_TOOL_CHAINS = 'node,bun'
+try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-image', 'code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
+finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
+Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for toolchains 'node,bun'"
+# There is no default toolchain: -image alone takes the image's own toolchains
+$env:STUB_IMAGE_TOOL_CHAINS = 'node,bun'
 try { $r = Invoke-Scenario $codeIt (@('-image', 'code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
-Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for tech 'node,bun'"
+Assert "-image without -toolchain runs" ($r.code -eq 0)
+Assert "-image without -toolchain does not assume dotnet,node" (-not $r.out.Contains('looks built for'))
+Assert "-image without -toolchain mounts the caches of the image's toolchains" (-not $r.out.Contains('NuGet'))
+$r = Invoke-Scenario $codeIt (@('-toolchain', ',') + $commonArgs) $stubPath
+Assert "an empty -toolchain list fails" ($r.code -ne 0)
 
-"9g. PowerShell tool chain (powershell / pwsh)"
+"9g. PowerShell toolchain (powershell / pwsh)"
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node,powershell') $stubPath
 Assert-Contains "-toolchain powershell sets POWERSHELL=true" $r.out '--build-arg POWERSHELL=true'
 Assert-Contains "-toolchain powershell derives the image name" $r.out '-t code-it-alpine-dotnet-node-powershell:latest'
@@ -417,7 +426,7 @@ Assert-Contains "pwsh aliases powershell" $r.out '-t code-it-alpine-powershell:l
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node') $stubPath
 Assert-Contains "a build without powershell sets POWERSHELL=false" $r.out '--build-arg POWERSHELL=false'
 
-"9e. Python tool chain (python / uv / -stack)"
+"9e. Python toolchain (python / uv / -stack)"
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-stack', 'python') $stubPath
 Assert-Contains "-stack python sets PYTHON=true" $r.out '--build-arg PYTHON=true'
 Assert-Contains "-stack python derives the image name" $r.out '-t code-it-alpine-python:latest'
@@ -625,14 +634,14 @@ try {
 }
 
 # ---------------------------------------------------------------------------
-"11b. Tech stack: -toolchain / -packageCaches build args and read-only caches"
+"11b. Toolchain: -toolchain / -packageCaches build args and read-only caches"
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node') $stubPath
 Assert-Contains "default build passes DOTNET=true" $r.out '--build-arg DOTNET=true'
 Assert-Contains "default build passes NODE=true" $r.out '--build-arg NODE=true'
 Assert-Contains "default build passes BUN=false" $r.out '--build-arg BUN=false'
 Assert-Contains "dotnet implies NUGET=true" $r.out '--build-arg NUGET=true'
 Assert-Contains "node implies NPM=true" $r.out '--build-arg NPM=true'
-Assert-Contains "reports the resolved tech" $r.out 'tech dotnet,node; package repos nuget,npm'
+Assert-Contains "reports the resolved toolchains" $r.out 'toolchains dotnet,node; package repos nuget,npm'
 
 # -toolchain replaces the default set
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'node,bun') $stubPath
@@ -660,7 +669,7 @@ Assert-Contains "image name derives from -toolchain" $r.out '-t code-it-alpine-n
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath
 Assert-Contains "-tech alias selects BUN" $r.out '--build-arg BUN=true'
 
-# Tech aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
+# Toolchain aliases resolve to the canonical name: js-node/ts-node -> node, js-bun/ts-bun -> bun
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'js-node') $stubPath
 Assert-Contains "js-node aliases node (NODE=true)" $r.out '--build-arg NODE=true'
 Assert-Contains "js-node canonical image name" $r.out '-t code-it-alpine-node:latest'
@@ -682,7 +691,7 @@ Assert-Contains "removed -packages is forwarded to the agent" $r.out '-packages 
 $env:STUB_IMAGE_TOOL_CHAINS = 'dotnet'
 try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
-Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for tech 'dotnet'"
+Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for toolchains 'dotnet'"
 # An image whose agents label lacks the chosen agent stops before docker run, readably
 # (the stub answers the agents label lookup with STUB_IMAGE_AGENTS)
 $env:STUB_IMAGE_AGENTS = 'claude'
@@ -720,7 +729,7 @@ Assert-Contains "image without agent-binaries label warns it may be out of date"
 $env:STUB_IMAGE_TOOL_CHAINS = ''
 try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
-Assert-Contains "falls back to the image-name guess without a label" $r.out "looks built for tech 'dotnet,node'"
+Assert-Contains "falls back to the image-name guess without a label" $r.out "looks built for toolchains 'dotnet,node'"
 
 # Unknown names are hard errors
 $r = Invoke-Scenario $codeIt (@('-toolchain','cobol') + $commonArgs) $stubPath
@@ -888,7 +897,7 @@ $addTc = Join-Path $scriptDir 'Code-It-Add-Tool-Chain.ps1'
 $repoD = Join-Path $tmp 'addtc-a'; New-GitRepo $repoD
 $r = Invoke-Scenario $addTc @('java', '-repo', $repoD, '-codeIt', $stubCi, '-dryRun') $stubPath
 Assert "add-tool-chain -dryRun exit code 0" ($r.code -eq 0)
-Assert-Contains "add-tool-chain prompt names the tool chain" $r.out 'Tool chain to add: java'
+Assert-Contains "add-tool-chain prompt names the toolchain" $r.out 'Toolchain to add: java'
 Assert-Contains "add-tool-chain prompt includes the gate" $r.out 'Gate first'
 Assert-Contains "add-tool-chain prompt requires a secure install" $r.out 'installs securely'
 Assert-Contains "add-tool-chain prompt requires musl builds" $r.out 'musl builds for x86_64 and aarch64'
@@ -1067,14 +1076,14 @@ Assert-Contains "explicit -toolchain is honoured" $r.out 'code-it-alpine-dotnet:
 $r = Invoke-Scenario $codeIt @('-dryRun', '-image', 'code-it-alpine-dotnet-node', '-WorkDirToMount', $scriptDir, '-saveDir', $hsel) $histPath
 Assert "explicit -image bypasses the default" (-not ($r.out.Contains('Using remembered image') -or $r.out.Contains('Using existing image')))
 
-# a remembered image labelled with a tool chain this checkout does not know (built by
+# a remembered image labelled with a toolchain this checkout does not know (built by
 # another branch) is still used, for the chains that are known
 $hunk = Join-Path $tmp 'histunknown'; $null = New-Item -ItemType Directory -Force -Path $hunk
 '20260101 code-it-alpine-dotnet-node-cobol' | Set-Content -Path (Join-Path $hunk 'image-history')
 $r = Invoke-Scenario $codeIt @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $hunk) $histPath
 Assert "an unknown chain in the remembered image's label is not an error" ($r.code -eq 0)
-Assert "an unknown label chain gives no unknown-tech warning" (-not $r.out.Contains('Unknown tech stack'))
-Assert-Contains "notes the unknown label chain" $r.out 'has tool chains this code-it does not know (dotnet,node,cobol); using dotnet,node'
+Assert "an unknown label chain gives no unknown-toolchain warning" (-not $r.out.Contains('Unknown toolchain'))
+Assert-Contains "notes the unknown label chain" $r.out 'has toolchains this code-it does not know (dotnet,node,cobol); using dotnet,node'
 Assert-Contains "runs the image with the unknown label chain" $r.out 'code-it-alpine-dotnet-node-cobol:latest'
 
 # powershell is a known chain: its remembered image is used with no note

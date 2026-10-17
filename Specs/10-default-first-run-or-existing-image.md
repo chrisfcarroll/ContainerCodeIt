@@ -6,7 +6,7 @@ See 00-conventions.md. **Spec 09 still applies in full**: when `code-it` runs wi
 This spec amends only the final paragraph of Spec 09. Where 09 says
 
 > If nothing is remembered, or no remembered image covers 70%, keep today's default
-> tool chains.
+> toolchains.
 
 read instead:
 
@@ -16,7 +16,7 @@ read instead:
    selects an existing image, use that image.
 3. Otherwise (no image history, or the weighted rule selected nothing), if any
    `code-it-*` image exists, use the most recently used remembered one that still
-   exists, else the most recently built. Use that image and its tool chains.
+   exists, else the most recently built. Use that image and its toolchains.
 4. Otherwise there is no code-it image at all: run `code-it-first-run` and exit.
 
 Explicit `--tool-chains` or `--image` bypasses all of this, and the image used is still

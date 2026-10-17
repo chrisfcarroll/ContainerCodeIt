@@ -1,7 +1,7 @@
 FROM alpine:3.24
 
 # ===========================================================================
-# Base image: tools every sandbox needs, whatever the tech stack
+# Base image: tools every sandbox needs, whatever the toolchains
 # ===========================================================================
 # Only tools here: each toolchain and agent brings its own libraries. The apk
 # toolchain packages (dotnet*, nodejs, python3, ...) declare their library
@@ -12,11 +12,12 @@ RUN apk add --no-cache git openssh-client ripgrep
 RUN apk add --no-cache vim less tmux oh-my-zsh ncurses-terminfo tzdata musl-locales
 
 # ===========================================================================
-# Tech stack selection
+# Toolchain selection
 #
 # These build switches are declared as low in the file as the layers that use
 # them allow, so changing one only invalidates the layers below it. Each is a
-# boolean, and each switched off skips its install layer entirely:
+# boolean, off unless code-it-build switches it on (there is no default
+# toolchain), and each switched off skips its install layer entirely:
 #
 #   DOTNET   .NET SDK + Mono                 (implies NUGET)
 #   NODE     Node.js                         (implies NPM)
@@ -30,11 +31,11 @@ RUN apk add --no-cache vim less tmux oh-my-zsh ncurses-terminfo tzdata musl-loca
 #   NPM      npm package cache support        (may be selected without NODE)
 #
 # NUGET and NPM may be left empty to follow DOTNET and NODE respectively. The
-# effective values are normalised once into /etc/code-it-tech.env so the later
+# effective values are normalised once into /etc/code-it-toolchain.env so the later
 # layers can read them.
 # ===========================================================================
-ARG DOTNET=true
-ARG NODE=true
+ARG DOTNET=false
+ARG NODE=false
 ARG BUN=false
 ARG PYTHON=false
 ARG POWERSHELL=false
@@ -44,22 +45,22 @@ RUN set -e; \
     case "$NUGET" in true|false) ;; *) NUGET=$DOTNET ;; esac; \
     case "$NPM"   in true|false) ;; *) NPM=$NODE   ;; esac; \
     printf 'DOTNET=%s\nNODE=%s\nBUN=%s\nPYTHON=%s\nPOWERSHELL=%s\nNUGET=%s\nNPM=%s\n' \
-        "$DOTNET" "$NODE" "$BUN" "$PYTHON" "$POWERSHELL" "$NUGET" "$NPM" > /etc/code-it-tech.env
+        "$DOTNET" "$NODE" "$BUN" "$PYTHON" "$POWERSHELL" "$NUGET" "$NPM" > /etc/code-it-toolchain.env
 
 # --- .NET ------------------------------------------------------------------
-RUN . /etc/code-it-tech.env; if [ "$DOTNET" = true ]; then \
+RUN . /etc/code-it-toolchain.env; if [ "$DOTNET" = true ]; then \
         apk add --no-cache dotnet10-sdk dotnet8-sdk mono; \
         dotnet workload update; \
     fi
 
 # --- Node.js ---------------------------------------------------------------
-RUN . /etc/code-it-tech.env; if [ "$NODE" = true ]; then \
+RUN . /etc/code-it-toolchain.env; if [ "$NODE" = true ]; then \
         apk add --no-cache nodejs; \
     fi
 
 # --- npm -------------------------------------------------------------------
 # Selecting npm without Node.js still works: the apk package pulls nodejs in.
-RUN . /etc/code-it-tech.env; if [ "$NPM" = true ]; then \
+RUN . /etc/code-it-toolchain.env; if [ "$NPM" = true ]; then \
         apk add --no-cache npm; \
     fi
 
@@ -67,7 +68,7 @@ RUN . /etc/code-it-tech.env; if [ "$NPM" = true ]; then \
 # Bun ships musl builds and its installer already picks the right architecture
 # for Alpine. Install into /usr/local so every user finds it on PATH; unzip is
 # its only requirement.
-RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
+RUN . /etc/code-it-toolchain.env; if [ "$BUN" = true ]; then \
         apk add --no-cache unzip; \
         curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash; \
         /usr/local/bin/bun --version; \
@@ -77,7 +78,7 @@ RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
 # Python 3 and uv from Alpine's own repos. The system Python is externally
 # managed, so never pip-install into it. uv fetches musl CPython builds on
 # x86_64/aarch64.
-RUN . /etc/code-it-tech.env; if [ "$PYTHON" = true ]; then \
+RUN . /etc/code-it-toolchain.env; if [ "$PYTHON" = true ]; then \
         apk add --no-cache python3 uv; \
         python3 --version; \
         uv --version; \
@@ -94,7 +95,7 @@ RUN . /etc/code-it-tech.env; if [ "$PYTHON" = true ]; then \
 # The x64 tarball is not an apk package, so add the libraries it links
 # (libgcc, libstdc++) and loads at runtime (icu-libs for globalization, libssl3
 # for TLS) ourselves.
-RUN set -e; . /etc/code-it-tech.env; \
+RUN set -e; . /etc/code-it-toolchain.env; \
     if [ "$POWERSHELL" != true ]; then \
         echo "Skipping PowerShell: POWERSHELL is off"; \
     elif [ "$(uname -m)" = "x86_64" ]; then \
@@ -129,10 +130,10 @@ RUN set -e; . /etc/code-it-tech.env; \
 RUN adduser -S agent1 -G wheel
 RUN sed -i 's#^\(agent1:[^:]*:[^:]*:[^:]*:[^:]*:[^:]*:\)/sbin/nologin$#\1/bin/zsh#' /etc/passwd
 # Passwordless doas lets the agent install further tools itself. apk is always
-# allowed; each enabled tech adds its own command(s), mirroring the switches in
-# the tech stack section above.
+# allowed; each enabled toolchain adds its own command(s), mirroring the switches
+# in the toolchain selection section above.
 RUN mkdir -p /etc/doas.d
-RUN . /etc/code-it-tech.env; { \
+RUN . /etc/code-it-toolchain.env; { \
         echo "permit nopass agent1 as root cmd apk"; \
         if [ "$DOTNET" = true ]; then echo "permit nopass agent1 as root cmd dotnet"; fi; \
         if [ "$NUGET" = true ]; then echo "permit nopass agent1 as root cmd nuget"; fi; \
@@ -153,7 +154,7 @@ RUN . /etc/code-it-tech.env; { \
 # NuGet uses a fallbackPackageFolder, so dotnet restore reads the host cache
 # directly (packages not found there are downloaded into ~/.nuget/packages).
 USER agent1
-RUN . /etc/code-it-tech.env; if [ "$NUGET" = true ]; then \
+RUN . /etc/code-it-toolchain.env; if [ "$NUGET" = true ]; then \
         mkdir -p ~/.nuget/packages-host ~/.nuget/NuGet; \
         printf '%s\n' \
             '<?xml version="1.0" encoding="utf-8"?>' \
@@ -169,10 +170,10 @@ RUN . /etc/code-it-tech.env; if [ "$NUGET" = true ]; then \
     fi
 # npm and Bun use their default writable caches; create both them and the
 # read-only host mount points so the launcher always has somewhere to mount.
-RUN . /etc/code-it-tech.env; if [ "$NPM" = true ]; then \
+RUN . /etc/code-it-toolchain.env; if [ "$NPM" = true ]; then \
         mkdir -p ~/.npm ~/.npm-host; \
     fi
-RUN . /etc/code-it-tech.env; if [ "$BUN" = true ]; then \
+RUN . /etc/code-it-toolchain.env; if [ "$BUN" = true ]; then \
         mkdir -p ~/.bun/install/cache ~/.bun-host; \
     fi
 
