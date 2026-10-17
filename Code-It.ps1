@@ -286,7 +286,14 @@ if ($claude -and $opencode) {
 $codeAgent = if ($claude) { "claude" } elseif ($opencode) { "opencode" } elseif ($agent) { $agent } else { "" }
 if (-not $codeAgent) {
     $savedAgent = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-agent'
-    $codeAgent = if ($savedAgent) { $savedAgent } else { "opencode" }
+    if ($savedAgent) {
+        $codeAgent = $savedAgent
+        # Say so: the agent's own state comes with it, and v2's login lives
+        # elsewhere from v1's, so the switch is otherwise invisible
+        "    Using saved default agent: $savedAgent"
+    } else {
+        $codeAgent = "opencode"
+    }
 }
 
 # Load the chosen agent's definition. The agent name is data: shortcut flags are

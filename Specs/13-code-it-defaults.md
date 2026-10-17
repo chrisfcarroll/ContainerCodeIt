@@ -82,13 +82,22 @@ are set, the rest are left alone.
 
 After parsing its own arguments, before the agent/toolchain resolution:
 
-- `--agent`, `-c`, `-o` not given and `default-agent` is set: run that agent.
+- `--agent`, `-c`, `-o` not given and `default-agent` is set: run that agent, and say
+  so (`Using saved default agent: …`), since the agent's state — its sessions and
+  login — comes with it: each agent keeps them in its own directory under the save
+  dir.
 - `--toolchain` and `--image` not given and `default-toolchain` is set: use it
   (resolved like an explicit `--toolchain`: image name derived, superset fallback,
   package caches implied). This overrides the image-history heuristic of Specs 09/10,
   which still applies when no default is saved.
 
 Explicit command-line options always beat the saved defaults.
+
+`--show` reads each agent's model from its own config (the live value) and names the
+file it was set in. Interactive runs say when the default agent changes that the
+agent's own state, and login, travel with it — e.g. opencode-v2 keeps its login in
+its own state directory, so a first run there can need a fresh login. `defaults_set`
+creates the save dir if it does not exist yet.
 
 ## Done when
 

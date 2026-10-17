@@ -106,6 +106,8 @@ defaults_set() {
         fi
         return 0
     fi
+    # The save dir may not exist yet on a machine that has not run code-it
+    mkdir -p "$save_dir" || return 1
     if [[ -f "$defaults_file" ]]; then
         tmp="$defaults_file.tmp"
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -353,7 +355,7 @@ refresh_models() {
 
 # do_show: the saved defaults, or a pointer to the interactive run
 do_show() {
-    local a m t
+    local a m t m_file spec live
     if [[ ! -f "$defaults_file" ]]; then
         echo "No defaults saved yet in $defaults_file."
         echo "Run code-it-defaults with no arguments to set them."
@@ -366,7 +368,18 @@ do_show() {
     if [[ -n "$t" ]]; then printf '  %-22s %s\n' "default toolchain:" "$t"; fi
     while IFS= read -r a; do
         m=$(current "model.$a")
-        if [[ -n "$m" ]]; then printf '  %-22s %s\n' "model for $a:" "$m"; fi
+        m_file=""
+        spec=$(ci_agent_config "$agents_dir" "$a" AGENT_MODEL_FILE) || spec=""
+        if [[ -n "$spec" && "$spec" == *:* ]]; then
+            m_file=$(agent_save_path "$a" "${spec%%:*}")
+            live=$(json_get "$m_file" "${spec##*:}")
+            # The agent's own config is the source of truth for its model
+            [[ -n "$live" ]] && m=$live
+        fi
+        if [[ -n "$m" ]]; then
+            printf '  %-22s %s\n' "model for $a:" "$m"
+            [[ -n "$m_file" ]] && printf '    (set in %s)\n' "$m_file"
+        fi
     done < <(ci_list_agents "$agents_dir")
     return 0
 }
@@ -449,6 +462,12 @@ interactive() {
         if [[ -n "$a" ]]; then
             defaults_set default-agent "$a"
             echo "    Default agent: $a"
+            if [[ "$a" != "$saved_agent" ]]; then
+                echo "    Note: each agent keeps its own state, and its own login, under the"
+                echo "    save dir, so switching the default agent switches that state too."
+                echo "    opencode-v2 keeps its login in the database under its own directory,"
+                echo "    so its first run there can ask you to log in again."
+            fi
         else
             echo "    Unknown agent '$answer'; keeping what is saved." >&2
         fi

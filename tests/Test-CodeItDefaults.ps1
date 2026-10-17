@@ -256,6 +256,43 @@ Assert-Contains "no defaults: opencode" $r.out 'CODE_AGENT="opencode"'
 Assert "no defaults: no toolchain note" (-not $r.out.Contains('saved default toolchain'))
 
 # ---------------------------------------------------------------------------
+"10. A save dir that does not exist yet; -show names the model files; the agent switch says so"
+
+# Saving must create the save dir: on a machine Code-It has not run on yet, it is absent
+$fresh = Join-Path $tmp 'fresh-save'
+$r = Invoke-Scenario "& '$defaults' -saveDir '$fresh' -agent opencode -toolchain node" $stubPath
+Assert "parameterised run into a missing save dir exits 0" ($r.code -eq 0)
+Assert "defaults file written" (Test-Path "$fresh/defaults")
+Assert-Contains "it says the agent was set" $r.out 'Default agent: opencode'
+
+# -show names where each agent's model was set
+$showD = Join-Path $tmp 'show-d'
+$null = New-Item -ItemType Directory -Force -Path "$showD/.config/opencode"
+Set-Content -Path "$showD/defaults" -Value "default-agent=opencode`nmodel.opencode=anthropic/claude-sonnet-4-5"
+Set-Content -Path "$showD/.config/opencode/config.json" -Value "{`n  `"model`": `"anthropic/claude-sonnet-4-5`"`n}"
+$r = Invoke-Scenario "& '$defaults' -saveDir '$showD' -show" $stubPath
+Assert-Contains "-show shows the model" $r.out 'model for opencode:'
+Assert-Contains "-show shows the model value" $r.out 'anthropic/claude-sonnet-4-5'
+Assert-Contains "-show names the model file" $r.out "(set in $showD/.config/opencode/config.json)"
+
+# Switching the default agent interactively explains that the agent's own state,
+# and login, come with it
+$noteD = Join-Path $tmp 'note-d'
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$noteD'" $stubPath @('opencode-v2', 'none', 'none', 'none', 'none')
+Assert "interactive switch exits 0" ($r.code -eq 0)
+Assert-Contains "the switch explains each agent's own state and login" $r.out 'log in again'
+Assert "the switched agent is saved" ((Get-Content "$noteD/defaults") -contains 'default-agent=opencode-v2')
+
+# Plain Code-It says when the saved agent is what it launches
+$agentD = Join-Path $tmp 'agent-note'; $null = New-Item -ItemType Directory -Force -Path $agentD
+Set-Content -Path "$agentD/defaults" -Value 'default-agent=claude'
+$r = Invoke-Scenario "& '$codeIt' -dryRun -WorkDirToMount '$scriptDir' -saveDir '$agentD'" $stubPath
+Assert-Contains "Code-It says which saved agent it launches" $r.out 'Using saved default agent: claude'
+Remove-Item "$agentD/defaults"
+$r = Invoke-Scenario "& '$codeIt' -dryRun -WorkDirToMount '$scriptDir' -saveDir '$agentD'" $stubPath
+Assert "no default agent: no agent note" (-not $r.out.Contains('saved default agent'))
+
+# ---------------------------------------------------------------------------
 ""
 "Results: $script:pass passed, $script:fail failed"
 if ($script:fail -gt 0) { exit 1 }

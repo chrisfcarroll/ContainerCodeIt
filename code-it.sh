@@ -401,7 +401,12 @@ saved_agent=""
 saved_toolchain=""
 if [[ "$agent_explicit" == false ]]; then
     saved_agent=$(ci_config_value "$save_dir/defaults" "default-agent") || saved_agent=""
-    [[ -n "$saved_agent" ]] && code_agent="$saved_agent"
+    if [[ -n "$saved_agent" ]]; then
+        code_agent="$saved_agent"
+        # Say so: the agent's own state comes with it, and v2's login lives
+        # elsewhere from v1's, so the switch is otherwise invisible
+        echo "    Using saved default agent: $saved_agent"
+    fi
 fi
 toolchain_from_defaults=false
 if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then

@@ -116,6 +116,8 @@ function Set-DefaultLine([string]$key, [string]$value) {
         else        { Write-Host "    would remove from ${defaultsFile}: $key" }
         return
     }
+    # The save dir may not exist yet on a machine that has not run Code-It
+    New-Item -ItemType Directory -Force -Path $saveDir | Out-Null
     $lines = @()
     if (Test-Path -Path $defaultsFile -PathType Leaf) { $lines = @(Get-Content $defaultsFile) }
     $out = @()
@@ -288,7 +290,18 @@ function Show-Defaults {
     if ($savedToolchain) { Write-Host ("  {0,-22} {1}" -f 'default toolchain:', $savedToolchain) }
     foreach ($a in (Get-CodeItListAgents $agentsDir)) {
         $m = Get-Default "model.$a"
-        if ($m) { Write-Host ("  {0,-22} {1}" -f "model for ${a}:", $m) }
+        $mFile = ""
+        $spec = Get-CodeItAgentConfig $agentsDir $a 'AGENT_MODEL_FILE'
+        if ($spec -and $spec.Contains(':')) {
+            $mFile = AgentSavePath $a ($spec.Substring(0, $spec.IndexOf(':')))
+            $live = Get-JsonKey $mFile ($spec.Substring($spec.IndexOf(':') + 1))
+            # The agent's own config is the source of truth for its model
+            if ($live) { $m = "$live" }
+        }
+        if ($m) {
+            Write-Host ("  {0,-22} {1}" -f "model for ${a}:", $m)
+            if ($mFile) { Write-Host "    (set in $mFile)" }
+        }
     }
 }
 
@@ -322,8 +335,10 @@ function Invoke-Interactive {
     if (-not $preselect) { $preselect = $script:CodeItDefaultAgents[0] }
     $answer = Read-Choice 'default agent' $preselect ($detectedAgents -join ' ') $savedAgent $agentsAvailable
     if (-not $answer -or $answer -eq 'none') {
+        $chosen = $null
         Set-DefaultLine 'default-agent' ""
     } elseif ($agentsAvailable -contains $answer) {
+        $chosen = $answer
         Set-DefaultLine 'default-agent' $answer
         Write-Host "    Default agent: $answer"
     } elseif ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $agentsAvailable.Count) {
@@ -332,6 +347,13 @@ function Invoke-Interactive {
         Write-Host "    Default agent: $chosen"
     } else {
         Write-Host "    Unknown agent '$answer'; keeping what is saved."
+        $chosen = $null
+    }
+    if ($chosen -and $chosen -ne $savedAgent) {
+        Write-Host "    Note: each agent keeps its own state, and its own login, under the"
+        Write-Host "    save dir, so switching the default agent switches that state too."
+        Write-Host "    opencode-v2 keeps its login in the database under its own directory,"
+        Write-Host "    so its first run there can ask you to log in again."
     }
 
     # 2. Default model, for each agent that has a known mechanism

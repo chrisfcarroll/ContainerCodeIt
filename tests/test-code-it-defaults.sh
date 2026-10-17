@@ -288,5 +288,47 @@ assert_contains "code-it --help mentions code-it-defaults" "$out" "code-it-defau
 
 # ---------------------------------------------------------------------------
 echo
+echo "12. A save dir that does not exist yet; --show names the model files; the agent switch says so"
+
+# Saving must create the save dir: on a machine code-it has not run on yet, it is absent
+fresh="$tmp/save-created-by-defaults"
+out=$(PATH="$cleanbin:$PATH" "$defaults" --save-dir "$fresh" --agent opencode --toolchain node 2>&1)
+rc=$?
+assert "parameterised run into a missing save dir exits 0" "$rc"
+[[ -f "$fresh/defaults" ]]; assert "defaults file written" "$?"
+assert_contains "it says the agent was set" "$out" "Default agent: opencode"
+
+# --show names where each agent's model was set
+show_d="$tmp/show-d"
+mkdir -p "$show_d/.config/opencode"
+printf '%s\n' "default-agent=opencode" "model.opencode=anthropic/claude-sonnet-4-5" > "$show_d/defaults"
+printf '{\n  "model": "anthropic/claude-sonnet-4-5"\n}\n' > "$show_d/.config/opencode/config.json"
+out=$(PATH="$cleanbin:$PATH" "$defaults" --save-dir "$show_d" --show)
+printf '%s\n' "$out" | grep -q 'model for opencode:.*anthropic/claude-sonnet-4-5'
+assert "--show shows the model" "$?"
+assert_contains "--show names the model file" "$out" "(set in $show_d/.config/opencode/config.json)"
+
+# Switching the default agent interactively explains that the agent's own state,
+# and login, come with it
+note_d="$tmp/note-d"
+out=$(printf 'opencode-v2\nnone\nnone\nnone\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" --save-dir "$note_d" 2>&1)
+rc=$?
+assert "interactive switch exits 0" "$rc"
+assert_contains "the switch explains each agent's own state and login" "$out" "log in again"
+[[ -f "$note_d/defaults" ]] && grep -q '^default-agent=opencode-v2$' "$note_d/defaults"
+assert "the switched agent is saved" "$?"
+
+# Plain code-it says when the saved agent is what it launches
+agent_d="$tmp/agent-d"
+mkdir -p "$agent_d"
+printf 'default-agent=claude\n' > "$agent_d/defaults"
+out=$(launched --save-dir "$agent_d" 2>&1)
+assert_contains "code-it says which saved agent it launches" "$out" "Using saved default agent: claude"
+rm -f "$agent_d/defaults"
+out=$(launched --save-dir "$agent_d" 2>&1)
+[[ "$out" != *"saved default agent"* ]]; assert "no default agent: no agent note" "$?"
+
+# ---------------------------------------------------------------------------
+echo
 echo "Results: $pass passed, $fail failed"
 [[ "$fail" == "0" ]] || exit 1

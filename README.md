@@ -194,10 +194,15 @@ scripted); a blank answer keeps the current value. With any of `--agent`, `--mod
 `code-it` uses the saved defaults only when its own options do not say:
 `--agent`/`-c`/`-o` beats the saved agent, and `--toolchain` and `--image` beat the
 saved toolchain — which in turn beats the remembered-image heuristic of
-[Specs 09/10](Specs/10-default-first-run-or-existing-image.md). Models are data: the
-catalog offered by the interactive picker (from `lib/models.txt`, or
-`<save dir>/model-catalog.txt` after `--refresh-models`) is best effort and always
-incomplete, and any model string is accepted.
+[Specs 09/10](Specs/10-default-first-run-or-existing-image.md). When it launches the
+saved agent it says so (`Using saved default agent: …`), because the agent brings its
+own state with it: each agent's state, and its login, live in its own directory under
+the save dir, so switching the default agent switches those too — opencode-v2 keeps
+its login in its own state directory, and its first run there can ask you to log in
+again. Models are data: the catalog offered by the interactive picker (from
+`lib/models.txt`, or `<save dir>/model-catalog.txt` after `--refresh-models`) is best
+effort and always incomplete, and any model string is accepted. `--show` names the
+file each agent's model was set in.
 
 ## Locale
 
