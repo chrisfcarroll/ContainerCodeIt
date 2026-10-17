@@ -26,7 +26,14 @@ Two new optional keys in `agents/<name>/config`, so the logic stays agent-neutra
 
 OpenCode (v1) sets `AGENT_EXCLUSIVE_DIRS='.local/share/opencode'` and
 `AGENT_EXCLUSIVE_CARRY='.local/share/opencode/auth.json'`. Agents without the keys
-behave as today. opencode-v2 can opt in once its storage is checked.
+behave as today. opencode-v2 sets
+`AGENT_EXCLUSIVE_DIRS='.local/share/opencode:.local/state/opencode'`: besides the
+database, its `.local/state/opencode/service.json` records its background service (URL,
+pid, password), which in another container's VM is unreachable. It carries nothing:
+checked against 2.0.6, v2 keeps credentials in the database (`credential`, `account`
+tables) and does not import a v1 `auth.json` into a new one. Reading them out of the
+live database would be the very cross-VM access this avoids, so a new v2 copy starts
+logged out.
 
 ## Slots
 - Slot 1 is the usual location, `<agent save dir>/<dir>`. Slot N (N ≥ 2) is
@@ -56,6 +63,8 @@ behave as today. opencode-v2 can opt in once its storage is checked.
   `Warning: Another opencode container is using …/.local/share/opencode. Containers
   cannot share it (its session database would be corrupted), so this one uses its own
   copy: …/.code-it-instances/opencode/2/.local/share/opencode`.
+- A new copy with no carry file to copy prints a note that it has no saved login, and
+  that later runs given the same copy keep the login made in it.
 - The mount for that directory points at the copy; every other state path is mounted
   as before.
 

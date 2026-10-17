@@ -259,7 +259,12 @@ opencode run started while the first is still going gets a warning and its own c
 `<save dir>/.code-it-instances/opencode/2/.local/share/opencode`, with `auth.json`
 copied in so it needs no new login. Sessions made in a copy stay in that copy, and a
 later run that gets the same copy carries on with them. A lock left by a run that
-crashed is ignored. Agents opt in with `AGENT_EXCLUSIVE_DIRS` (below).
+crashed is ignored. opencode-v2 does the same, under `<save dir>/opencode-v2/`, for
+both `.local/share/opencode` and `.local/state/opencode` (the record of its shared
+background service, which another container cannot reach). v2 keeps its login inside
+its database rather than in `auth.json`, so a new v2 copy starts logged out: log in
+once in it, and later runs that get the same copy keep that login. Agents opt in with
+`AGENT_EXCLUSIVE_DIRS` (below).
 
 ### Agent definitions
 

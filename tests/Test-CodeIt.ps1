@@ -1393,6 +1393,7 @@ $r = Invoke-Scenario $codeIt (@('-o') + $exclArgs) $stubLocksPath
 Assert-Contains "real run mounts slot 2" $r.out "$exclLocks/2/.local/share/opencode:/home/agent1/.local/share/opencode"
 Assert-Contains "real run holds slot 2's lock while running" $r.out 'LOCK-DURING-RUN: 2.lock'
 Assert-Contains "real run sees the other run's lock" $r.out 'LOCK-DURING-RUN: 1.lock'
+Assert "auth.json to carry: no login note" (-not $r.out.Contains('no saved login'))
 Assert "real run frees its lock afterwards" (-not (Test-Path "$exclLocks/2.lock"))
 Assert "real run leaves the other run's lock alone" (Test-Path "$exclLocks/1.lock")
 $slot2Auth = "$exclLocks/2/.local/share/opencode/auth.json"
@@ -1430,7 +1431,36 @@ Remove-Item -Recurse -Force "$excl/.code-it-instances"
 $null = Invoke-Scenario $codeIt (@('-c') + $exclArgs) $stubPath
 Assert "claude takes no lock" (-not (Test-Path "$excl/.code-it-instances"))
 
-# (h) help documents it
+# (h) opencode-v2: both its data and its shared-service state are exclusive, locked
+# under its own save subdir, apart from opencode's
+$v2Locks = "$excl/opencode-v2/.code-it-instances/opencode-v2"
+$null = New-Item -ItemType Directory -Force -Path $v2Locks, "$excl/opencode-v2/.local/share/opencode"
+Set-Content -Path "$v2Locks/1.lock" -Value "$PID"
+$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v2', '-dryRun') + $exclArgs) $stubPath
+Assert-Contains "v2 held lock: warns of the other container" $r.out "Another opencode-v2 container is using $excl/opencode-v2/.local/share/opencode"
+Assert-Contains "v2 held lock: data from slot 2" $r.out "-v `"$v2Locks/2/.local/share/opencode:/home/agent1/.local/share/opencode`""
+Assert-Contains "v2 held lock: shared-service state from slot 2" $r.out "-v `"$v2Locks/2/.local/state/opencode:/home/agent1/.local/state/opencode`""
+Assert-Contains "v2 held lock: config is still shared" $r.out "-v `"$excl/opencode-v2/.config/opencode:/home/agent1/.config/opencode`""
+Assert-Contains "v2 new copy: says it has no saved login" $r.out 'This copy has no saved login'
+Set-Content -Path "$excl/opencode-v2/.local/share/opencode/auth.json" -Value '{"v1":"style"}'
+$env:STUB_LOCK_DIR = $v2Locks
+$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v2') + $exclArgs) $stubLocksPath
+Assert-Contains "v2 real run holds slot 2's lock" $r.out 'LOCK-DURING-RUN: 2.lock'
+Assert "v2 copy has its own shared-service state" (Test-Path "$v2Locks/2/.local/state/opencode" -PathType Container)
+Assert "v2 carries no auth.json (its login is in its database)" (-not (Test-Path "$v2Locks/2/.local/share/opencode/auth.json"))
+$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v2') + $exclArgs) $stubLocksPath
+Remove-Item Env:STUB_LOCK_DIR
+Assert "v2 reused copy: no login note (it keeps its own)" (-not $r.out.Contains('no saved login'))
+Remove-Item -Force "$v2Locks/1.lock"
+$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v2', '-dryRun') + $exclArgs) $stubPath
+Assert-Contains "v2 free: slot 1 state is mounted" $r.out "-v `"$excl/opencode-v2/.local/state/opencode:/home/agent1/.local/state/opencode`""
+$null = New-Item -ItemType Directory -Force -Path "$excl/.code-it-instances/opencode"
+Set-Content -Path "$excl/.code-it-instances/opencode/1.lock" -Value "$PID"
+$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v2', '-dryRun') + $exclArgs) $stubPath
+Assert "an opencode (v1) lock does not affect opencode-v2" (-not $r.out.Contains('Another opencode-v2 container'))
+Remove-Item -Recurse -Force "$excl/.code-it-instances"
+
+# (i) help documents it
 $r = Invoke-ScenarioCommand "Get-Help '$codeIt' -Full | Out-String -Width 200" $stubPath
 Assert-Contains "help documents exclusive state" $r.out 'AGENT_EXCLUSIVE_DIRS'
 

@@ -1447,6 +1447,7 @@ chmod +x "$stub_locks/docker"
 out=$(STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" -o "${excl_args[@]}" 2>&1)
 assert_contains "real run mounts slot 2" "$out" "-v $excl_locks/2/.local/share/opencode:/home/agent1/.local/share/opencode"
 assert_contains "real run holds slot 2's lock while running" "$out" "LOCKS-DURING-RUN: 1.lock 2.lock"
+[[ "$out" != *"no saved login"* ]]; assert "auth.json to carry: no login note" "$?"
 [[ ! -e "$excl_locks/2.lock" ]]; assert "real run frees its lock afterwards" "$?"
 [[ -e "$excl_locks/1.lock" ]]; assert "real run leaves the other run's lock alone" "$?"
 cmp -s "$excl/.local/share/opencode/auth.json" "$excl_locks/2/.local/share/opencode/auth.json"
@@ -1484,7 +1485,33 @@ rm -rf "$excl/.code-it-instances"
 PATH="$stub_docker:$PATH" "$code_it" -c "${excl_args[@]}" >/dev/null 2>&1
 [[ ! -e "$excl/.code-it-instances" ]]; assert "claude takes no lock" "$?"
 
-# (h) help documents it
+# (h) opencode-v2: both its data and its shared-service state are exclusive, locked
+# under its own save subdir, apart from opencode's
+v2_locks="$excl/opencode-v2/.code-it-instances/opencode-v2"
+mkdir -p "$v2_locks"; echo "$$" > "$v2_locks/1.lock"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --dry-run "${excl_args[@]}" 2>&1)
+assert_contains "v2 held lock: warns of the other container" "$out" "Warning: Another opencode-v2 container is using $excl/opencode-v2/.local/share/opencode"
+assert_contains "v2 held lock: data from slot 2" "$out" "-v \"$v2_locks/2/.local/share/opencode:/home/agent1/.local/share/opencode\""
+assert_contains "v2 held lock: shared-service state from slot 2" "$out" "-v \"$v2_locks/2/.local/state/opencode:/home/agent1/.local/state/opencode\""
+assert_contains "v2 held lock: config is still shared" "$out" "-v \"$excl/opencode-v2/.config/opencode:/home/agent1/.config/opencode\""
+assert_contains "v2 new copy: says it has no saved login" "$out" "This copy has no saved login"
+mkdir -p "$excl/opencode-v2/.local/share/opencode"
+echo '{"v1":"style"}' > "$excl/opencode-v2/.local/share/opencode/auth.json"
+out=$(STUB_LOCK_DIR="$v2_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode-v2 "${excl_args[@]}" 2>&1)
+assert_contains "v2 real run holds slot 2's lock" "$out" "LOCKS-DURING-RUN: 1.lock 2.lock"
+[[ -d "$v2_locks/2/.local/state/opencode" ]]; assert "v2 copy has its own shared-service state" "$?"
+[[ ! -e "$v2_locks/2/.local/share/opencode/auth.json" ]]; assert "v2 carries no auth.json (its login is in its database)" "$?"
+out=$(STUB_LOCK_DIR="$v2_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode-v2 "${excl_args[@]}" 2>&1)
+[[ "$out" != *"no saved login"* ]]; assert "v2 reused copy: no login note (it keeps its own)" "$?"
+rm -f "$v2_locks/1.lock"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --dry-run "${excl_args[@]}" 2>&1)
+assert_contains "v2 free: slot 1 state is mounted" "$out" "-v \"$excl/opencode-v2/.local/state/opencode:/home/agent1/.local/state/opencode\""
+mkdir -p "$excl_locks"; echo "$$" > "$excl_locks/1.lock"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --dry-run "${excl_args[@]}" 2>&1)
+[[ "$out" != *"Another opencode-v2 container"* ]]; assert "an opencode (v1) lock does not affect opencode-v2" "$?"
+rm -rf "$excl/.code-it-instances"
+
+# (i) help documents it
 out=$(PATH="$stub_docker:$PATH" "$code_it" --help)
 assert_contains "--help documents exclusive state" "$out" "AGENT_EXCLUSIVE_DIRS"
 

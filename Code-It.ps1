@@ -674,6 +674,7 @@ if ($exclusiveDirList.Count -gt 0) {
         if (-not $dryRun) { $exclusiveLock = "$lockDir/$slot.lock" }
         if ($slot -ne 1) {
             $instanceRoot = "$lockDir/$slot"
+            $newCopy = -not (Test-Path -Path $instanceRoot -PathType Container)
             foreach ($d in $exclusiveDirList) {
                 Write-Warning ("Another $codeAgent container is using $agentSaveDir/$d.`n" +
                     "    Containers cannot share it (its session database would be corrupted), so this one uses its own copy:`n" +
@@ -692,6 +693,16 @@ if ($exclusiveDirList.Count -gt 0) {
                         Copy-Item -Path $src -Destination $dest -Force
                     }
                 }
+            }
+            # A new copy with no credentials to carry (opencode-v2 keeps its login in
+            # the database) starts logged out
+            $hasLogin = $false
+            foreach ($f in (Split-CodeItList ($agentExclusiveCarry -replace ':', ','))) {
+                if ((Test-Path -Path "$agentSaveDir/$f" -PathType Leaf) -or (Test-Path -Path "$instanceRoot/$f" -PathType Leaf)) { $hasLogin = $true }
+            }
+            if ($newCopy -and -not $hasLogin) {
+                Write-Warning ("This copy has no saved login: log in again inside the container. Later runs`n" +
+                    "    that get this copy keep that login.")
             }
         }
     }

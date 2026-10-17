@@ -832,6 +832,8 @@ if [[ -n "${AGENT_EXCLUSIVE_DIRS:-}" ]]; then
         [[ "$take_lock" == true ]] && exclusive_lock="$lock_dir/$slot.lock"
         if [[ "$slot" != 1 ]]; then
             instance_root="$lock_dir/$slot"
+            new_copy=true
+            [[ -d "$instance_root" ]] && new_copy=false
             IFS=':' read -r -a exclusive_dirs <<< "$AGENT_EXCLUSIVE_DIRS"
             for d in "${exclusive_dirs[@]}"; do
                 [[ -n "$d" ]] || continue
@@ -851,6 +853,17 @@ if [[ -n "${AGENT_EXCLUSIVE_DIRS:-}" ]]; then
                         cp -p "$agent_save_dir/$f" "$instance_root/$f"
                     fi
                 done
+            fi
+            # A new copy with no credentials to carry (opencode-v2 keeps its login in
+            # the database) starts logged out
+            has_login=false
+            IFS=':' read -r -a carry_files <<< "${AGENT_EXCLUSIVE_CARRY:-}"
+            for f in ${carry_files[@]+"${carry_files[@]}"}; do
+                [[ -n "$f" && ( -f "$agent_save_dir/$f" || -f "$instance_root/$f" ) ]] && has_login=true
+            done
+            if [[ "$new_copy" == true && "$has_login" == false ]]; then
+                echo "    This copy has no saved login: log in again inside the container. Later runs" >&2
+                echo "    that get this copy keep that login." >&2
             fi
         fi
     else
