@@ -65,7 +65,7 @@ RUN apk add --no-cache libgcc libstdc++
 USER agent1
 RUN curl -fsSL https://opencode.ai/install -o /tmp/opencode-install.sh \
     && bash /tmp/opencode-install.sh && rm -f /tmp/opencode-install.sh \
-    && test -x ~/.opencode/bin/opencode # last changed 2026-10-06
+    && test -x ~/.opencode/bin/opencode # last changed 2026-10-18
 USER root
 RUN printf '%s\n' 'opencode=/home/agent1/.opencode/bin/opencode' > /etc/code-it-agents
 USER agent1
