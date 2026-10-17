@@ -8,7 +8,8 @@
     Builds the Alpine image from the Dockerfile with the requested toolchains,
     package caches and coding agents, and labels the image with that resolution so
     Code-It.ps1 can check it rather than guess from the image name. The image's
-    locale defaults to the host's. Code-It.ps1 runs the images this builds.
+    locale defaults to the host's. With no toolchain, it interactively detects and
+    asks which toolchains and agents to build. Code-It.ps1 runs the images this builds.
 
     The agents' install layers live in agents/<name>/install.dockerfile. This script
     assembles them into the Dockerfile (replacing the "# @@CODE_IT_AGENT_INSTALLS@@"
@@ -18,7 +19,7 @@
     Comma-separated toolchains to build. Known: dotnet, node (aliases js-node,
     ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell
     (alias pwsh). Alias: -stack.
-    Required: with none, this help is printed and the script exits 1.
+    With no selection, interactive setup asks which detected toolchains to build.
 
 .PARAMETER packageCaches
     Comma-separated package repos to support, independent of -toolchain. Known:
@@ -26,7 +27,8 @@
     node->npm). An explicit, empty list means no package caches.
 
 .PARAMETER agent
-    Comma-separated agents to install. Default: opencode,claude. Alias: -agents
+    Comma-separated agents to install. Default for parameterized builds: opencode,claude.
+    Interactive setup preselects detected agents. Alias: -agents
 
 .PARAMETER listAgents
     List the available agents and exit.
@@ -54,6 +56,15 @@
 .PARAMETER dryRun
     Print the build command without executing it.
 
+.PARAMETER yes
+    Accept detected/default selections and build without asking.
+
+.PARAMETER interactive
+    Ask about any missing toolchain/agent selection.
+
+.PARAMETER selectionFile
+    Internal: write the selected toolchains and agents for Code-It-FirstRun.ps1.
+
 .EXAMPLE
     .\Code-It-Build.ps1 -toolchain 'node,bun' -packageCaches npm -agent opencode
 
@@ -76,6 +87,9 @@ param (
     [string]$dockerfileDir = $PSScriptRoot,
     [string]$runtime       = "",
     [switch]$dryRun        = $false,
+    [switch]$yes           = $false,
+    [switch]$interactive   = $false,
+    [string]$selectionFile = "",
     [Alias('h')]
     [switch]$help          = $false
 )
@@ -100,6 +114,53 @@ if ($listAgents) {
     exit 0
 }
 
+# With no toolchain, build is an interactive setup command. First-run also asks
+# build to prompt for whichever selections were not supplied.
+if (-not $toolchain -or $interactive) { $interactive = $true }
+
+function ConvertTo-CodeItSelection([string]$answer, [string[]]$items) {
+    $out = @()
+    foreach ($tok in ($answer -split '[,\s]+' | Where-Object { $_ })) {
+        if ($tok -match '^\d+$') {
+            $idx = [int]$tok
+            if ($idx -ge 1 -and $idx -le $items.Count) { $out += $items[$idx - 1] }
+        } elseif ($items -contains $tok) {
+            $out += $tok
+        }
+    }
+    return ($out | Select-Object -Unique)
+}
+
+function Read-CodeItChoice([string]$label, [string[]]$default, [string[]]$detected, [string[]]$items) {
+    if ($yes) { return $default }
+    Write-Host "$label (detected marked *):"
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $flag = if ($detected -contains $items[$i]) { ' *' } else { '' }
+        Write-Host ("  {0}) {1}{2}" -f ($i + 1), $items[$i], $flag)
+    }
+    $shown = if ($default.Count) { $default -join ',' } else { 'none' }
+    $answer = Read-Host "Choose $label [$shown]"
+    if (-not $answer) { return $default }
+    return (ConvertTo-CodeItSelection $answer $items)
+}
+
+if ($interactive) {
+    $toolchainAvailable = @($script:CodeItKnownToolchain)
+    $agentsAvailable = @(Get-CodeItListAgents $agentsDir)
+    $detectedToolchain = @($toolchainAvailable | Where-Object { Test-CodeItToolchainDetected $_ })
+    $detectedAgents = @($agentsAvailable | Where-Object { Test-CodeItAgentDetected $agentsDir $_ })
+
+    if (-not $toolchain) {
+        # Running this script means PowerShell is present, so preselect it too.
+        $preselectedToolchains = @($detectedToolchain | Where-Object { $_ -ne 'powershell' }) + 'powershell'
+        $toolchain = (Read-CodeItChoice 'Toolchains to build' $preselectedToolchains $detectedToolchain $toolchainAvailable) -join ','
+    }
+    if (-not $agent) {
+        $defaultAgents = if ($detectedAgents.Count) { $detectedAgents } else { @($script:CodeItDefaultAgents) }
+        $agent = (Read-CodeItChoice 'Agents to install' $defaultAgents $detectedAgents $agentsAvailable) -join ','
+    }
+}
+
 # There is no default toolchain: building one nobody asked for wastes a long build.
 # The empty-list check also catches -toolchain ','.
 # An explicit, empty -packageCaches means "no package caches", not "use the implied ones".
@@ -109,8 +170,7 @@ if ($toolchain) {
     if ($null -eq $enabledToolchain) { exit 1 }
 }
 if ($enabledToolchain.Count -eq 0) {
-    Write-Warning "-toolchain is required."
-    Get-Help $PSCommandPath -Full
+    Write-Warning "No toolchains selected. Choose at least one, or pass -toolchain."
     exit 1
 }
 if ($PSBoundParameters.ContainsKey('packageCaches')) {
@@ -208,6 +268,16 @@ try {
 
     "    Building with toolchains $($enabledToolchain -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ','); locale $containerLocale"
     "    $runtime build $($buildArgs -join ' ') -t $image`:latest $buildContext"
+
+    if ($interactive -and -not $yes) {
+        $answer = Read-Host 'Build now? [Y/n]'
+        if ($answer -match '^[Nn]') { Write-Host 'Aborted.'; exit 0 }
+    }
+
+    if ($selectionFile) {
+        @("toolchains=$($enabledToolchain -join ',')", "agents=$($enabledAgents -join ',')") |
+            Set-Content -Path $selectionFile -Encoding UTF8
+    }
 
     if ($dryRun) { exit 0 }
 

@@ -3,8 +3,9 @@
 # Install by sourcing it, e.g. from ~/.bashrc:
 #     source /path/to/ContainerCodeIt/completions/code-it-build.bash
 
-_code_it_build_opts='--toolchain -t --stack --package-caches --agent -a --list-agents
-    --rebuild --locale -l --image -i --dockerfile-dir --runtime -r --dry-run -d --help -h'
+_code_it_build_opts='--toolchain -t --stack --package-caches --agent --agents -a --list-agents
+    --rebuild --locale -l --image -i --dockerfile-dir --runtime -r --dry-run -d
+    --yes -y --interactive --help -h'
 
 _code_it_build() {
     local cur prev

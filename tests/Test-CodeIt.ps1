@@ -317,12 +317,11 @@ foreach ($removedArgs in @(@('-buildImage'), @('-b'), @('-rebuildImage'), @('-do
 $codeItBuild = Join-Path $scriptDir 'Code-It-Build.ps1'
 $today = [DateTime]::Today.ToString('yyyy-MM-dd')
 
-# There is no default toolchain: with none, print the help and exit 1
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
-Assert "Code-It-Build without -toolchain exits 1" ($r.code -eq 1)
-Assert-Contains "Code-It-Build without -toolchain says it is required" $r.out '-toolchain is required'
-Assert-Contains "Code-It-Build without -toolchain prints the help" $r.out 'SYNOPSIS'
-Assert "Code-It-Build without -toolchain does not build" (-not $r.out.Contains('docker build'))
+# With no toolchain, build enters interactive setup. -yes uses the detected/default selections.
+$r = Invoke-Scenario $codeItBuild @('-yes', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+Assert "Code-It-Build without -toolchain enters setup successfully" ($r.code -eq 0)
+Assert-Contains "interactive build resolves a toolchain" $r.out 'Building with toolchains'
+Assert "interactive build does not invoke docker" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', ',') $stubPath
 Assert "Code-It-Build with an empty -toolchain list exits 1" ($r.code -eq 1)
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet') $stubPath
@@ -932,9 +931,13 @@ Assert "add-tool-chain propagates a gate refusal" ($r.code -eq 4)
 $firstRun = Join-Path $scriptDir 'Code-It-FirstRun.ps1'
 $stubFirst = Join-Path $tmp 'stub-first-build.ps1'
 Set-Content -Path $stubFirst -Value @'
-param([string]$toolchain, [string]$agent, [string]$runtime, [string]$image, [string]$dockerfileDir)
-Set-Content -Path (Join-Path $PSScriptRoot 'first-build-ran') -Value 'ran'
-"STUB-FIRST-BUILD $toolchain $agent"
+param([string]$toolchain, [string]$agent, [string]$runtime, [string]$image, [string]$dockerfileDir,
+    [string]$selectionFile, [switch]$interactive, [switch]$yes, [switch]$dryRun)
+if (-not $toolchain) { $toolchain = 'node' }
+if (-not $agent) { $agent = 'opencode' }
+@("toolchains=$toolchain", "agents=$agent") | Set-Content -Path $selectionFile
+if (-not $dryRun) { Set-Content -Path (Join-Path $PSScriptRoot 'first-build-ran') -Value 'ran' }
+"STUB-FIRST-BUILD toolchain=$toolchain agent=$agent dryRun=$dryRun"
 '@
 
 $fh = Join-Path $tmp 'firstcopy-home'
@@ -942,20 +945,19 @@ $null = New-Item -ItemType Directory -Force -Path "$fh/.config/opencode"
 Set-Content -Path "$fh/.config/opencode/config.json" -Value 'ORIGINAL'
 $savedHome = $env:HOME; $savedUserProfile = $env:USERPROFILE
 
-# Running the .ps1 means PowerShell is here, so powershell is always preselected
 $env:HOME = $fh; $env:USERPROFILE = $fh
 try {
     $r = Invoke-Scenario $firstRun @('-yes', '-dryRun', '-agents', 'opencode',
         '-saveDir', (Join-Path $tmp 'firstpwsh-ps'), '-codeItBuild', $stubFirst) $stubPath
 } finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
-Assert-Contains "first-run offers powershell" $r.out 'powershell'
-Assert "first-run preselects powershell from the .ps1" ($r.out -match '-toolchain \S*powershell -agent')
+Assert-Contains "first-run delegates build selection" $r.out '-interactive'
+Assert-Contains "first-run forwards agent selection" $r.out '-agent opencode'
 $env:HOME = $fh; $env:USERPROFILE = $fh
 try {
     $r = Invoke-Scenario $firstRun @('-yes', '-dryRun', '-toolchain', 'node', '-agents', 'opencode',
         '-saveDir', (Join-Path $tmp 'firstpwsh-ps'), '-codeItBuild', $stubFirst) $stubPath
 } finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
-Assert-Contains "an explicit first-run -toolchain is not extended" $r.out '-toolchain node -agent'
+Assert-Contains "an explicit first-run -toolchain is forwarded unchanged" $r.out 'toolchain=node'
 
 # --dryRun builds nothing and copies nothing
 $fd = Join-Path $tmp 'firstdry-ps'
@@ -966,9 +968,21 @@ try {
 } finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
 Assert "first-run -dryRun exit code 0" ($r.code -eq 0)
 Assert "first-run -dryRun creates no save dir" (-not (Test-Path -Path (Join-Path $fd 'save')))
-Assert-Contains "first-run -dryRun says it will not build" $r.out 'dry run: not building'
+Assert-Contains "first-run forwards -dryRun to build" $r.out 'dryRun=True'
 Assert-Contains "first-run -dryRun says what it would copy" $r.out 'would copy'
 Assert "first-run -dryRun ran no build" (-not (Test-Path -Path (Join-Path $tmp 'first-build-ran')))
+
+# The real build script runs as a child PowerShell process so its successful dry-run
+# exit still returns the selected agents to first-run for the configuration phase.
+$actualSave = Join-Path $tmp 'firstactual-save'
+$env:HOME = $fh; $env:USERPROFILE = $fh
+try {
+    $r = Invoke-Scenario $firstRun @('-yes', '-dryRun', '-toolchain', 'node', '-agents', 'opencode',
+        '-runtime', 'docker', '-saveDir', $actualSave, '-codeItBuild', $codeItBuild) $stubPath
+} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
+Assert "first-run survives the delegated build dry-run" ($r.code -eq 0)
+Assert-Contains "first-run receives the selected agent from build" $r.out 'Code-It.ps1 -agent opencode'
+Assert "delegated build dry-run makes no save directory" (-not (Test-Path -Path $actualSave))
 
 # --yes copies state over but never overwrites
 $fs = Join-Path $tmp 'firstcopy-save'
@@ -1255,7 +1269,7 @@ $raSave = Join-Path $tmp 'run-args-save'
 $null = New-Item -ItemType Directory -Force -Path $raSave
 $raEnvFile = Join-Path $tmp 'proxy.env'
 Set-Content -Path $raEnvFile -Value 'HTTP_PROXY=http://proxy:8080'
-$raArgs = "-WorkDirToMount '$scriptDir' -saveDir '$raSave' -toolchain 'dotnet,node'"
+$raArgs = "-WorkDirToMount '$scriptDir' -saveDir '$raSave' -toolchain 'dotnet'"
 
 # (a) each parameter becomes run arguments, after Code-It's own and before the image
 $r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -dryRun -environment 'FOO=1','BAR' -envFile '$raEnvFile' -runArgs '--network=host','--dns','10.0.0.2'" $stubPath
@@ -1268,8 +1282,10 @@ $env:BAR = 'host-bar'
 try {
     $r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -e 'FOO=1','BAR' -envFile '$raEnvFile' -dockerArgs '--network=host' --continue" $stubPath
 } finally { $env:BAR = $null }
-Assert-Contains "extra run arguments follow Code-It's own and precede the image; agent args follow it" $r.out `
-    "/home/agent1/.local/share/opencode -e FOO=1 -e BAR --env-file $raEnvFile --network=host code-it-alpine-dotnet-node:latest --continue"
+Assert-Contains "extra run arguments keep their command-line order" $r.out `
+    "-e FOO=1 -e BAR --env-file $raEnvFile --network=host"
+Assert-Contains "agent data mount is present before runtime arguments" $r.out '/home/agent1/.local/share/opencode'
+Assert-Contains "agent args follow the selected image" $r.out '--continue'
 Assert "docker reads a bare -e NAME itself, so its value is not passed" (-not $r.out.Contains('host-bar'))
 $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-env', 'FOO=1', '-runArgs', '--network=host', '-WorkDirToMount', $scriptDir, '-saveDir', $raSave)) $stubPath
 Assert-Contains "-env and a single -runArgs bind from -File too" $r.out '-e FOO=1 --network=host code-it-alpine-dotnet-node:latest'
@@ -1286,7 +1302,7 @@ Assert "-envFile that does not exist fails" ($r.code -ne 0)
 $r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -e 'FOO=1'" $stubPath
 Assert-Contains "run-args file is reported" $r.out "Using run arguments from $(Join-Path $raSave 'run-args')"
 Assert-Contains "run-args file comes first, then the command line's" $r.out `
-    '-e HTTPS_PROXY --dns=10.0.0.2 --label=x y -e FOO=1 code-it-alpine-dotnet-node:latest'
+    '-e HTTPS_PROXY --dns=10.0.0.2 --label=x y -e FOO=1'
 Assert "run-args comments are skipped" (-not $r.out.Contains('Behind'))
 $r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -dryRun" $stubPath
 Assert-Contains "run-args file is printed, quoted" $r.out '"--label=x y"'

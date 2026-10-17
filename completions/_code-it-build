@@ -20,8 +20,9 @@ _code_it_build() {
         (--agent|-a)       compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
     esac
 
-    compadd -- --toolchain -t --stack --package-caches --agent -a --list-agents \
-        --rebuild --locale -l --image -i --dockerfile-dir --runtime -r --dry-run -d --help -h
+    compadd -- --toolchain -t --stack --package-caches --agent --agents -a --list-agents \
+        --rebuild --locale -l --image -i --dockerfile-dir --runtime -r --dry-run -d \
+        --yes -y --interactive --help -h
 }
 
 _code_it_build "$@"

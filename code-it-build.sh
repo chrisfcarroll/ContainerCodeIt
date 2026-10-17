@@ -12,8 +12,8 @@
 #   ./code-it-build.sh [OPTIONS]
 #
 # Options:
-#   --toolchain, -t LIST     Comma-separated toolchains to build. Required: with none,
-#                            this help is printed and the script exits 1.
+#   --toolchain, -t LIST     Comma-separated toolchains to build. With none,
+#                            interactive selection is used.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun), python (alias uv),
 #                            powershell (alias pwsh).
@@ -23,7 +23,8 @@
 #                            Default: the repos implied by --toolchain
 #                            (dotnet->nuget, node->npm).
 #   --agent, -a LIST         Comma-separated agents to install. Default: opencode,claude.
-#                            --agents is an alias.
+#                            --agents is an alias. Interactive mode preselects detected
+#                            agents instead.
 #   --list-agents            List the available agents and exit.
 #   --rebuild                Bump the "# last changed" dates in the Dockerfile and the
 #                            selected agents' install fragments to today first, so the
@@ -41,6 +42,9 @@
 #   --runtime, -r NAME       Container runtime to use: "docker" or "container".
 #                            Default: auto-detected (Apple container on macOS, else docker).
 #   --dry-run, -d            Print the build command without executing it.
+#   --yes, -y                Accept detected/default selections and build without asking.
+#   --interactive            Ask about any missing toolchain/agent selection.
+#   --selection-file FILE    Internal: write selected toolchains and agents for first-run.
 #   --help, -h               Show this help message.
 #
 # The image is labelled with its toolchains, package caches and locale
@@ -68,6 +72,9 @@ image=""
 dockerfile_dir="$script_dir"
 runtime=""
 dry_run=false
+yes=false
+interactive=false
+selection_file=""
 
 show_help() { sed -n '2,/^$/{ s/^# \{0,1\}//; p; }' "$0"; }
 
@@ -114,6 +121,18 @@ while [[ $# -gt 0 ]]; do
             dry_run=true
             shift
             ;;
+        --yes|-y)
+            yes=true
+            shift
+            ;;
+        --interactive)
+            interactive=true
+            shift
+            ;;
+        --selection-file)
+            selection_file="$2"
+            shift 2
+            ;;
         --help|-h)
             show_help
             exit 0
@@ -148,13 +167,78 @@ if [[ "$list_agents" == true ]]; then
     exit 0
 fi
 
+# With no toolchain, build is an interactive setup command. First-run also asks
+# build to prompt for whichever of its selections were not supplied.
+[[ -z "$toolchain" ]] && interactive=true
+
+parse_selection() {
+    local answer="$1"; shift
+    local items=("$@") out="" tok it idx
+    local IFS=', '
+    for tok in $answer; do
+        [[ -n "$tok" ]] || continue
+        if [[ "$tok" =~ ^[0-9]+$ ]]; then
+            idx="$tok"
+            if (( idx >= 1 && idx <= ${#items[@]} )); then
+                out=$(ci_comma_list_add "$out" "${items[$((idx-1))]}")
+            fi
+        else
+            for it in "${items[@]}"; do
+                [[ "$it" == "$tok" ]] && out=$(ci_comma_list_add "$out" "$it")
+            done
+        fi
+    done
+    printf '%s' "$out"
+}
+
+choose() {
+    local label="$1" default="$2" detected="$3"; shift 3
+    local items=("$@") i=1 item flag answer
+    if [[ "$yes" == true ]]; then printf '%s' "$default"; return 0; fi
+    printf '%s (detected marked *):\n' "$label" >&2
+    for item in "${items[@]}"; do
+        flag=""
+        case " $detected " in *" $item "*) flag=" *" ;; esac
+        printf '  %d) %s%s\n' "$i" "$item" "$flag" >&2
+        i=$((i+1))
+    done
+    printf 'Choose %s [%s]: ' "$label" "$(ci_join , "${default:-none}")" >&2
+    read -r answer || answer=""
+    if [[ -z "$answer" ]]; then printf '%s' "$default"; else parse_selection "$answer" "${items[@]}"; fi
+}
+
+if [[ "$interactive" == true ]]; then
+    toolchain_available=($CI_KNOWN_TOOLCHAIN)
+    agents_available=()
+    while IFS= read -r a; do agents_available+=("$a"); done < <(ci_list_agents "$agents_dir")
+    detected_toolchain=""
+    for t in "${toolchain_available[@]}"; do
+        ci_toolchain_detected "$t" && detected_toolchain=$(ci_comma_list_add "$detected_toolchain" "$t")
+    done
+    detected_agents=""
+    for a in "${agents_available[@]}"; do
+        ci_agent_detected "$agents_dir" "$a" && detected_agents=$(ci_comma_list_add "$detected_agents" "$a")
+    done
+
+    if [[ -z "$toolchain" ]]; then
+        preselected_toolchains="$detected_toolchain"
+        ci_host_is_windows && preselected_toolchains=$(ci_comma_list_add "$preselected_toolchains" powershell)
+        toolchain=$(ci_join , "$(choose "Toolchains to build" "$preselected_toolchains" "$detected_toolchain" "${toolchain_available[@]}")")
+    fi
+    if [[ -z "$agents_raw" ]]; then
+        default_agents="$detected_agents"
+        [[ -n "$default_agents" ]] || default_agents="$CI_DEFAULT_AGENTS"
+        agents_raw=$(ci_join , "$(choose "Agents to install" "$default_agents" "$detected_agents" "${agents_available[@]}")")
+    fi
+fi
+
 # There is no default toolchain: building one nobody asked for wastes a long build.
 # The empty-list check also catches --toolchain ','.
 # An explicit, empty --package-caches means "no package caches", not "use the implied ones".
 enabled_toolchain=""
 [[ -n "$toolchain" ]] && { enabled_toolchain=$(ci_resolve_toolchain "$toolchain") || exit 1; }
 if [[ -z "$enabled_toolchain" ]]; then
-    echo "Warning: --toolchain is required." >&2
+    echo "Warning: no toolchains selected. Choose at least one, or pass --toolchain." >&2
     show_help
     exit 1
 fi
@@ -273,6 +357,16 @@ echo "    Building with toolchains ${enabled_toolchain// /,}; package repos ${en
 
 # Print the command
 echo "    $runtime build ${build_args[*]} -t ${image}:latest $build_context"
+
+if [[ "$interactive" == true && "$yes" != true ]]; then
+    printf 'Build now? [Y/n]: ' >&2
+    read -r answer || answer=""
+    case "$answer" in [Nn]*) echo "Aborted."; exit 0 ;; esac
+fi
+
+if [[ -n "$selection_file" ]]; then
+    printf 'toolchains=%s\nagents=%s\n' "$(ci_join , "$enabled_toolchain")" "$(ci_join , "$enabled_agents")" > "$selection_file"
+fi
 
 if [[ "$dry_run" == true ]]; then
     exit 0

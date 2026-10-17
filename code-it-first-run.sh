@@ -3,9 +3,8 @@
 # One interactive command that takes a new user from nothing to a built image with
 # their agent logins carried over.
 #
-# It detects the container runtime, the host toolchains and agents, asks what to
-# include, runs code-it-build, optionally copies agent state into the save dir, and
-# prints the code-it command to start.
+# It delegates toolchain/agent selection and image building to code-it-build, then
+# optionally copies host agent state into the save dir and prints the run command.
 #
 # There is no default toolchain. The toolchains detected on the host are
 # preselected, powershell among them when pwsh or powershell is found, and powershell
@@ -18,8 +17,8 @@
 # Options:
 #   --save-dir, -s DIR       Where agent state is kept/copied. Default: ~/.config/code-it
 #   --work-dir, -w DIR       Host directory mounted as /work. Default: .
-#   --toolchain, -t LIST     Preselect toolchains (skips the question).
-#   --agents, -a LIST        Preselect agents (skips the question).
+#   --toolchain, -t LIST     Select toolchains (skips that question).
+#   --agents, -a LIST        Select agents (skips that question).
 #   --image, -i NAME         Image name to build.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile.
 #   --runtime, -r NAME       docker or container. Default: auto-detected.
@@ -76,134 +75,38 @@ done
 
 agents_dir="$script_dir/agents"
 
-# 1. Container runtime and git, reusing code-it's detection and advice.
-runtime=$(ci_detect_runtime "$runtime") || exit 1
+# Git configuration and agent-state copying remain first-run's responsibility.
 if ! command -v git &>/dev/null; then
     echo "Warning: Git command not found. Please install Git and ensure it is in your PATH." >&2
     exit 1
 fi
 
-# 2. Detect host toolchains and agents.
-toolchain_available=($CI_KNOWN_TOOLCHAIN)
-agents_available=()
-for a in $CI_DEFAULT_AGENTS; do
-    ci_agent_exists "$agents_dir" "$a" && agents_available+=("$a")
-done
-while IFS= read -r a; do
-    [[ " ${agents_available[*]:-} " == *" $a "* ]] || agents_available+=("$a")
-done < <(ci_list_agents "$agents_dir")
+# code-it-build owns host detection, selection, runtime detection and build confirmation.
+selection_file=$(mktemp "${TMPDIR:-/tmp}/code-it-first-run-selection.XXXXXX")
+rm -f "$selection_file"
+trap 'rm -f "$selection_file"' EXIT
+build_cmd=("$code_it_build" --interactive --selection-file "$selection_file")
+[[ -n "$toolchain_arg" ]] && build_cmd+=(--toolchain "$toolchain_arg")
+[[ -n "$agents_arg" ]] && build_cmd+=(--agent "$agents_arg")
+[[ -n "$image" ]] && build_cmd+=(--image "$image")
+[[ "$dockerfile_dir" != "$script_dir" ]] && build_cmd+=(--dockerfile-dir "$dockerfile_dir")
+[[ -n "$runtime" ]] && build_cmd+=(--runtime "$runtime")
+[[ "$yes" == true ]] && build_cmd+=(--yes)
+[[ "$dry_run" == true ]] && build_cmd+=(--dry-run)
 
-detected_toolchain=""
-for t in "${toolchain_available[@]}"; do
-    if ci_toolchain_detected "$t"; then
-        detected_toolchain=$(ci_comma_list_add "$detected_toolchain" "$t")
-    fi
-done
-detected_agents=""
-for a in "${agents_available[@]}"; do
-    if ci_agent_detected "$agents_dir" "$a"; then
-        detected_agents=$(ci_comma_list_add "$detected_agents" "$a")
-    fi
-done
+echo
+echo "  ${build_cmd[*]}"
+"${build_cmd[@]}"
 
-# parse_selection ANSWER ITEMS...: map numbers (1-based) or names to a space list
-parse_selection() {
-    local answer="$1"; shift
-    local items=("$@") out="" tok idx it
-    local IFS=', '
-    for tok in $answer; do
-        [[ -n "$tok" ]] || continue
-        if [[ "$tok" =~ ^[0-9]+$ ]]; then
-            idx="$tok"
-            if (( idx >= 1 && idx <= ${#items[@]} )); then
-                out=$(ci_comma_list_add "$out" "${items[$((idx-1))]}")
-            fi
-        else
-            for it in "${items[@]}"; do
-                [[ "$it" == "$tok" ]] && out=$(ci_comma_list_add "$out" "$it")
-            done
-        fi
-    done
-    printf '%s' "$out"
-}
-
-# choose LABEL DEFAULT ITEMS...: numbered prompt; prints the selection
-choose() {
-    local label="$1" default="$2"; shift 2
-    local items=("$@") i=1 t flag answer
-    if [[ "$yes" == true ]]; then
-        printf '%s' "$default"
-        return 0
-    fi
-    # The prompts go to stderr: only the selection is captured from stdout.
-    echo "$label (detected marked *):" >&2
-    for t in "${items[@]}"; do
-        flag=""
-        case " $detected_toolchain $detected_agents " in *" $t "*) flag=" *" ;; esac
-        printf '  %d) %s%s\n' "$i" "$t" "$flag" >&2
-        i=$((i+1))
-    done
-    printf 'Choose %s [%s]: ' "$label" "$(ci_join , "${default:-none}")" >&2
-    read -r answer || answer=""
-    if [[ -z "$answer" ]]; then
-        printf '%s' "$default"
-    else
-        parse_selection "$answer" "${items[@]}"
-    fi
-}
-
-echo "== ContainerCodeIt first run =="
-echo "Using container runtime: $runtime"
-
-if [[ -n "$toolchain_arg" ]]; then
-    chosen_toolchain=$(ci_resolve_toolchain "$toolchain_arg") || exit 1
-else
-    # There is no default toolchain: preselect what was detected, and powershell on
-    # Windows too.
-    preselected_tcs="$detected_toolchain"
-    if ci_host_is_windows; then
-        preselected_tcs=$(ci_comma_list_add "$preselected_tcs" powershell)
-    fi
-    chosen_toolchain=$(choose "Toolchains to build" "$preselected_tcs" "${toolchain_available[@]}")
-fi
-if [[ -z "$chosen_toolchain" ]]; then
-    echo "Warning: no toolchains selected. Choose at least one, or pass --toolchain." >&2
-    exit 1
-fi
-
-if [[ -n "$agents_arg" ]]; then
-    chosen_agents=$(ci_resolve_agents "$agents_arg" "$agents_dir") || exit 1
-else
-    default_agents="$detected_agents"
-    [[ -n "$default_agents" ]] || default_agents="$CI_DEFAULT_AGENTS"
-    chosen_agents=$(choose "Agents to install" "$default_agents" "${agents_available[@]}")
-fi
+# No selection means the user declined the build.
+[[ -f "$selection_file" ]] || exit 0
+chosen_agents=""
+while IFS= read -r line; do
+    case "$line" in agents=*) chosen_agents="${line#agents=}" ;; esac
+done < "$selection_file"
 if [[ -z "$chosen_agents" ]]; then
     echo "Warning: no agents selected." >&2
     exit 1
-fi
-
-# 3/4. Show the code-it-build command, confirm, run it.
-build_cmd=("$code_it_build" --toolchain "$(ci_join , "$chosen_toolchain")" --agent "$(ci_join , "$chosen_agents")" --runtime "$runtime")
-[[ -n "$image" ]] && build_cmd+=(--image "$image")
-[[ "$dockerfile_dir" != "$script_dir" ]] && build_cmd+=(--dockerfile-dir "$dockerfile_dir")
-
-echo
-echo "Build command:"
-echo "  ${build_cmd[*]}"
-
-if [[ "$yes" != true ]]; then
-    printf 'Build now? [Y/n]: '
-    read -r answer || answer=""
-    case "$answer" in
-        [Nn]*) echo "Aborted."; exit 0 ;;
-    esac
-fi
-
-if [[ "$dry_run" == true ]]; then
-    echo "    (dry run: not building)"
-else
-    "${build_cmd[@]}"
 fi
 
 # 5. Copy agent host state into the save dir, preserving layout, never overwriting.
@@ -240,7 +143,7 @@ copy_state_path() {
     fi
 }
 
-for a in $chosen_agents; do
+for a in ${chosen_agents//,/ }; do
     host_paths=""
     dirs=$(ci_agent_config "$agents_dir" "$a" AGENT_STATE_DIRS)
     files=$(ci_agent_config "$agents_dir" "$a" AGENT_STATE_FILES)
@@ -275,7 +178,7 @@ done
 # 6. Print the code-it command to start.
 echo
 echo "Start an agent with:"
-for a in $chosen_agents; do
+for a in ${chosen_agents//,/ }; do
     start_cmd=("$script_dir/code-it.sh" --agent "$a" --work-dir "$work_dir")
     [[ "$save_dir" != "$HOME/.config/code-it" ]] && start_cmd+=(--save-dir "$save_dir")
     echo "  ${start_cmd[*]}"

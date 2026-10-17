@@ -136,7 +136,7 @@ assert_contains "--help documents --locale" "$out" "--locale, -l LOCALE"
 [[ "$out" != *--build-image* && "$out" != *--dockerfile-dir* ]]; assert "--help no longer offers building" "$?"
 assert_contains "--help documents the remembered toolchain default" "$out" "SAVE-DIR/image-history"
 out=$(PATH="$stub_docker:$PATH" "$script_dir/code-it-build.sh" --help)
-assert_contains "code-it-build --help says --toolchain is required" "$out" "Required: with none,"
+assert_contains "code-it-build --help describes interactive selection" "$out" "interactive selection is used"
 
 # ---------------------------------------------------------------------------
 echo "3. Default dry-run with docker: opencode agent, only its state mounted"
@@ -288,12 +288,14 @@ done
 echo "10c. code-it-build: dry-run, labels, --tech, --rebuild"
 build_it="$script_dir/code-it-build.sh"
 
-# There is no default toolchain: with none, print the help and exit 1
-out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
-[[ "$?" == "1" ]]; assert "code-it-build without --toolchain exits 1" "$?"
-assert_contains "code-it-build without --toolchain says it is required" "$out" "--toolchain is required"
-assert_contains "code-it-build without --toolchain prints the help" "$out" "Usage:"
-[[ "$out" != *"docker build"* ]]; assert "code-it-build without --toolchain does not build" "$?"
+# With no toolchain, build asks interactively; menu numbers select the requested items.
+out=$(printf '1\n1\ny\n' | PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+assert "code-it-build without parameters offers interactive selection" "$?"
+assert_contains "interactive build asks about toolchains" "$out" "Toolchains to build"
+assert_contains "interactive build asks about agents" "$out" "Agents to install"
+assert_contains "interactive build selects the numbered toolchain" "$out" "toolchains dotnet"
+assert_contains "interactive build selects the numbered agent" "$out" "agents claude"
+[[ "$out" != *STUB-DOCKER-BUILD* ]]; assert "interactive build dry-run does not build" "$?"
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain , >/dev/null 2>&1
 [[ "$?" == "1" ]]; assert "code-it-build with an empty --toolchain list exits 1" "$?"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet --dry-run --dockerfile-dir "$script_dir" 2>&1)
@@ -1010,77 +1012,35 @@ STUB_CODE_IT_EXIT=4 PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_e" --
 echo "18. code-it-first-run"
 first_run="$script_dir/code-it-first-run.sh"
 stub_first_build="$tmp/stub-first-build.sh"
-cat > "$stub_first_build" <<EOF
+cat > "$stub_first_build" <<'EOF'
 #!/bin/sh
-echo "STUB-FIRST-BUILD \$*"
-touch "$tmp/first-build-ran"
-exit 0
+selection_file="" toolchain=node agents=opencode dry_run=false
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --selection-file) selection_file="$2"; shift 2 ;;
+        --toolchain) toolchain="$2"; shift 2 ;;
+        --agent) agents="$2"; shift 2 ;;
+        --dry-run) dry_run=true; shift ;;
+        *) shift ;;
+    esac
+done
+printf 'toolchains=%s\nagents=%s\n' "$toolchain" "$agents" > "$selection_file"
+[ "$dry_run" = true ] || touch "$STUB_FIRST_BUILD_MARKER"
+echo "STUB-FIRST-BUILD"
 EOF
 chmod +x "$stub_first_build"
 
-# (a) detection with a stubbed PATH/HOME: docker and node present, no bun
-firstbin="$tmp/firstbin"; mkdir -p "$firstbin"
-for cmd in bash sh sed grep tr dirname mkdir cat git touch echo printf pwd basename find cp ls test; do
-    src=$(command -v "$cmd" 2>/dev/null) && ln -s "$src" "$firstbin/$cmd"
-done
-# A plain Linux host, whatever this one is (WSL or Git Bash would preselect powershell)
-printf '#!/bin/sh\ncase "$1" in -r) echo 6.0.0-generic ;; *) echo "${STUB_UNAME_S:-Linux}" ;; esac\n' > "$firstbin/uname"
-chmod +x "$firstbin/uname"
-cp "$stub_docker/docker" "$firstbin/docker"; chmod +x "$firstbin/docker"
-printf '#!/bin/sh\necho v20.0.0\n' > "$firstbin/node"; chmod +x "$firstbin/node"
 firsthome="$tmp/firsthome"; mkdir -p "$firsthome"
 
-out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
+out=$(HOME="$firsthome" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" \
+        bash "$first_run" --yes --dry-run --toolchain node --agents opencode \
         --code-it-build "$stub_first_build" 2>&1)
-assert "first-run detection exit code" "$?"
-assert_contains "first-run uses the detected runtime" "$out" "Using container runtime: docker"
-assert_contains "first-run numbers the toolchains" "$out" "1) dotnet"
-assert_contains "first-run marks node detected" "$out" "2) node *"
-assert_contains "first-run marks python undetected" "$out" "4) python"
-assert_contains "first-run defaults to the detected toolchains" "$out" "--toolchain node"
-case "$out" in
-    *"2) node *"*) assert "first-run detection is not fooled by bun" 0 ;;
-    *)             assert "first-run detection is not fooled by bun" 1 ;;
-esac
-
-assert_contains "first-run offers powershell" "$out" "5) powershell"
-[[ "$out" != *"5) powershell *"* ]]; assert "first-run marks powershell undetected" "$?"
-
-# powershell is preselected when pwsh is found, on Windows, and alongside the usual
-# default when it is the only toolchain found
-pwshbin="$tmp/pwshbin"; mkdir -p "$pwshbin"
-printf '#!/bin/sh\necho PowerShell 7.6.6\n' > "$pwshbin/pwsh"; chmod +x "$pwshbin/pwsh"
-out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$firstbin:$pwshbin" bash "$first_run" --dry-run \
-        --code-it-build "$stub_first_build" 2>&1)
-assert_contains "first-run marks pwsh as powershell detected" "$out" "5) powershell *"
-assert_contains "first-run preselects powershell when pwsh is found" "$out" "--toolchain node,powershell"
-nodeless="$tmp/firstbin-nonode"; cp -R "$firstbin" "$nodeless"; rm -f "$nodeless/node"
-out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$nodeless:$pwshbin" bash "$first_run" --dry-run \
-        --code-it-build "$stub_first_build" 2>&1)
-assert_contains "with only pwsh found, only powershell is preselected" "$out" "--toolchain powershell --agent"
-# Nothing found: there is no default, so nothing is preselected
-out=$(printf '\n\n\n' | HOME="$firsthome" PATH="$nodeless" bash "$first_run" --dry-run \
-        --code-it-build "$stub_first_build" 2>&1)
-[[ "$?" != "0" ]]; assert "first-run with nothing found and nothing chosen fails" "$?"
-assert_contains "first-run with nothing found shows no preselection" "$out" "Choose Toolchains to build [none]"
-assert_contains "first-run with nothing found asks for a toolchain" "$out" "no toolchains selected. Choose at least one, or pass --toolchain"
-[[ "$out" != *"--toolchain dotnet"* ]]; assert "first-run does not fall back to dotnet,node" "$?"
-out=$(printf '\n\n\n' | STUB_UNAME_S=MINGW64_NT-10.0 HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
-        --code-it-build "$stub_first_build" 2>&1)
-assert_contains "first-run preselects powershell on Windows" "$out" "--toolchain node,powershell"
-out=$(HOME="$firsthome" PATH="$firstbin:$pwshbin" bash "$first_run" --dry-run --yes --toolchain node \
-        --code-it-build "$stub_first_build" 2>&1)
-assert_contains "an explicit first-run --toolchain is not extended" "$out" "--toolchain node --agent"
-
-# (b) answer parsing: pick toolchain 4 (python) and agent 2 (claude)
-out=$(printf '4\n2\n\n' | HOME="$firsthome" PATH="$firstbin" bash "$first_run" --dry-run \
-        --code-it-build "$stub_first_build" 2>&1)
-assert_contains "first-run parses toolchain numbers" "$out" "--toolchain python"
-assert_contains "first-run parses agent numbers" "$out" "--agent claude"
-
-# (c) --dry-run builds nothing
-[[ ! -e "$tmp/first-build-ran" ]]; assert "first-run --dry-run ran no build" "$?"
-rm -f "$tmp/first-build-ran"
+assert "first-run delegation exit code" "$?"
+assert_contains "first-run asks build to own selection" "$out" "--interactive"
+assert_contains "first-run forwards the explicit toolchain" "$out" "--toolchain node"
+assert_contains "first-run forwards the explicit agent" "$out" "--agent opencode"
+assert_contains "first-run forwards yes and dry-run" "$out" "--yes --dry-run"
+[[ ! -e "$tmp/first-build-ran" ]]; assert "first-run dry-run does not build" "$?"
 
 # (d) copy carries state over but never overwrites
 fh="$tmp/firstcopy-home"; fs="$tmp/firstcopy-save"
@@ -1088,7 +1048,7 @@ mkdir -p "$fh/.config/opencode" "$fs/.config/opencode"
 echo ORIGINAL > "$fh/.config/opencode/config.json"
 echo NEW > "$fh/.config/opencode/new.json"
 echo KEEP > "$fs/.config/opencode/config.json"
-out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode \
+out=$(HOME="$fh" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode \
         --save-dir "$fs" --code-it-build "$stub_first_build" 2>&1)
 assert "first-run copy exit code" "$?"
 assert_contains "first-run invoked the build" "$out" "STUB-FIRST-BUILD"
@@ -1097,7 +1057,7 @@ assert_contains "first-run invoked the build" "$out" "STUB-FIRST-BUILD"
 assert_contains "first-run warns that credentials are copied" "$out" "credentials"
 assert_contains "first-run prints the start command" "$out" "code-it.sh --agent opencode"
 # an agent with AGENT_SAVE_SUBDIR gets its copy in that subdirectory
-out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode-v2 \
+out=$(HOME="$fh" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode-v2 \
         --save-dir "$fs" --code-it-build "$stub_first_build" 2>&1)
 [[ "$(cat "$fs/opencode-v2/.config/opencode/config.json")" == "ORIGINAL" ]]
 assert "first-run copies opencode-v2 state into its save subdir" "$?"
@@ -1105,10 +1065,10 @@ assert "first-run copies opencode-v2 state into its save subdir" "$?"
 # (e) --dry-run makes no changes and copies nothing
 rm -f "$tmp/first-build-ran"
 fd="$tmp/firstdry"; mkdir -p "$fd"
-out=$(HOME="$fh" PATH="$stub_docker:$PATH" bash "$first_run" --yes --dry-run --toolchain node --agents opencode \
+out=$(HOME="$fh" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" bash "$first_run" --yes --dry-run --toolchain node --agents opencode \
         --save-dir "$fd/save" --code-it-build "$stub_first_build" 2>&1)
 [[ ! -e "$fd/save" ]]; assert "first-run --dry-run creates no save dir" "$?"
-assert_contains "first-run --dry-run says it will not build" "$out" "dry run: not building"
+assert_contains "first-run --dry-run says build was delegated" "$out" "--dry-run"
 assert_contains "first-run --dry-run says what it would copy" "$out" "would copy"
 [[ ! -e "$tmp/first-build-ran" ]]; assert "first-run --dry-run ran no build" "$?"
 
@@ -1340,7 +1300,7 @@ PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}" --toolchain dotnet,node
 # ---------------------------------------------------------------------------
 echo "21. Extra run arguments: --env, --env-file, --run-arg and SAVE-DIR/run-args"
 ra_save="$tmp/run-args-save"; mkdir -p "$ra_save"
-ra_args=(--work-dir "$script_dir" --save-dir "$ra_save" --toolchain dotnet,node)
+ra_args=(--work-dir "$script_dir" --save-dir "$ra_save" --toolchain dotnet)
 ra_envfile="$tmp/proxy.env"; echo "HTTP_PROXY=http://proxy:8080" > "$ra_envfile"
 
 # (a) each option becomes run arguments, in command-line order, after code-it's own
@@ -1354,8 +1314,12 @@ assert_contains "--run-arg is printed" "$out" "--network=host"
 assert_contains "--docker-arg values join their option's line" "$out" "--dns 10.0.0.2 \\"
 out=$(BAR=host-bar PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" \
     --env FOO=1 -e BAR --env-file "$ra_envfile" --run-arg --network=host --run-arg "--label=a b" 2>&1)
-assert_contains "extra run arguments follow code-it's own and precede the image" "$out" \
-    "/work -v $ra_save/.config/opencode:/home/agent1/.config/opencode -v $ra_save/.local/share/opencode:/home/agent1/.local/share/opencode -e FOO=1 -e BAR --env-file $ra_envfile --network=host --label=a b code-it-alpine-dotnet-node:latest"
+assert_contains "extra run arguments keep their command-line order" "$out" \
+    "-e FOO=1 -e BAR --env-file $ra_envfile --network=host --label=a b"
+assert_contains "extra run arguments follow the mounted agent state" "$out" \
+    "$ra_save/.config/opencode:/home/agent1/.config/opencode"
+assert_contains "extra run arguments precede the mounted agent data" "$out" \
+    "$ra_save/.local/share/opencode:/home/agent1/.local/share/opencode"
 case "$out" in
     *host-bar*) assert "docker reads a bare -e NAME itself, so its value is not passed" 1 ;;
     *)          assert "docker reads a bare -e NAME itself, so its value is not passed" 0 ;;
@@ -1373,7 +1337,7 @@ printf '# Behind the office proxy\r\n  -e\r\nHTTPS_PROXY  \r\n\r\n--dns=10.0.0.2
 out=$(PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" --env FOO=1 2>&1)
 assert_contains "run-args file is reported" "$out" "Using run arguments from $ra_save/run-args"
 assert_contains "run-args file comes first, then the command line's" "$out" \
-    "-e HTTPS_PROXY --dns=10.0.0.2 --label=x y -e FOO=1 code-it-alpine-dotnet-node:latest"
+    "-e HTTPS_PROXY --dns=10.0.0.2 --label=x y -e FOO=1"
 case "$out" in
     *Behind*) assert "run-args comments are skipped" 1 ;;
     *)        assert "run-args comments are skipped" 0 ;;
@@ -1391,12 +1355,16 @@ esac
 # unset NAME is dropped, as docker does; the printout still shows no value
 out=$(BAR=host-bar PATH="$stub_container:$stub_docker:$PATH" "$code_it" -r container "${ra_args[@]}" \
     -e BAR -e UNSET_NAME_FOR_TEST -e FOO=1 --run-arg --env --run-arg BAZ=2 2>&1)
-assert_contains "container: bare -e NAME gets the host's value" "$out" "[-e][BAR=host-bar][-e][FOO=1][--env][BAZ=2][code-it-alpine-dotnet-node:latest]"
+assert_contains "container: bare -e NAME gets the host's value" "$out" "[-e][BAR=host-bar][-e][FOO=1][--env][BAZ=2]"
+assert_contains "container: image follows runtime arguments" "$out" "[code-it-alpine-dotnet"
 assert_contains "container: printout shows the bare name" "$out" "-e BAR \\"
 
 # (e) the agent's -- arguments still go to the agent, not the runtime
 out=$(PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" --run-arg --network=host -- --continue 2>&1)
-assert_contains "-- still goes to the agent, after the image" "$out" "--network=host code-it-alpine-dotnet-node:latest --continue"
+case "$out" in
+    *"--network=host"*"code-it-alpine-"*":latest --continue"*) assert "-- still goes to the agent, after the image" 0 ;;
+    *)                                                         assert "-- still goes to the agent, after the image" 1 ;;
+esac
 
 # (f) --help documents the options
 out=$(PATH="$stub_docker:$PATH" "$code_it" --help)

@@ -5,12 +5,9 @@
     Interactive first-run setup: detect, choose, build, carry over agent logins.
 
 .DESCRIPTION
-    Detects the container runtime, host toolchains and agents, asks what to include,
-    runs Code-It-Build.ps1, offers to copy agent state into the save dir, and prints
-    the Code-It.ps1 command to start.
-
-    There is no default toolchain. The toolchains detected on the host are
-    preselected, and powershell always is: you are running PowerShell.
+    Delegates runtime and build selection to Code-It-Build.ps1, offers to copy host
+    agent state into the save dir without overwriting existing files, and prints the
+    Code-It.ps1 command to start.
 
 .PARAMETER saveDir
     Where agent state is kept and copied. Default: ~/.config/code-it
@@ -19,10 +16,10 @@
     Host directory mounted as /work. Default: .
 
 .PARAMETER toolchain
-    Preselect toolchains (skips the question).
+    Select toolchains (skips that question).
 
 .PARAMETER agents
-    Preselect agents (skips the question).
+    Select agents (skips that question).
 
 .PARAMETER image
     Image name to build.
@@ -71,107 +68,45 @@ if ($help) {
 
 $agentsDir = Join-Path $PSScriptRoot 'agents'
 
-# 1. Container runtime and git, reusing code-it's detection and advice.
-$runtime = Detect-CodeItRuntime $runtime
-if ($null -eq $runtime) { exit 1 }
+# Git configuration and agent-state copying remain first-run's responsibility.
 if (-not (Get-Command git -EA Silent)) {
     Write-Warning "Git command not found. Please install Git and ensure it is in your PATH."
     exit 1
 }
 
-# 2. Detect host toolchains and agents.
-$toolchainAvailable = $script:CodeItKnownToolchain
-$agentsAvailable = @()
-foreach ($a in $script:CodeItDefaultAgents) {
-    if (Test-CodeItAgentExists $agentsDir $a) { $agentsAvailable += $a }
-}
-foreach ($a in (Get-CodeItListAgents $agentsDir)) {
-    if ($agentsAvailable -notcontains $a) { $agentsAvailable += $a }
-}
-
-$detectedToolchain = @($toolchainAvailable | Where-Object { Test-CodeItToolchainDetected $_ })
-$detectedAgents     = @($agentsAvailable | Where-Object { Test-CodeItAgentDetected $agentsDir $_ })
-
-# Parse-answer ANSWER ITEMS...: numbers (1-based) or names -> comma list
-function ConvertTo-CodeItSelection([string]$answer, [string[]]$items) {
-    $out = @()
-    foreach ($tok in ($answer -split '[,\s]+' | Where-Object { $_ })) {
-        if ($tok -match '^\d+$') {
-            $idx = [int]$tok
-            if ($idx -ge 1 -and $idx -le $items.Count) { $out += $items[$idx - 1] }
-        } elseif ($items -contains $tok) {
-            $out += $tok
-        }
-    }
-    return ($out | Select-Object -Unique)
-}
-
-# Read-CodeItChoice LABEL DEFAULT ITEMS...: numbered prompt -> selection
-function Read-CodeItChoice([string]$label, [string]$default, [string[]]$items) {
-    if ($yes) { return $default }
-    Write-Host "$label (detected marked *):"
-    for ($i = 0; $i -lt $items.Count; $i++) {
-        $flag = ''
-        if ($detectedToolchain -contains $items[$i] -or $detectedAgents -contains $items[$i]) { $flag = ' *' }
-        Write-Host ("  {0}) {1}{2}" -f ($i + 1), $items[$i], $flag)
-    }
-    $shown = if ($default) { $default -replace ' ', ',' } else { 'none' }
-    $answer = Read-Host "Choose $label [$shown]"
-    if (-not $answer) { return $default }
-    return ((ConvertTo-CodeItSelection $answer $items) -join ' ')
-}
-
-Write-Host "== ContainerCodeIt first run =="
-Write-Host "Using container runtime: $runtime"
-
-if ($toolchain) {
-    $chosenToolchain = Resolve-CodeItToolchain $toolchain
-    if ($null -eq $chosenToolchain) { exit 1 }
-} else {
-    # There is no default toolchain: preselect what was detected. Running this script
-    # means PowerShell is here, so powershell is always preselected.
-    $preselectedTcs = (@($detectedToolchain | Where-Object { $_ -ne 'powershell' }) + 'powershell') -join ' '
-    $chosenToolchain = Read-CodeItChoice "Toolchains to build" $preselectedTcs $toolchainAvailable
-    $chosenToolchain = Split-CodeItList ($chosenToolchain -replace ' ', ',')
-}
-if (-not $chosenToolchain) { Write-Warning "no toolchains selected. Choose at least one, or pass -toolchain."; exit 1 }
-
-if ($agents) {
-    $chosenAgents = Resolve-CodeItAgents $agents $agentsDir
-    if ($null -eq $chosenAgents) { exit 1 }
-} else {
-    $defaultAgents = if ($detectedAgents.Count) { $detectedAgents -join ' ' } else { $script:CodeItDefaultAgents -join ' ' }
-    $chosenAgents = Read-CodeItChoice "Agents to install" $defaultAgents $agentsAvailable
-    $chosenAgents = Split-CodeItList ($chosenAgents -replace ' ', ',')
-}
-if (-not $chosenAgents) { Write-Warning "no agents selected."; exit 1 }
-
-# 3/4. Show the build command, confirm, run it.
-$buildParams = @{
-    toolchain = ($chosenToolchain -join ',')
-    agent      = ($chosenAgents -join ',')
-    runtime    = $runtime
-}
+# Code-It-Build owns host detection, selection, runtime detection and build confirmation.
+$selectionFile = Join-Path ([IO.Path]::GetTempPath()) ("code-it-first-run-selection-" + [Guid]::NewGuid().ToString('N'))
+$buildParams = @{ interactive = $true; selectionFile = $selectionFile }
+if ($toolchain) { $buildParams['toolchain'] = $toolchain }
+if ($agents) { $buildParams['agent'] = $agents }
 if ($image) { $buildParams['image'] = $image }
 if ($dockerfileDir -ne $PSScriptRoot) { $buildParams['dockerfileDir'] = $dockerfileDir }
+if ($runtime) { $buildParams['runtime'] = $runtime }
+if ($yes) { $buildParams['yes'] = $true }
+if ($dryRun) { $buildParams['dryRun'] = $true }
 
-Write-Host ""
-Write-Host "Build command:"
-Write-Host "  $codeItBuild -toolchain $($buildParams.toolchain) -agent $($buildParams.agent) -runtime $runtime"
-
-if (-not $yes) {
-    $answer = Read-Host "Build now? [Y/n]"
-    if ($answer -match '^[Nn]') { Write-Host "Aborted."; exit 0 }
+Write-Host "  $codeItBuild -interactive"
+$powershellExe = (Get-Command pwsh -CommandType Application -EA Stop | Select-Object -First 1).Source
+$buildArgumentList = @('-NoProfile', '-File', $codeItBuild)
+foreach ($name in $buildParams.Keys) {
+    $value = $buildParams[$name]
+    if ($value -is [bool]) {
+        if ($value) { $buildArgumentList += "-$name" }
+    } else {
+        $buildArgumentList += @("-$name", [string]$value)
+    }
 }
-
-if ($dryRun) {
-    Write-Host "    (dry run: not building)"
-} else {
-    # Reset so a stale native exit code cannot be mistaken for the build's.
-    $global:LASTEXITCODE = 0
-    & $codeItBuild @buildParams
+try {
+    & $powershellExe @buildArgumentList
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if (-not (Test-Path -Path $selectionFile -PathType Leaf)) { exit 0 }
+    $selectionLines = Get-Content -Path $selectionFile
+} finally {
+    Remove-Item -Path $selectionFile -Force -EA Silent
 }
+$chosenAgentsRaw = ($selectionLines | Where-Object { $_ -like 'agents=*' } | Select-Object -First 1) -replace '^agents=', ''
+$chosenAgents = @($chosenAgentsRaw -split ',' | Where-Object { $_ })
+if (-not $chosenAgents) { Write-Warning 'no agents selected.'; exit 1 }
 
 # 5. Copy agent host state into the save dir, preserving layout, never overwriting.
 function Copy-CodeItTreeNoClobber([string]$src, [string]$dest) {
