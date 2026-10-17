@@ -172,7 +172,7 @@ function Read-CodeItChoice([string]$label, [string[]]$default, [string[]]$detect
 
 if ($interactive) {
     $toolchainAvailable = Get-CodeItListToolchains $toolchainsDir
-    $agentsAvailable = @(Get-CodeItListAgents $agentsDir)
+    $agentsAvailable = Get-CodeItListAgents $agentsDir
     $detectedToolchain = @($toolchainAvailable | Where-Object { Test-CodeItToolchainDetected $toolchainsDir $_ })
     $detectedAgents = @($agentsAvailable | Where-Object { Test-CodeItAgentDetected $agentsDir $_ })
 

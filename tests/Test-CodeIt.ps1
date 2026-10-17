@@ -374,6 +374,14 @@ $r = Invoke-Scenario $codeItBuild @('-yes', '-dryRun', '-dockerfileDir', $script
 Assert "Code-It-Build without -toolchain enters setup successfully" ($r.code -eq 0)
 Assert-Contains "interactive build resolves a toolchain" $r.out 'Building with toolchains'
 Assert "interactive build does not invoke docker" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
+# Menu numbers select the requested items (toolchains and agents listed alphabetically).
+$env:PATH = $stubPath
+try {
+    $out = "2`n1`ny" | & $pwshExe -NoProfile -Command "& '$codeItBuild' -dryRun -dockerfileDir '$scriptDir'" 2>&1 | Out-String
+} finally { $env:PATH = $origPath }
+Assert-Contains "interactive build asks about agents" $out 'Agents to install'
+Assert-Contains "interactive build selects the numbered toolchain" $out 'toolchains dotnet'
+Assert-Contains "interactive build selects the numbered agent" $out 'agents claude'
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', ',') $stubPath
 Assert "Code-It-Build with an empty -toolchain list exits 1" ($r.code -eq 1)
 Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet', '-runtime', 'docker')

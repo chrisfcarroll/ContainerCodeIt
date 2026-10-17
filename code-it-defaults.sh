@@ -83,6 +83,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 agents_dir="$script_dir/agents"
+toolchains_dir="$script_dir/toolchains"
 defaults_file="$save_dir/defaults"
 catalog_bundled="$script_dir/lib/models.txt"
 catalog_cache="$save_dir/model-catalog.txt"
@@ -536,9 +537,10 @@ interactive() {
     # 3. Default toolchain, as code-it-build's selection: multi-choice, detected
     # preselected (powershell too on Windows)
     echo
-    local toolchain_available=($CI_KNOWN_TOOLCHAIN) saved_toolchain t
+    local toolchain_available=() saved_toolchain t
+    while IFS= read -r t; do toolchain_available+=("$t"); done < <(ci_list_definitions "$toolchains_dir")
     for t in "${toolchain_available[@]}"; do
-        ci_toolchain_detected "$t" && detected_toolchain=$(ci_comma_list_add "$detected_toolchain" "$t")
+        ci_toolchain_detected "$toolchains_dir" "$t" && detected_toolchain=$(ci_comma_list_add "$detected_toolchain" "$t")
     done
     saved_toolchain=$(current default-toolchain)
     if [[ -n "$saved_toolchain" ]]; then
@@ -553,7 +555,7 @@ interactive() {
     else
         local multi
         multi=$(parse_multi "$answer" "${toolchain_available[@]}")
-        multi=$(ci_resolve_toolchain "$(ci_join , "$multi")") || multi=""
+        multi=$(ci_resolve_toolchain "$(ci_join , "$multi")" "$toolchains_dir") || multi=""
         if [[ -n "$multi" ]]; then
             defaults_set default-toolchain "$(ci_join , "$multi")"
             echo "    Default toolchain: $(ci_join , "$multi")"
@@ -603,7 +605,7 @@ for m in ${model_args[@]+"${model_args[@]}"}; do
     set_model "${m%%=*}" "${m#*=}" || rc=1
 done
 if [[ "$toolchain_set" == true ]]; then
-    resolved=$(ci_resolve_toolchain "$toolchain_arg") || resolved=""
+    resolved=$(ci_resolve_toolchain "$toolchain_arg" "$toolchains_dir") || resolved=""
     if [[ -z "$resolved" ]]; then
         echo "Warning: --toolchain needs at least one known toolchain." >&2
         rc=1

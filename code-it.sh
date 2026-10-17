@@ -401,7 +401,7 @@ if [[ "$list_agents" == true ]]; then
     exit 0
 fi
 
-# Defaults saved by code-it-defaults (Spec 13) fill in whatever the command line
+# Defaults saved by code-it-defaults (Spec 15) fill in whatever the command line
 # does not say: the agent, and the toolchain, which then beats the remembered-image
 # heuristic below. Explicit options always win over the saved defaults.
 saved_agent=""

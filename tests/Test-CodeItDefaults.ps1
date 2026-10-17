@@ -190,8 +190,8 @@ Assert "-dryRun wrote no files" (@(Get-ChildItem $saveDry -Recurse -File).Count 
 "8. Interactive: picks by number, blanks keep, none clears"
 $saveInt = Join-Path $tmp 'interactive'; $null = New-Item -ItemType Directory -Force -Path $saveInt
 # Agents are listed alphabetically: claude, opencode, opencode-v2. The toolchains
-# are listed in CodeItCommon's known order.
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('1', '', '', '', '2,4')
+# are listed as Code-It-Build lists them: bun, dotnet, node, powershell, python.
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('1', '', '', '', '3,5')
 Assert "interactive exit code 0" ($r.code -eq 0)
 Assert "first agent answer is claude" ((Get-Content "$saveInt/defaults") -contains 'default-agent=claude')
 Assert "toolchain answered by numbers" ((Get-Content "$saveInt/defaults") -contains 'default-toolchain=node,python')

@@ -1,4 +1,4 @@
-# 13 — `code-it-defaults`: saved default agent, model and toolchain
+# 15 — `code-it-defaults`: saved default agent, model and toolchain
 
 See 00-conventions.md. Amends the heuristic of Specs 09/10.
 

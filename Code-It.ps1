@@ -279,7 +279,7 @@ if ($listAgents) {
 }
 
 # Resolve which agent to run: -c / -o are shortcuts, else -agent NAME, else the agent
-# saved by Code-It-Defaults.ps1 (Spec 13), else opencode. Explicit options beat the
+# saved by Code-It-Defaults.ps1 (Spec 15), else opencode. Explicit options beat the
 # saved default.
 if ($claude -and $opencode) {
     Write-Warning "Specify only one of -claude or -opencode."

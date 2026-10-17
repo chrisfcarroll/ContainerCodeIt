@@ -95,6 +95,7 @@ if ($help) {
 . "$PSScriptRoot/lib/CodeItCommon.ps1"
 
 $agentsDir   = Join-Path $PSScriptRoot 'agents'
+$toolchainsDir = Join-Path $PSScriptRoot 'toolchains'
 $defaultsFile = Join-Path $saveDir 'defaults'
 $catalogBundled = Join-Path $PSScriptRoot (Join-Path 'lib' 'models.txt')
 $catalogCache   = Join-Path $saveDir 'model-catalog.txt'
@@ -322,7 +323,7 @@ function Read-Choice([string]$label, [string]$default, [string]$detected, [strin
 }
 
 function Invoke-Interactive {
-    $agentsAvailable = @(Get-CodeItListAgents $agentsDir)
+    $agentsAvailable = Get-CodeItListAgents $agentsDir
     $detectedAgents = @($agentsAvailable | Where-Object { Test-CodeItAgentDetected $agentsDir $_ })
 
     Write-Host "Setting code-it defaults, saved in ${defaultsFile}. A blank answer keeps the"
@@ -401,7 +402,8 @@ function Invoke-Interactive {
 
     # 3. Default toolchain, as Code-It-Build's selection. Running this script means
     # PowerShell is present, so preselect it too.
-    $detectedToolchain = @($script:CodeItKnownToolchain | Where-Object { Test-CodeItToolchainDetected $_ })
+    $toolchainAvailable = Get-CodeItListToolchains $toolchainsDir
+    $detectedToolchain = @($toolchainAvailable | Where-Object { Test-CodeItToolchainDetected $toolchainsDir $_ })
     $savedToolchain = Get-Default 'default-toolchain'
     if ($savedToolchain) {
         $preselect = $savedToolchain
@@ -410,7 +412,7 @@ function Invoke-Interactive {
         $preselect = (@($detectedToolchain | Where-Object { $_ -ne 'powershell' }) + 'powershell') -join ','
         $preselectItems = $detectedToolchain + 'powershell'
     }
-    $answer = Read-Choice 'default toolchain' $preselect ($detectedToolchain -join ' ') $savedToolchain $script:CodeItKnownToolchain
+    $answer = Read-Choice 'default toolchain' $preselect ($detectedToolchain -join ' ') $savedToolchain $toolchainAvailable
     if (-not $answer -or $answer -eq 'none') {
         Set-DefaultLine 'default-toolchain' ""
         Write-Host "    Default toolchain cleared"
@@ -418,11 +420,11 @@ function Invoke-Interactive {
         $chosen = @($answer -split '[,\s]+' | Where-Object { $_ } | ForEach-Object {
             if ($_ -match '^\d+$') {
                 $idx = [int]$_
-                if ($idx -ge 1 -and $idx -le $script:CodeItKnownToolchain.Count) { $script:CodeItKnownToolchain[$idx - 1] }
-            } elseif ($script:CodeItKnownToolchain -contains $_) { $_ }
+                if ($idx -ge 1 -and $idx -le $toolchainAvailable.Count) { $toolchainAvailable[$idx - 1] }
+            } elseif ($toolchainAvailable -contains $_) { $_ }
         } | Select-Object -Unique)
         $resolved = $null
-        if ($chosen.Count) { $resolved = Resolve-CodeItToolchain ($chosen -join ',') }
+        if ($chosen.Count) { $resolved = Resolve-CodeItToolchain ($chosen -join ',') $toolchainsDir }
         if ($null -ne $resolved -and $resolved.Count) {
             $joined = $resolved -join ','
             Set-DefaultLine 'default-toolchain' $joined
@@ -470,7 +472,7 @@ foreach ($m in $model) {
     if (-not (Set-Model ($m.Substring(0, $sep)) ($m.Substring($sep + 1)))) { $rc = 1 }
 }
 if ($toolchain) {
-    $resolved = Resolve-CodeItToolchain $toolchain
+    $resolved = Resolve-CodeItToolchain $toolchain $toolchainsDir
     if ($null -eq $resolved -or $resolved.Count -eq 0) {
         Write-Warning "-toolchain needs at least one known toolchain."
         $rc = 1
