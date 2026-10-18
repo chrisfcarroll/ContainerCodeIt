@@ -202,7 +202,7 @@ Assert "second interactive run exit code 0" ($r.code -eq 0)
 Assert "agent answered as a name" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode-v2')
 Assert "a free-text model is accepted" ((Get-Content "$saveInt/defaults") -contains 'model.opencode-v2=my-favourite-model')
 Assert "kept model is not overwritten" (-not (Get-Content "$saveInt/defaults" -Raw).Contains("model.claude="))
-Assert-Contains "the interactive picker lists the bundled catalog" $r.out 'anthropic/claude-opus-4-5'
+Assert-Contains "the interactive picker lists the bundled catalog" $r.out 'anthropic/claude-opus-5-5'
 Assert-Contains "claude's list offers bare aliases" $r.out "  1) opus"
 $r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('5', 'sonnet', '', 'none', 'none')
 Assert "third interactive run exit code 0" ($r.code -eq 0)
