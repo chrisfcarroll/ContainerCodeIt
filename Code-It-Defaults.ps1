@@ -23,9 +23,11 @@
 .PARAMETER model
     Set agents' default models in their own configs, one AGENT=MODEL per array
     element, e.g.
-        -model 'opencode=anthropic/claude-sonnet-4-5' -model 'claude=opus'
-    An empty MODEL, as in -model 'opencode=', clears it. Any model string is
-    accepted: the catalog of known models is best effort and always incomplete.
+        -model 'opencode=opencode-go/glm-5.3' -model 'claude=opus'
+    The picker prefers opencode-go, the provider OpenCode itself runs on,
+    wherever it serves the model. An empty MODEL, as in -model 'opencode=',
+    clears it. Any model string is accepted: the catalog of known models is best
+    effort and always incomplete.
 
 .PARAMETER toolchain
     Set the default toolchain list, as Code-It -toolchain would take it. Overrides
@@ -102,6 +104,9 @@ $catalogCache   = Join-Path $saveDir 'model-catalog.txt'
 $modelsUrl      = 'https://models.dev/api.json'
 # Claude Code's model aliases, offered by the picker alongside full model names
 $claudeAliases  = @('opus', 'sonnet', 'haiku', 'opusplan')
+# The provider OpenCode itself runs on: where it serves a model, the picker
+# offers it as opencode-go/MODEL instead of the provider the catalog names
+$opencodeGoProvider = 'opencode-go'
 $defaultsHeader = '# code-it defaults, written by Code-It-Defaults, read by Code-It.'
 
 function Get-Default([string]$key) {
@@ -374,10 +379,23 @@ function Invoke-Interactive {
         $models = @()
         $claudeStyle = $path.StartsWith('.claude/')
         if ($claudeStyle) { $models += $claudeAliases }
-        foreach ($entry in (Get-ModelCatalog)) {
+        $catalog = @(Get-ModelCatalog)
+        # opencode-go is the provider OpenCode itself runs on: where it serves a
+        # model, offer it as opencode-go/MODEL rather than the catalog's provider
+        $goModels = @()
+        if (-not $claudeStyle) {
+            $goPrefix = "$script:opencodeGoProvider/"
+            $goModels = @($catalog | Where-Object { $_.StartsWith($goPrefix) } |
+                ForEach-Object { $_.Substring($goPrefix.Length) })
+        }
+        foreach ($entry in $catalog) {
             if ($claudeStyle) {
                 if ($entry -like 'anthropic/*') { $models += $entry.Substring('anthropic/'.Length) }
             } else {
+                $bare = if ($entry -like '*/*') { $entry.Substring($entry.IndexOf('/') + 1) } else { $entry }
+                if ($goModels -contains $bare) { $entry = "$script:opencodeGoProvider/$bare" }
+                # The preference maps two catalog lines to one model; offer it once
+                if ($models -contains $entry) { continue }
                 $models += $entry
             }
         }

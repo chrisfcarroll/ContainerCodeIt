@@ -11,6 +11,12 @@
 # GPT-6 line, the Claude 5.x family, GLM-5.3, DeepSeek V4 and Kimi K3, plus
 # xiaomi/mimo-v2.6-flash, then the leading low-cost model on cost-adjusted
 # coding rankings.
+#
+# opencode-go, the provider OpenCode itself runs on, serves some of these too,
+# listed at the end of this file. Where it serves a model, the picker offers it
+# as opencode-go/MODEL in place of the provider named above, for every agent
+# whose models are provider/model ids. Claude Code takes bare Anthropic model
+# names only, so its list is the Anthropic lines below, unprefixed, unchanged.
 
 anthropic/claude-fable-5-1
 anthropic/claude-haiku-5-5
@@ -27,3 +33,14 @@ xiaomi/mimo-v2.6-flash
 zai/glm-5.3
 zai/glm-5.3-flash
 zai/glm-5.3-flashx
+
+# The same models served by opencode-go, verified against its entry in
+# https://models.dev (2026-10-18). These lines are also what tells the picker
+# which models opencode-go has, so it can offer them in its own name.
+opencode-go/claude-haiku-5-5
+opencode-go/deepseek-v4-pro
+opencode-go/glm-5.3
+opencode-go/glm-5.3-flash
+opencode-go/gpt-6-luna
+opencode-go/kimi-k3
+opencode-go/mimo-v2.6-flash

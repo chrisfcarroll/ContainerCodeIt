@@ -158,6 +158,7 @@ Assert "claude model set in existing settings" ($rtSettings.model -eq 'claude-op
 $catalog = @(Get-Content (Join-Path $scriptDir 'lib/models.txt') | Where-Object { $_ -and $_ -notmatch '^\s*#' })
 Assert "lib/models.txt has models" ($catalog.Count -gt 0)
 Assert "lib/models.txt entries are provider/model" (@($catalog | Where-Object { $_ -notmatch '^[a-z0-9][a-z0-9.-]*/[a-z0-9][a-z0-9.-]*$' }).Count -eq 0)
+Assert "lib/models.txt says which models opencode-go serves" (@($catalog | Where-Object { $_ -like 'opencode-go/*' }).Count -gt 0)
 
 # -show lists them
 $r = Invoke-Scenario "& '$defaults' -show -saveDir '$save'" $stubPath
@@ -204,6 +205,15 @@ Assert "a free-text model is accepted" ((Get-Content "$saveInt/defaults") -conta
 Assert "kept model is not overwritten" (-not (Get-Content "$saveInt/defaults" -Raw).Contains("model.claude="))
 Assert-Contains "the interactive picker lists the bundled catalog" $r.out 'anthropic/claude-opus-5-5'
 Assert-Contains "claude's list offers bare aliases" $r.out "  1) opus"
+# The opencode agents' lists prefer opencode-go's models; Claude Code's keeps
+# Anthropic's bare names, which is all it takes
+Assert-Contains "the opencode picker offers opencode-go's models under opencode-go" $r.out 'opencode-go/glm-5.3'
+Assert "a model opencode-go serves is not also offered under its other provider" `
+    (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) zai/glm-5\.3$' }).Count -eq 0)
+Assert "a model opencode-go does not serve keeps its provider" `
+    (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) zai/glm-5\.3-flashx$' }).Count -gt 0)
+Assert "claude's list keeps Anthropic's models without the prefix" `
+    (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) claude-sonnet-5-5$' }).Count -gt 0)
 $r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('5', 'sonnet', '', 'none', 'none')
 Assert "third interactive run exit code 0" ($r.code -eq 0)
 Assert "out-of-range number keeps the saved agent" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode-v2')

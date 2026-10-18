@@ -164,6 +164,8 @@ catalog=$(PATH="$cleanbin:$PATH" "$defaults" -s "$save" --show; true)
 grep -qv '^#' "$script_dir/lib/models.txt"; assert "lib/models.txt has models" "$?"
 awk '/^[^#]/ && NF && $0 !~ /^[a-z0-9][a-z0-9.-]*\/[a-z0-9][a-z0-9.-]*$/ { bad=1 } END { exit bad }' "$script_dir/lib/models.txt"
 assert "lib/models.txt entries are provider/model" "$?"
+grep -q '^opencode-go/' "$script_dir/lib/models.txt"
+assert "lib/models.txt says which models opencode-go serves" "$?"
 
 # ---------------------------------------------------------------------------
 echo "7. --model AGENT= clears the model; bad specs fail"
@@ -201,6 +203,16 @@ grep -q '^default-agent=opencode-v2$' "$save_i/defaults"; assert "agent answered
 grep -q '^model.opencode-v2=my-favourite-model$' "$save_i/defaults"; assert "a free-text model is accepted" "$?"
 grep -q '^model.claude=' "$save_i/defaults"
 [[ "$?" != "0" ]]; assert "kept model is not overwritten" "$?"
+# The opencode agents' lists prefer opencode-go's models; Claude Code's keeps
+# Anthropic's bare names, which is all it takes
+printf '%s\n' "$out" | grep -qE '^  [0-9]+\) opencode-go/glm-5\.3$'
+assert "the opencode picker offers opencode-go's models under opencode-go" "$?"
+printf '%s\n' "$out" | grep -qE '^  [0-9]+\) zai/glm-5\.3$'
+[[ "$?" != "0" ]]; assert "a model opencode-go serves is not also offered under its other provider" "$?"
+printf '%s\n' "$out" | grep -qE '^  [0-9]+\) zai/glm-5\.3-flashx$'
+assert "a model opencode-go does not serve keeps its provider" "$?"
+printf '%s\n' "$out" | grep -qE '^  [0-9]+\) claude-sonnet-5-5$'
+assert "claude's list keeps Anthropic's models without the prefix" "$?"
 out=$(printf '5\nsonnet\nnone\n\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "third interactive run exit code" "$?"
 grep -q '^default-agent=opencode-v2$' "$save_i/defaults"; assert "out-of-range number keeps the saved agent" "$?"
@@ -229,7 +241,7 @@ EOF
 cat > "$stubbin/jq" <<'EOF'
 #!/bin/sh
 cat > /dev/null
-printf 'prov1/m-two\nprov1/m-one\nprov2/m-three\n'
+printf 'prov1/m-two\nprov1/m-one\nprov2/m-three\nopencode-go/m-three\n'
 EOF
 chmod +x "$stubbin/curl" "$stubbin/jq"
 out=$(PATH="$stubbin:$cleanbin:$PATH" "$defaults" -s "$save_r" --refresh-models 2>&1)
@@ -239,6 +251,12 @@ grep -q '^prov1/m-one$' "$save_r/model-catalog.txt"; assert "cache has the fetch
 grep -qv '^#' "$save_r/model-catalog.txt"; assert "cache has more than the header" "$?"
 out=$(printf '1\n99\n\n\nnode\n' | PATH="$stubbin:$cleanbin:$PATH" "$defaults" -s "$save_r" 2>&1)
 assert_contains "the interactive picker offers the fetched catalog" "$out" "prov1/m-one"
+# opencode-go's models from a refreshed catalog are offered in its own name, once
+assert_contains "the refreshed catalog's opencode-go models are offered" "$out" "opencode-go/m-three"
+printf '%s\n' "$out" | grep -qE '^  [0-9]+\) prov2/m-three$'
+[[ "$?" != "0" ]]; assert "the fetched model opencode-go serves is not offered under its other provider" "$?"
+n=$(printf '%s\n' "$out" | grep -cE '^  [0-9]+\) opencode-go/m-three$')
+[[ "$n" == "2" ]]; assert "the mapped model appears once per opencode-style agent's list (two agents)" "$?"
 grep -q '^model.claude=' "$save_r/defaults"
 [[ "$?" != "0" ]]; assert "picker out-of-range number is refused" "$?"
 

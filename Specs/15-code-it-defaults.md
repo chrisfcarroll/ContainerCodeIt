@@ -18,7 +18,7 @@ by `code-it-defaults` and read by `code-it`. Same conventions as agent configs:
 ```
 default-agent=claude
 default-toolchain=node,bun        # canonical names, as code-it --toolchain resolves them
-model.opencode=anthropic/claude-sonnet-4-5
+model.opencode=opencode-go/glm-5.3
 model.claude=opus
 ```
 
@@ -48,6 +48,14 @@ accepted. Sources, in order:
 `provider/model` ids. Needs `curl` and `jq` (bash) or `Invoke-RestMethod` (PowerShell);
 on failure it says so and changes nothing. Claude's list also offers Claude Code's
 aliases (`opus`, `sonnet`, `haiku`) and Anthropic models without the provider prefix.
+
+For an agent whose models are `provider/model` ids, the picker offers a model as
+`opencode-go/MODEL` — opencode-go being the provider OpenCode itself runs on —
+whenever opencode-go serves that model, instead of the provider the catalog names
+for it, and offers it only once however many catalog lines name it. `lib/models.txt`
+says which models opencode-go serves (checked against its entry on models.dev); a
+refreshed catalog says the same by listing them itself. Claude Code, which takes
+bare Anthropic model names only, is unaffected.
 
 ## Parameters
 

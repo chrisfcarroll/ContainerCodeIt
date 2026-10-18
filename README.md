@@ -175,7 +175,7 @@ model in the agent's own configuration under the save dir, where every run picks
 ```bash
 ./code-it-defaults.sh                 # interactive: agent, models, toolchain
 ./code-it-defaults.sh --agent claude --toolchain node,bun
-./code-it-defaults.sh --model 'opencode=anthropic/claude-sonnet-4-5' --model 'claude=opus'
+./code-it-defaults.sh --model 'opencode=opencode-go/glm-5.3' --model 'claude=opus'
 ./code-it-defaults.sh --show          # print the saved defaults
 ./code-it-defaults.sh --refresh-models   # update the model list from https://models.dev
 ```
@@ -206,7 +206,10 @@ the save dir, so switching the default agent switches those too — opencode-v2 
 its login in its own state directory, and its first run there can ask you to log in
 again. Models are data: the catalog offered by the interactive picker (from
 `lib/models.txt`, or `<save dir>/model-catalog.txt` after `--refresh-models`) is best
-effort and always incomplete, and any model string is accepted. `--show` names the
+effort and always incomplete, and any model string is accepted. Where opencode-go —
+the provider OpenCode itself runs on — serves a model, the picker offers it as
+`opencode-go/MODEL` rather than under the provider the catalog names (Claude Code,
+which takes bare Anthropic model names, is unaffected). `--show` names the
 file each agent's model was set in.
 
 ## Locale

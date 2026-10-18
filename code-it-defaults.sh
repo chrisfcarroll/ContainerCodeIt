@@ -16,8 +16,10 @@
 #   --agent, -a NAME        Set the default agent, as code-it --agent would take it.
 #                           `none` clears it.
 #   --model AGENT=MODEL     Set AGENT's default model in its own config, e.g.
-#                             --model 'opencode=anthropic/claude-sonnet-4-5'
+#                             --model 'opencode=opencode-go/glm-5.3'
 #                             --model 'claude=opus'
+#                           The picker prefers opencode-go, the provider OpenCode
+#                           itself runs on, wherever it serves the model.
 #                           An empty MODEL, as in --model 'opencode=', clears it.
 #                           Repeatable. Any model string is accepted: the catalog of
 #                           known models is best effort and always incomplete.
@@ -47,6 +49,9 @@ CI_MODELS_URL="https://models.dev/api.json"
 CI_DEFAULTS_HEADER="# code-it defaults, written by code-it-defaults, read by code-it."
 # Claude Code's model aliases, offered by the picker alongside full model names
 CI_CLAUDE_ALIASES="opus sonnet haiku opusplan"
+# The provider OpenCode itself runs on: where it serves a model, the picker
+# offers it as opencode-go/MODEL instead of the provider the catalog names
+CI_OPENCODE_GO="opencode-go"
 
 save_dir="$HOME/.config/code-it"
 agent_arg=""
@@ -328,6 +333,25 @@ catalog_file() {
     fi
 }
 
+# opencode_go_models FILE: the model ids (without the provider) that opencode-go
+# serves, from its provider/model lines in FILE — the models the picker offers as
+# opencode-go/MODEL, in place of the same model under any other provider. Space
+# separated, for the case-pattern membership test in the picker.
+opencode_go_models() {
+    local line bare out=""
+    if [[ -f "$1" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line=${line%%#*}
+            line=${line%"${line##*[![:space:]]}"}
+            [[ "$line" == "$CI_OPENCODE_GO"/* ]] || continue
+            bare=${line#*/}
+            [[ -n "$bare" ]] || continue
+            out="$out $bare"
+        done < "$1"
+    fi
+    printf '%s' "${out# }"
+}
+
 refresh_models() {
     if [[ "$dry_run" == true ]]; then
         echo "    would fetch $CI_MODELS_URL into $catalog_cache"
@@ -475,7 +499,7 @@ interactive() {
     fi
 
     # 2. Default model, for each agent that has a known mechanism
-    local spec path key live target catalog entry claude_style="" choice
+    local spec path key live target catalog entry claude_style="" choice og_models seen
     local -a models=()
     for a in "${agents_available[@]}"; do
         spec=$(ci_agent_config "$agents_dir" "$a" AGENT_MODEL_FILE) || spec=""
@@ -497,17 +521,30 @@ interactive() {
             for entry in $CI_CLAUDE_ALIASES; do models+=("$entry"); done
         fi
         catalog=$(catalog_file)
+        # opencode-go is the provider OpenCode itself runs on: where it serves a
+        # model, offer it as opencode-go/MODEL rather than the catalog's provider
+        og_models=""
+        [[ "$claude_style" == true ]] || og_models=$(opencode_go_models "$catalog")
+        seen=" "
         if [[ -f "$catalog" ]]; then
             while IFS= read -r entry; do
                 entry=${entry%%#*}
                 entry=${entry%"${entry##*[![:space:]]}"}
                 [[ -z "$entry" ]] && continue
-                # Claude Code takes bare model names, not provider/model ids: offer
-                # Anthropic's without the prefix, and nothing else
                 if [[ "$claude_style" == true ]]; then
+                    # Claude Code takes bare model names, not provider/model ids: offer
+                    # Anthropic's without the prefix, and nothing else
                     case "$entry" in anthropic/*) entry=${entry#anthropic/} ;; *) continue ;; esac
+                    models+=("$entry")
+                else
+                    case " $og_models " in
+                        *" ${entry#*/} "*) entry="$CI_OPENCODE_GO/${entry#*/}" ;;
+                    esac
+                    # The preference maps two catalog lines to one model; offer it once
+                    case "$seen" in *" $entry "*) continue ;; esac
+                    seen="$seen$entry "
+                    models+=("$entry")
                 fi
-                models+=("$entry")
             done < "$catalog"
         fi
         local i=1
