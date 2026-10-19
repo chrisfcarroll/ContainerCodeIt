@@ -65,7 +65,8 @@
 #                            slug of the resolved --toolchain list, e.g. code-it-alpine-dotnet,
 #                            code-it-alpine-node-bun. When that image does not exist, the
 #                            most-recently built existing image whose code-it.tool-chains
-#                            label contains every requested toolchain is used instead.
+#                            label contains every requested toolchain is used instead;
+#                            failing that, code-it-build.sh builds it first.
 #                            Set it explicitly to force a particular image (an error if it
 #                            does not exist).
 #   --runtime, -r NAME       Container runtime to use: "docker" or "container".
@@ -673,9 +674,21 @@ if ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
         echo "    '$image' does not exist; using '$superset_image', which contains ${enabled_toolchain// /,}"
         image="$superset_image"
     else
-        echo "Warning: $runtime image '$image' does not exist." >&2
-        echo "Build it with code-it-build.sh --toolchain $(ci_join , "$enabled_toolchain"), or set --image to an image that exists." >&2
-        exit 1
+        # Nothing to substitute, so build it: the toolchains, package caches and locale
+        # asked for, and the default agents plus the one about to run.
+        build_agents=$CI_DEFAULT_AGENTS
+        [[ "$no_agent" == false ]] && build_agents=$(ci_comma_list_add "$build_agents" "$code_agent")
+        build_args=(--toolchain "$(ci_join , "$enabled_toolchain")"
+                    --package-caches "$(ci_join , "$enabled_package_caches")"
+                    --agent "$(ci_join , "$build_agents")"
+                    --locale "$locale" --runtime "$runtime" --image "$image" --yes)
+        [[ "$dry_run" == true ]] && build_args+=(--dry-run)
+        echo "Warning: $runtime image '$image' does not exist; building it with code-it-build.sh --toolchain ${build_args[1]} --agent ${build_args[5]}" >&2
+        "${CODE_IT_BUILD:-$script_dir/code-it-build.sh}" "${build_args[@]}" || {
+            rc=$?
+            echo "Warning: building '$image' failed. Build it with code-it-build.sh, or set --image to an image that exists." >&2
+            exit $rc
+        }
     fi
 fi
 

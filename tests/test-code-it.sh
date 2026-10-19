@@ -513,7 +513,7 @@ assert_in_df "python adds its doas permit" "cmd python3"
 do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
 assert_not_in_df "a build without python leaves it out" "python3"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --stack python "${common_args[@]}" 2>&1)
-assert_contains "code-it --stack python looks for the python image" "$out" "image 'code-it-alpine-python' does not exist"
+assert_contains "code-it --stack python looks for the python image" "$out" "image 'code-it-alpine-python' does not exist; building it"
 # Python and uv are installed together, by the Python toolchain's fragment only.
 grep -q "apk add --no-cache python3 uv" "$script_dir/toolchains/python/install.dockerfile"
 assert "the python fragment installs uv with Python" "$?"
@@ -581,20 +581,55 @@ out=$(STUB_IMAGES="code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:l
 assert_contains "picks the most recent qualifying image" "$out" "using 'code-it-alpine-dotnet-node'"
 
 # Every requested chain must be present: dotnet-node does not contain bun
-PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest" \
-    "$code_it" --toolchain dotnet,bun "${super_args[@]}" >/dev/null 2>&1
-[[ "$?" != "0" ]]; assert "requires every requested chain to be present" "$?"
+out=$(PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest" \
+    "$code_it" --toolchain dotnet,bun "${super_args[@]}" 2>&1)
+assert_contains "requires every requested chain to be present" "$out" "'code-it-alpine-dotnet-bun' does not exist; building it"
 
-# No image contains the requested chain: still an error
+# No image contains the requested chain: warn, then build it and run it
 out=$(PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest" \
     "$code_it" --toolchain python "${super_args[@]}" 2>&1)
-[[ "$?" != "0" ]]; assert "errors when no image contains the requested chain" "$?"
-assert_contains "advises code-it-build for the missing image" "$out" "Build it with code-it-build.sh --toolchain python"
+assert "builds when no image contains the requested chain" "$?"
+assert_contains "warns that the image is missing" "$out" "image 'code-it-alpine-python' does not exist; building it with code-it-build.sh --toolchain python"
+assert_contains "builds the missing image" "$out" "-t code-it-alpine-python:latest"
+assert_contains "builds the default agents and the chosen one" "$out" "code-it.agents=opencode,claude "
+assert_contains "then runs the built image" "$out" "docker run"
+case "$out" in
+    *"STUB build"*) assert "--dry-run passes --dry-run to the build" 1 ;;
+    *)              assert "--dry-run passes --dry-run to the build" 0 ;;
+esac
 
-# An explicit --image is never substituted, and errors if missing
-PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-bun:latest" \
-    "$code_it" --toolchain dotnet --image code-it-alpine-nope "${super_args[@]}" >/dev/null 2>&1
+# The build is given the run's toolchains, package caches, locale, runtime and image,
+# with the chosen agent added to the defaults
+stub_build="$tmp/stub-build.sh"
+printf '#!/bin/sh\necho "STUB-BUILD $*"\nexit ${STUB_BUILD_RC:-0}\n' > "$stub_build"; chmod +x "$stub_build"
+out=$(CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet:latest" \
+    "$code_it" --toolchain python --package-caches npm --locale en-GB --agent opencode-v2 "${super_args[@]}" 2>&1)
+assert_contains "build gets the toolchains and package caches" "$out" "STUB-BUILD --toolchain python --package-caches npm"
+assert_contains "build gets the defaults plus the chosen agent" "$out" "--agent opencode,claude,opencode-v2"
+assert_contains "build gets the locale, runtime and image" "$out" "--locale en-GB --runtime docker --image code-it-alpine-python --yes --dry-run"
+out=$(CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet:latest" \
+    "$code_it" --toolchain python --agent claude "${super_args[@]}" 2>&1)
+assert_contains "an agent already in the defaults is not repeated" "$out" "--agent opencode,claude --locale"
+out=$(CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet:latest" \
+    "$code_it" --toolchain python --no-agent "${super_args[@]}" 2>&1)
+assert_contains "--no-agent builds the default agents" "$out" "--agent opencode,claude --locale"
+out=$(STUB_BUILD_RC=3 CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet:latest" \
+    "$code_it" --toolchain python "${super_args[@]}" 2>&1)
+[[ "$?" == "3" ]]; assert "a failed build exits with its code" "$?"
+assert_contains "a failed build says so" "$out" "building 'code-it-alpine-python' failed"
+case "$out" in
+    *"docker run"*) assert "a failed build does not run" 1 ;;
+    *)              assert "a failed build does not run" 0 ;;
+esac
+
+# An explicit --image is never substituted or built, and errors if missing
+out=$(CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet-bun:latest" \
+    "$code_it" --toolchain dotnet --image code-it-alpine-nope "${super_args[@]}" 2>&1)
 [[ "$?" != "0" ]]; assert "explicit --image is used as-is and errors if missing" "$?"
+case "$out" in
+    *STUB-BUILD*) assert "explicit --image is not built" 1 ;;
+    *)            assert "explicit --image is not built" 0 ;;
+esac
 
 # ---------------------------------------------------------------------------
 echo "10h. Dockerfile comment stripping keeps the buildable Dockerfile small"

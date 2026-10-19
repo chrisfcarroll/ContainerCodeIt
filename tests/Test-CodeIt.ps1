@@ -539,7 +539,7 @@ Assert-InCapture "python sets UV_CACHE_DIR in the agent home" 'UV_CACHE_DIR=/hom
 Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node', '-runtime', 'docker')
 Assert-NotInCapture "a build without python leaves it out" 'python3'
 $r = Invoke-Scenario $codeIt (@('-stack', 'python') + $commonArgs) $stubPath
-Assert-Contains "code-it -stack python looks for the python image" $r.out "image 'code-it-alpine-python' does not exist"
+Assert-Contains "code-it -stack python looks for the python image" $r.out "image 'code-it-alpine-python' does not exist; building it"
 $dfText = Get-Content (Join-Path $scriptDir 'Dockerfile') -Raw
 Assert "the python fragment installs uv with Python" ((Get-Content (Join-Path $scriptDir 'toolchains/python/install.dockerfile') -Raw).Contains('apk add --no-cache python3 uv'))
 Assert "the base Dockerfile has no toolchain switches" (-not ($dfText -match '(?m)^ARG (DOTNET|NODE|BUN|PYTHON|POWERSHELL)='))
@@ -616,20 +616,53 @@ Assert-Contains "picks the most recent qualifying image" $r.out "using 'code-it-
 $env:STUB_IMAGES = 'code-it-alpine-dotnet-node:latest'
 try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,bun') + $commonArgs) $superPath }
 finally { $env:STUB_IMAGES = $null }
-Assert "requires every requested chain to be present" ($r.code -ne 0)
+Assert-Contains "requires every requested chain to be present" $r.out "'code-it-alpine-dotnet-bun' does not exist; building it"
 
-# No image contains the requested chain
+# No image contains the requested chain: warn, then build it and run it
 $env:STUB_IMAGES = 'code-it-alpine-dotnet-node:latest code-it-alpine-dotnet-bun:latest'
 try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'python') + $commonArgs) $superPath }
 finally { $env:STUB_IMAGES = $null }
-Assert "errors when no image contains the requested chain" ($r.code -ne 0)
-Assert-Contains "advises Code-It-Build for the missing image" $r.out 'Build it with Code-It-Build.ps1 -toolchain python'
+Assert "builds when no image contains the requested chain" ($r.code -eq 0)
+Assert-Contains "warns that the image is missing" $r.out "image 'code-it-alpine-python' does not exist; building it with Code-It-Build.ps1 -toolchain python"
+Assert-Contains "builds the missing image" $r.out '-t code-it-alpine-python:latest'
+Assert-Contains "builds the default agents and the chosen one" $r.out 'code-it.agents=opencode,claude '
+Assert-Contains "then runs the built image" $r.out 'docker run'
+Assert "-dryRun passes -dryRun to the build" (-not $r.out.Contains('STUB build'))
 
-# An explicit -image is never substituted
-$env:STUB_IMAGES = 'code-it-alpine-dotnet-bun:latest'
-try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet', '-image', 'code-it-alpine-nope') + $commonArgs) $superPath }
-finally { $env:STUB_IMAGES = $null }
-Assert "explicit -image is used as-is and errors if missing" ($r.code -ne 0)
+# The build is given the run's toolchains, package caches, locale, runtime and image,
+# with the chosen agent added to the defaults
+$stubBuild = Join-Path $tmp 'stub-build.ps1'
+Set-Content -Path $stubBuild -Value @'
+param([string]$toolchain, [string]$packageCaches, [string]$agent, [string]$locale,
+      [string]$runtime, [string]$image, [switch]$yes, [switch]$dryRun)
+"STUB-BUILD toolchain=$toolchain packageCaches=$packageCaches agent=$agent locale=$locale runtime=$runtime image=$image yes=$yes dryRun=$dryRun"
+exit ([int]$env:STUB_BUILD_RC)
+'@
+$env:CODE_IT_BUILD = $stubBuild
+$env:STUB_IMAGES = 'code-it-alpine-dotnet:latest'
+try {
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'python', '-packageCaches', 'npm', '-locale', 'en-GB', '-agent', 'opencode-v2') + $commonArgs) $superPath
+    Assert-Contains "build gets the toolchains and package caches" $r.out 'STUB-BUILD toolchain=python packageCaches=npm'
+    Assert-Contains "build gets the defaults plus the chosen agent" $r.out 'agent=opencode,claude,opencode-v2'
+    Assert-Contains "build gets the locale, runtime and image" $r.out 'locale=en-GB runtime=docker image=code-it-alpine-python yes=True dryRun=True'
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'python', '-claude') + $commonArgs) $superPath
+    Assert-Contains "an agent already in the defaults is not repeated" $r.out 'agent=opencode,claude locale'
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'python', '-noAgent') + $commonArgs) $superPath
+    Assert-Contains "-noAgent builds the default agents" $r.out 'agent=opencode,claude locale'
+    $env:STUB_BUILD_RC = '3'
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'python') + $commonArgs) $superPath
+    Assert "a failed build exits with its code" ($r.code -eq 3)
+    Assert-Contains "a failed build says so" $r.out "Building 'code-it-alpine-python' failed"
+    Assert "a failed build does not run" (-not $r.out.Contains('docker run'))
+    $env:STUB_BUILD_RC = $null
+
+    # An explicit -image is never substituted or built
+    $env:STUB_IMAGES = 'code-it-alpine-dotnet-bun:latest'
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet', '-image', 'code-it-alpine-nope') + $commonArgs) $superPath
+    Assert "explicit -image is used as-is and errors if missing" ($r.code -ne 0)
+    Assert "explicit -image is not built" (-not $r.out.Contains('STUB-BUILD'))
+}
+finally { $env:STUB_IMAGES = $null; $env:STUB_BUILD_RC = $null; $env:CODE_IT_BUILD = $null }
 
 "9h. Dockerfile comment stripping keeps the buildable Dockerfile small"
 $stripTest = @"

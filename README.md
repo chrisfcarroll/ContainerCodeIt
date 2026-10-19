@@ -121,13 +121,15 @@ from their directories.
 When the image derived from `--toolchain` (e.g. `code-it-alpine-dotnet`) does not
 exist, `code-it` uses the most-recently built existing image whose
 `code-it.tool-chains` label contains every requested chain (e.g.
-`code-it-alpine-dotnet-bun` for `dotnet`), and says which image it chose. An explicit
-`--image` is used as-is and is an error if missing.
+`code-it-alpine-dotnet-bun` for `dotnet`), and says which image it chose. If no image
+contains them, it warns, builds the missing image with `code-it-build` (the requested
+toolchains, package caches and locale; the default agents plus the one about to run),
+then runs it. An explicit `--image` is used as-is and is an error if missing.
 
-`code-it` runs images; it does not build them. Build with `code-it-build`, or let
-first run do it. (The old `--build-image`, `--rebuild-image` and `--dockerfile-dir`
-options are gone: `code-it` chooses one agent to run, while an image holds a set, so
-building from `code-it` rebuilt images without their other agents.)
+Otherwise `code-it` runs images; it does not rebuild them. Rebuild with `code-it-build`,
+or let first run build the first one. (The old `--build-image`, `--rebuild-image` and
+`--dockerfile-dir` options are gone: `code-it` chooses one agent to run, while an image
+holds a set, so rebuilding from `code-it` lost the image's other agents.)
 
 ## code-it-build options
 

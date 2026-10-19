@@ -69,7 +69,8 @@
     Image name to run. Default: "code-it-alpine-<toolchains>", a slug of the resolved -toolchain
     list, e.g. code-it-alpine-dotnet or code-it-alpine-node-bun. When that image does not
     exist, the most-recently built existing image whose code-it.tool-chains label contains
-    every requested toolchain is used instead. Set it explicitly to force a particular
+    every requested toolchain is used instead; failing that, Code-It-Build.ps1 builds it
+    first. Set it explicitly to force a particular
     image (an error if it does not exist).
 
 .PARAMETER runtime
@@ -584,9 +585,27 @@ if (-not $exactExists) {
         "    '$image' does not exist; using '$supersetImage', which contains $($enabledToolchain -join ',')"
         $image = $supersetImage
     } else {
-        Write-Warning "$runtime image '$image' does not exist.
-    Build it with Code-It-Build.ps1 -toolchain $($enabledToolchain -join ','), or set -image to an image that exists."
-        exit 1
+        # Nothing to substitute, so build it: the toolchains, package caches and locale
+        # asked for, and the default agents plus the one about to run.
+        $buildAgents = @($script:CodeItDefaultAgents)
+        if (-not $noAgent -and $buildAgents -notcontains $codeAgent) { $buildAgents += $codeAgent }
+        $buildArgs = @{
+            toolchain     = $enabledToolchain -join ','
+            packageCaches = $enabledPackageCaches -join ','
+            agent         = $buildAgents -join ','
+            locale        = $locale
+            runtime       = $runtime
+            image         = $image
+            yes           = $true
+            dryRun        = [bool]$dryRun
+        }
+        $build = if ($env:CODE_IT_BUILD) { $env:CODE_IT_BUILD } else { Join-Path $PSScriptRoot 'Code-It-Build.ps1' }
+        Write-Warning "$runtime image '$image' does not exist; building it with Code-It-Build.ps1 -toolchain $($buildArgs.toolchain) -agent $($buildArgs.agent)"
+        & $build @buildArgs
+        if ($LASTEXITCODE) {
+            Write-Warning "Building '$image' failed. Build it with Code-It-Build.ps1, or set -image to an image that exists."
+            exit $LASTEXITCODE
+        }
     }
 }
 
