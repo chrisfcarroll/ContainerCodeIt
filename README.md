@@ -2,71 +2,52 @@
 
 Sandbox your agentic AI properly: in a container, with access to a single working directory, where it can work free of permissions interruption.
 
-The default Dockerfile offers **OpenCode** and **Claude Code** agents, but you can add others.
-
 The agent gets work done by having a _single mounted directory_, typically one containing a git repo or repos, so it can work and commit.
 
 ## Prerequisites
 
 - Docker or Apple Containers.
-- Tested on MacOs and Windows 11, minimal testing on Linux.
-- Runs on both bash and PowerShell on any O/S.
+- bash or PowerShell/pwsh.
+
+Tested mostly on MacOs and Win11.
 
 ## Quick start
 
 ```bash
-./code-it.sh #bash or zsh
-./Code-It.ps1 # powershell
+./code-it.sh # bash
+./Code-It.ps1 # powershell/pwsh
 ```
 
-## Exiting a container
+### Exiting a container
 
 Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succession.
 
 ## First run
 
-`code-it` first run checks for Git, then delegates runtime detection, toolchain/agent
-selection, and image building to `code-it-build`. It offers to copy existing host
-agent configuration into the save directory without overwriting existing files, then
-prints the command to start an agent. Existing state is copied, not moved or symlinked;
-copied state will include your agent login in the container. With no toolchain detected,
-choose at least one; PowerShell is preselected on Windows and when running the
-PowerShell first-run script.
-The image build waits for your confirmation; copying existing host state is separately opt-in.
+`code-it` first run checks for Git and a container runtime, asks you about toolchains 
+and agents, and then builds a Dockerfile image. Existing state and login can be copied 
+over for the contained agent to use.
 
-You can also run it yourself, e.g. to add another image later:
+Use `code-it-defaults` and `code-it-build` to change your setup. 
 
-```bash
-./code-it-first-run.sh                      # interactive
-./code-it-first-run.sh --toolchain python --agents claude --yes   # no questions
-./code-it-first-run.sh --dry-run            # show what it would do
-```
+See help with `--help` (bash) or `-help` (PowerShell).
 
-```powershell
-.\Code-It-FirstRun.ps1 -toolchain python -agents claude -yes
-```
-
-It takes `--save-dir`/`-saveDir`, `--work-dir`/`-workDir`, `--toolchain`, `--agents`,
-`--image`, `--dockerfile-dir`, `--runtime`, `--yes` and `--dry-run`; see `--help`.
+Initial agents are opencode and claude. Initial toolchains are dotnet, node, bun, uv/python.
 
 ## Adding a new agent
 
 `code-it-add-agent NAME [--url URL]` will use code-it to attempt to add agent NAME 
-to your setup. The agent doing the install will first attempt to check 
-“is NAME a well-known, maintained agent with official docs and an official install
-channel?”.
+to your setup. The agent doing the install is prompted to first check, “is NAME a 
+well-known, maintained agent with official docs and an official install channel?”.
 If it passes, it will read its docs, adds the definition, add tests, extend the README, 
 add completions, run the tests, then commit.
 
-It will refuse to run on a dirty repository, works on a new branch
-`add-agent/NAME` (never committing to your current branch, never pushing), and prints
-the branch and a diff summary when it finishes. A gate refusal leaves the repo
-unchanged and is propagated as the tool's non-zero exit code.
+It will refuse to run on a dirty repository, and works on a new branch
+`add-agent/NAME`. It will print the branch and a diff summary when it finishes.
 
 ```bash
 ./code-it-add-agent.sh cursor --url https://docs.cursor.com/cli
 ./code-it-add-agent.sh cursor --dry-run     # show the prompt and command only
-
 .\Code-It-Add-Agent.ps1 cursor -url https://docs.cursor.com/cli
 ```
 
@@ -74,21 +55,28 @@ unchanged and is propagated as the tool's non-zero exit code.
 
 `code-it-add-tool-chain NAME [--url URL]` will use code-it to attempt to add a new
 supported toolchain to your repo and image.
-The in-container agent gates on: NAME being a well-known language/runtime whose 
-toolchain installs securely (Alpine repos or the vendor's HTTPS distribution with checksum
-or signature verification where published, musl builds for x86_64 and aarch64, actively
-maintained).
+The agent doing the install is prompted to first check whether NAME is a well-known 
+language/runtime whose toolchain installs securely (Alpine repos or the vendor's 
+HTTPS distribution with checksum or signature verification where published; 
+musl builds for x86_64 and aarch64; actively maintained).
+
 It adds a `toolchains/NAME/` definition (`config` and `install.dockerfile`) exactly like
 the existing ones, an optional `package-caches/NAME/` read-only cache, completions and
-README, tests, and a commit. No Dockerfile or script edits: definitions are discovered
-from their directories.
+README, tests, and a commit.
 
 ```bash
 ./code-it-add-tool-chain.sh java --url https://openjdk.org/install/
 ./code-it-add-tool-chain.sh java --dry-run
-
 .\Code-It-Add-Tool-Chain.ps1 java -url https://openjdk.org/install/
 ```
+
+## tmux
+
+The container includes tmux and starts a shell as well as your agent inside the container.
+Press `Ctrl-B S` then use the up/down arrow keys to switch between the agent session and the shell.
+Press `Ctrl-B S` again to switch back.
+
+The shell is zsh, with some common abbreviations for git (`gco`, `glog`, `gs`, …)
 
 ## Code-It options
 
@@ -325,22 +313,13 @@ data paths, and v1 exits at once on v2's `opencode.json`, so v2 sets
 `AGENT_SAVE_SUBDIR=opencode-v2` in its config and keeps its state under
 `<save dir>/opencode-v2/` instead of the save dir itself.
 
-### Several containers at once
+### Multiple containers
 
-OpenCode keeps its sessions in a SQLite database in `~/.local/share/opencode`. Two
-containers writing it at once corrupt it ("can't create session", `database disk
-image is malformed`), especially with Apple `container`, which runs each container in
-its own VM. So code-it locks that directory while a container uses it. A second
-opencode run started while the first is still going gets a warning and its own copy,
-`<save dir>/.code-it-instances/opencode/2/.local/share/opencode`, with `auth.json`
-copied in so it needs no new login. Sessions made in a copy stay in that copy, and a
-later run that gets the same copy carries on with them. A lock left by a run that
-crashed is ignored. opencode-v2 does the same, under `<save dir>/opencode-v2/`, for
-both `.local/share/opencode` and `.local/state/opencode` (the record of its shared
-background service, which another container cannot reach). v2 keeps its login inside
-its database rather than in `auth.json`, so a new v2 copy starts logged out: log in
-once in it, and later runs that get the same copy keep that login. Agents opt in with
-`AGENT_EXCLUSIVE_DIRS` (below).
+When running multiple OpenCode containers, code-it makes copies of the session 
+database to avoid conflicts, so multiple sessions can't share context or history.
+We try to not make you log in again. This in `AGENT_EXCLUSIVE_DIRS` (below).
+
+Multiple Claude agents get on fine.
 
 ### Agent definitions
 
@@ -465,14 +444,6 @@ The launcher translates the prompt into each agent's own command line
 Interactively the agent still runs inside tmux. With `--headless` it runs in the
 foreground with no TTY allocated (`docker run -i`), so output can be piped or redirected
 and the container's exit code is the agent's.
-
-## tmux
-
-The container includes tmux and starts a shell as well as your agent inside the container.
-Press `Ctrl-B S` then use the up/down arrow keys to switch between the agent session and the shell.
-Press `Ctrl-B S` again to switch back.
-
-The shell is zsh, and some common abbreviations for git (`gco`, `glog`, `gs`, …)
 
 ## tab completion in bash, zsh, powershell
 
