@@ -9,8 +9,6 @@ The agent gets work done by having a _single mounted directory_, typically one c
 - Docker or Apple Containers.
 - bash or PowerShell/pwsh.
 
-Tested mostly on MacOs and Win11.
-
 ## Quick start
 
 ```bash
@@ -503,7 +501,8 @@ docker run -it --rm \
 
 ## Rough Edges
 
-- Updating the agent harnesses claude code/open code is done by rebuilding the image (`code-it-build --toolchain <chains> --rebuild` / `Code-It-Build.ps1 -toolchain <chains> -rebuild`)
+- Tested mostly on MacOs and Win11.
+- To update the agent harnesses you must rebuild the image (`code-it-build --toolchain <chains> --rebuild` / `Code-It-Build.ps1 -toolchain <chains> -rebuild`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
 - Git configuration and indexing on Windows
   - When Git alternates between Windows and the Linux container on a bind-mounted
