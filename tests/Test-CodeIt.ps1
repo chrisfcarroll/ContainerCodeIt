@@ -387,7 +387,7 @@ Assert-Contains "interactive build selects the numbered agent" $out 'agents clau
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', ',') $stubPath
 Assert "Code-It-Build with an empty -toolchain list exits 1" ($r.code -eq 1)
 Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet', '-runtime', 'docker')
-Assert-InCapture "Code-It-Build assembles the toolchain given" 'dotnet10-sdk'
+Assert-InCapture "Code-It-Build assembles the toolchain given" 'dotnet-sdk-$version-linux-musl'
 Assert-NotInCapture "Code-It-Build builds only the toolchain given" 'apk add --no-cache nodejs'
 
 # -dryRun prints the build command without executing it
@@ -401,7 +401,10 @@ Assert "build dry-run does not execute the build" (-not $r.out.Contains('STUB-DO
 
 # The build assembles the selected toolchains and their implied caches only
 Invoke-Capture $codeItBuild @('-toolchain', 'dotnet,node', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
-Assert-InCapture "build assembles dotnet" 'dotnet10-sdk'
+Assert-InCapture "build assembles dotnet" 'dotnet-sdk-$version-linux-musl'
+Assert-InCapture "dotnet SDKs are verified against Microsoft's SHA-512" 'sha512sum -c "$file.sha512"'
+Assert-InCapture "dotnet installs both the 10.0 and 8.0 SDKs" 'for channel in 10.0 8.0'
+Assert-NotInCapture "dotnet does not use Alpine's mismatched dotnet10-sdk apk" 'apk add --no-cache dotnet10-sdk dotnet8-sdk'
 Assert-InCapture "build assembles node" 'apk add --no-cache nodejs'
 Assert-InCapture "dotnet implies the nuget package cache" 'fallbackPackageFolders'
 Assert-InCapture "node implies the npm package cache" '/home/agent1/.npm-host'
@@ -548,6 +551,10 @@ Assert-Contains "pwsh aliases powershell" $r.out '-t code-it-alpine-powershell:l
 Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'powershell,pwsh', '-runtime', 'docker')
 Assert-InCapture "powershell toolchain assembles pwsh" 'PowerShell/releases/download'
 Assert-NotInCapture "powershell does not drag the dotnet toolchain in" 'dotnet workload update'
+Assert-InCapture "powershell on aarch64 uses Microsoft's musl .NET SDK" 'dotnet-sdk-$version-linux-musl-arm64'
+Assert-InCapture "powershell verifies the .NET SDK against Microsoft's SHA-512" 'sha512sum -c "$file.sha512"'
+Assert-NotInCapture "powershell does not use Alpine's mismatched dotnet10-sdk apk" 'apk add --no-cache dotnet10-sdk'
+Assert-InCapture "powershell reuses a 10.0 SDK the dotnet toolchain installed" 'ls /usr/share/dotnet/sdk'
 Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node', '-runtime', 'docker')
 Assert-NotInCapture "a build without powershell leaves it out" 'PowerShell/releases/download'
 
@@ -796,7 +803,7 @@ try {
 "11b. Toolchain: -toolchain / -packageCaches fragment assembly and read-only caches"
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node') $stubPath
 Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet,node', '-runtime', 'docker')
-Assert-InCapture "dotnet,node assembles dotnet" 'dotnet10-sdk'
+Assert-InCapture "dotnet,node assembles dotnet" 'dotnet-sdk-$version-linux-musl'
 Assert-InCapture "dotnet,node assembles node" 'apk add --no-cache nodejs'
 Assert-NotInCapture "dotnet,node leaves bun out" 'bun.sh/install'
 Assert-InCapture "dotnet implies the nuget cache" 'fallbackPackageFolders'
@@ -807,7 +814,7 @@ Assert-Contains "reports the resolved toolchains" $r.out 'toolchains dotnet,node
 Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'node,bun', '-runtime', 'docker')
 Assert-InCapture "-toolchain node,bun assembles node" 'apk add --no-cache nodejs'
 Assert-InCapture "-toolchain node,bun assembles bun" 'bun.sh/install'
-Assert-NotInCapture "-toolchain node,bun drops dotnet" 'dotnet10-sdk'
+Assert-NotInCapture "-toolchain node,bun drops dotnet" 'dotnet-sdk-$version-linux-musl'
 Assert-NotInCapture "-toolchain node,bun drops nuget (dotnet gone)" 'fallbackPackageFolders'
 Assert-InCapture "-toolchain node,bun keeps npm (node present)" '/home/agent1/.npm-host'
 

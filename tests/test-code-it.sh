@@ -334,7 +334,7 @@ assert_contains "interactive build selects the numbered agent" "$out" "agents cl
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain , >/dev/null 2>&1
 [[ "$?" == "1" ]]; assert "code-it-build with an empty --toolchain list exits 1" "$?"
 do_capture --toolchain dotnet --dockerfile-dir "$script_dir" --runtime docker
-assert_in_df "code-it-build assembles the toolchain given" "dotnet10-sdk"
+assert_in_df "code-it-build assembles the toolchain given" 'dotnet-sdk-$version-linux-musl'
 assert_not_in_df "code-it-build builds only the toolchain given" "apk add --no-cache nodejs"
 
 # --dry-run prints the build command (the same args code-it passes) without executing
@@ -352,7 +352,10 @@ esac
 # The build assembles the selected toolchains and their implied caches only
 do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
 assert "code-it-build capture exit code" "$?"
-assert_in_df "build assembles dotnet" "dotnet10-sdk"
+assert_in_df "build assembles dotnet" 'dotnet-sdk-$version-linux-musl'
+assert_in_df "dotnet SDKs are verified against Microsoft's SHA-512" 'sha512sum -c "$file.sha512"'
+assert_in_df "dotnet installs both the 10.0 and 8.0 SDKs" 'for channel in 10.0 8.0'
+assert_not_in_df "dotnet does not use Alpine's mismatched dotnet10-sdk apk" 'apk add --no-cache dotnet10-sdk dotnet8-sdk'
 assert_in_df "build assembles node" "apk add --no-cache nodejs"
 assert_in_df "dotnet implies the nuget package cache" "fallbackPackageFolders"
 assert_in_df "node implies the npm package cache" "/home/agent1/.npm-host"
@@ -366,7 +369,7 @@ out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_
 assert_contains "build --tech alias derives the image name" "$out" "-t code-it-alpine-bun:latest"
 do_capture --dockerfile-dir "$script_dir" --tech bun --runtime docker
 assert_in_df "build --tech alias assembles bun" "bun.sh/install"
-assert_not_in_df "build --tech bun leaves dotnet out" "dotnet10-sdk"
+assert_not_in_df "build --tech bun leaves dotnet out" 'dotnet-sdk-$version-linux-musl'
 
 # --package-caches replaces the implied set
 do_capture --dockerfile-dir "$script_dir" --toolchain bun --package-caches nuget --runtime docker
@@ -432,13 +435,13 @@ assert "code-it-build copies ca-certificates/ into the build context" "$?"
 assert_in_df "assembled Dockerfile copies the extra CA certificates" "COPY ca-certificates/"
 awk '/COPY ca-certificates\//{c=NR} /apk add/{if(!a)a=NR} END{exit !(c && a && c<a)}' "$capture"
 assert "extra CA certificates are trusted before the first apk add" "$?"
-rm -rf "$bdfdir/ca-certificates"
-
-# The /etc/code-it-agents write happens after "USER agent1"; it is root-owned, so
 printf -- '-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n' > "$bdfdir/ca-certificates/corp-root.cer"
 out=$(PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
 assert "code-it-build with .crt and .cer but no .pem certificates succeeds" "$?"
 assert_contains "code-it-build lists .crt and .cer certificates together" "$out" "test-proxy-ca.crt corp-root.cer"
+rm -rf "$bdfdir/ca-certificates"
+
+# The /etc/code-it-agents write happens after "USER agent1"; it is root-owned, so
 # the assembled Dockerfile must switch to root for that write (and back to agent1).
 do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
 assert "code-it-build captured the assembled Dockerfile" "$([[ -s "$capture" ]]; echo $?)"
@@ -520,6 +523,10 @@ assert_contains "pwsh aliases powershell" "$out" "-t code-it-alpine-powershell:l
 do_capture --toolchain powershell,pwsh --dockerfile-dir "$script_dir" --runtime docker
 assert_in_df "powershell toolchain assembles pwsh" "PowerShell/releases/download"
 assert_not_in_df "powershell does not drag the dotnet toolchain in" "dotnet workload update"
+assert_in_df "powershell on aarch64 uses Microsoft's musl .NET SDK" 'dotnet-sdk-$version-linux-musl-arm64'
+assert_in_df "powershell verifies the .NET SDK against Microsoft's SHA-512" 'sha512sum -c "$file.sha512"'
+assert_not_in_df "powershell does not use Alpine's mismatched dotnet10-sdk apk" 'apk add --no-cache dotnet10-sdk'
+assert_in_df "powershell reuses a 10.0 SDK the dotnet toolchain installed" 'ls /usr/share/dotnet/sdk'
 do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
 assert_not_in_df "a build without powershell leaves it out" "PowerShell/releases/download"
 
@@ -770,7 +777,7 @@ bun_cache="$tmp/bun-cache"; mkdir -p "$bun_cache"
 # dotnet,node and the package repos they imply (nuget, npm)
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain dotnet,node)
 do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
-assert_in_df "dotnet,node assembles dotnet" "dotnet10-sdk"
+assert_in_df "dotnet,node assembles dotnet" 'dotnet-sdk-$version-linux-musl'
 assert_in_df "dotnet,node assembles node" "apk add --no-cache nodejs"
 assert_not_in_df "dotnet,node leaves bun out" "bun.sh/install"
 assert_in_df "dotnet implies the nuget cache" "fallbackPackageFolders"
@@ -781,7 +788,7 @@ assert_contains "reports the resolved toolchains" "$out" "toolchains dotnet,node
 do_capture --toolchain node,bun --dockerfile-dir "$script_dir" --runtime docker
 assert_in_df "--toolchain node,bun assembles node" "apk add --no-cache nodejs"
 assert_in_df "--toolchain node,bun assembles bun" "bun.sh/install"
-assert_not_in_df "--toolchain node,bun drops dotnet" "dotnet10-sdk"
+assert_not_in_df "--toolchain node,bun drops dotnet" 'dotnet-sdk-$version-linux-musl'
 assert_not_in_df "--toolchain node,bun drops nuget (dotnet gone)" "fallbackPackageFolders"
 assert_in_df "--toolchain node,bun keeps npm (node present)" "/home/agent1/.npm-host"
 
