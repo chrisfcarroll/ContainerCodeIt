@@ -227,6 +227,18 @@ foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-
     $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptDir $f), [ref]$null, [ref]$parseErrors)
     Assert "parses: $f" ($parseErrors.Count -eq 0)
 }
+# Files the bash scripts read or source must check out as LF even where Git
+# converts text to CRLF (Windows), or every value read carries a trailing `r
+if (Get-Command git -EA Silent) {
+    $lfFiles = @('agents/*/config', 'toolchains/*/config', 'package-caches/*/config', 'lib/models.txt', 'completions/_code-it*') |
+        ForEach-Object { Get-ChildItem -Path (Join-Path $scriptDir $_) -File } |
+        ForEach-Object { [IO.Path]::GetRelativePath($scriptDir, $_.FullName) -replace '\\', '/' }
+    foreach ($f in $lfFiles) {
+        Assert "checks out LF: $f" ((git -C $scriptDir check-attr eol -- $f) -like '*: eol: lf')
+    }
+} else {
+    "  skip: LF checkout attributes (no git)"
+}
 # Comment-based help needs a blank line after the shebang: with the shebang directly
 # above it, Get-Help finds no help and prints only the one-line syntax.
 foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','Code-It-Defaults.ps1')) {

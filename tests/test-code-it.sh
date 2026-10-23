@@ -123,6 +123,19 @@ if command -v zsh &>/dev/null; then
 else
     echo "  skip: zsh -n completions (no zsh)"
 fi
+# Files the bash scripts read or source must check out as LF even where Git
+# converts text to CRLF (Windows), or every value read carries a trailing \r
+if git -C "$script_dir" rev-parse --git-dir &>/dev/null; then
+    for f in "$script_dir"/agents/*/config "$script_dir"/toolchains/*/config \
+             "$script_dir"/package-caches/*/config "$script_dir"/lib/models.txt \
+             "$script_dir"/completions/_code-it*; do
+        f=${f#"$script_dir/"}
+        [[ "$(git -C "$script_dir" check-attr eol -- "$f")" == *": eol: lf" ]]
+        assert "checks out LF: $f" "$?"
+    done
+else
+    echo "  skip: LF checkout attributes (not a git checkout)"
+fi
 
 # ---------------------------------------------------------------------------
 echo "2. --help exits 0 and prints usage"
