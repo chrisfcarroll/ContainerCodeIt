@@ -300,6 +300,7 @@ case "\$1" in
     build)
         for a in "\$@"; do last="\$a"; done
         cp "\$last/Dockerfile" "$capture"
+        ls "\$last/ca-certificates" > "$capture.ca" 2>&1
         echo "STUB-DOCKER-BUILD \$*" ;;
     images) echo "code-it-alpine-dotnet-node:latest" ;;
     image)  echo dotnet,node ;;
@@ -415,6 +416,23 @@ assert "code-it-build --rebuild leaves unselected toolchain fragments alone" "$?
 # A missing Dockerfile is an error
 PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$tmp" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build without a Dockerfile fails" "$?"
+# Extra CA certificates next to the Dockerfile reach the build context, and the
+# assembled Dockerfile trusts them before its first apk fetch. With no
+# ca-certificates/ folder, the context still has an empty one for COPY.
+out=$(PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
+[[ -f "$capture.ca" && ! -s "$capture.ca" ]]
+assert "code-it-build without ca-certificates/ gives the context an empty one" "$?"
+assert_contains "code-it-build says when no certificate trust was requested" "$out" "No additional certificate trust was requested"
+mkdir -p "$bdfdir/ca-certificates"
+printf -- '-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n' > "$bdfdir/ca-certificates/test-proxy-ca.crt"
+out=$(PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
+assert_contains "code-it-build lists the certificate files it adds trust for" "$out" "Adding certificate trust from ca-certificates/: test-proxy-ca.crt"
+grep -qx "test-proxy-ca.crt" "$capture.ca" 2>/dev/null
+assert "code-it-build copies ca-certificates/ into the build context" "$?"
+assert_in_df "assembled Dockerfile copies the extra CA certificates" "COPY ca-certificates/"
+awk '/COPY ca-certificates\//{c=NR} /apk add/{if(!a)a=NR} END{exit !(c && a && c<a)}' "$capture"
+assert "extra CA certificates are trusted before the first apk add" "$?"
+rm -rf "$bdfdir/ca-certificates"
 
 # The /etc/code-it-agents write happens after "USER agent1"; it is root-owned, so
 # the assembled Dockerfile must switch to root for that write (and back to agent1).

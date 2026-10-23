@@ -178,6 +178,7 @@ if ($onWindows) {
 if "%~1"=="build" (
     for %%a in (%*) do set "ctx=%%~a"
     copy /Y "%ctx%\Dockerfile" "%CAPTURE%" >nul 2>nul
+    dir /b "%ctx%\ca-certificates" > "%CAPTURE%.ca" 2>nul
     echo STUB-DOCKER-BUILD %*
     goto :eof
 )
@@ -193,6 +194,7 @@ case "$1" in
     build)
         for a in "$@"; do last="$a"; done
         cp "$last/Dockerfile" "$CAPTURE"
+        ls "$last/ca-certificates" > "$CAPTURE.ca" 2>&1
         echo "STUB-DOCKER-BUILD $*" ;;
     images) echo "code-it-alpine-dotnet-node:latest" ;;
     image)  echo dotnet,node ;;
@@ -475,6 +477,27 @@ Assert "Code-It-Build -rebuild leaves unselected toolchain fragments alone" ((Ge
 # A missing Dockerfile is an error
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $tmp) $stubPath
 Assert "Code-It-Build without a Dockerfile fails" ($r.code -ne 0)
+# Extra CA certificates next to the Dockerfile reach the build context, and the
+# assembled Dockerfile trusts them before its first apk fetch. With no
+# ca-certificates/ folder, the context still has an empty one for COPY.
+$caCapture = "$capture.ca"
+Remove-Item $caCapture -Force -EA Silent
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $bDfDir, '-runtime', 'docker') $capturePath
+Assert "Code-It-Build without ca-certificates/ gives the context an empty one" ((Test-Path $caCapture) -and -not ([IO.File]::ReadAllText($caCapture).Trim()))
+Assert-Contains "Code-It-Build says when no certificate trust was requested" $r.out 'No additional certificate trust was requested'
+$bDfCa = Join-Path $bDfDir 'ca-certificates'
+$null = New-Item -ItemType Directory -Force -Path $bDfCa
+[IO.File]::WriteAllText((Join-Path $bDfCa 'test-proxy-ca.crt'), "-----BEGIN CERTIFICATE-----`nTEST`n-----END CERTIFICATE-----`n")
+Remove-Item $caCapture -Force -EA Silent
+Remove-Item $capture -Force -EA Silent
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $bDfDir, '-runtime', 'docker') $capturePath
+Assert-Contains "Code-It-Build lists the certificate files it adds trust for" $r.out 'Adding certificate trust from ca-certificates/: test-proxy-ca.crt'
+Assert "Code-It-Build copies ca-certificates/ into the build context" ((Test-Path $caCapture) -and ((Get-Content $caCapture) -contains 'test-proxy-ca.crt'))
+Assert-InCapture "assembled Dockerfile copies the extra CA certificates" 'COPY ca-certificates/'
+$df = Get-CaptureText
+$caCopyAt = $df.IndexOf('COPY ca-certificates/')
+Assert "extra CA certificates are trusted before the first apk add" ($caCopyAt -ge 0 -and $caCopyAt -lt $df.IndexOf('apk add'))
+Remove-Item -Recurse -Force $bDfCa
 
 "9f. Code-It-Build agents"
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath

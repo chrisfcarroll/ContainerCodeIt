@@ -1,1 +1,42 @@
 .DS_Store
+# Certificates, keys, keystores, CSRs, revocation lists
+## X.509 certificates
+*.[cC][eE][rR]
+*.[cC][rR][tT]
+*.[dD][eE][rR]
+*.[pP][eE][mM]
+*.[cC][eE][rR][tT]
+## Private/public keys
+*.[kK][eE][yY]
+*.[pP][uU][bB]
+*.[pP][rR][iI][vV]
+## Certificate signing requests
+*.[cC][sS][rR]
+## PKCS formats
+*.[pP][1][2]
+*.[pP][fF][xX]
+*.[pP][7][bB]
+*.[pP][7][cC]
+*.[pP][kK][cC][sS][7]
+*.[pP][kK][cC][sS][1][2]
+## Java keystores / truststores
+*.[jJ][kK][sS]
+*.[kK][eE][yY][sS][tT][oO][rR][eE]
+*.[tT][rR][uU][sS][tT][sS][tT][oO][rR][eE]
+## OpenSSL databases and serial files
+*.[sS][rR][lL]
+*.[iI][nN][dD][eE][xX]
+*.[iI][nN][dD][eE][xX].[tT][xX][tT]
+*.[iI][nN][dD][eE][xX].[aA][tT][tT][rR]
+*.[oO][lL][dD]
+## SSH keys and ids
+*.[pP][pP][kK]
+[id_dsa]
+[id_ecdsa]
+[id_ed25519]
+[id_rsa]
+
+# local secrets
+*.env
+*.env.*
+secrets.*

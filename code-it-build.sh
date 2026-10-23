@@ -424,6 +424,20 @@ done < "$dockerfile_dir/Dockerfile" > "$build_context/Dockerfile"
 ci_strip_dockerfile_comments < "$build_context/Dockerfile" > "$build_context/Dockerfile.stripped" \
     && mv "$build_context/Dockerfile.stripped" "$build_context/Dockerfile"
 
+# Extra CA certificates (ca-certificates/ next to the Dockerfile) go into the
+# context, so a corporate TLS proxy's CA is trusted from the first apk fetch. The
+# Dockerfile always copies the folder, so it exists even when empty.
+mkdir -p "$build_context/ca-certificates"
+if [[ -d "$dockerfile_dir/ca-certificates" ]]; then
+    cp -R "$dockerfile_dir/ca-certificates/." "$build_context/ca-certificates/"
+fi
+ca_files=$(cd "$build_context/ca-certificates" && ls -1 -- *.[cC][rR][tT] *.[cC][eE][rR] *.[pP][eE][mM] 2>/dev/null | tr '\n' ' ')
+if [[ -n "$ca_files" ]]; then
+    echo "    Adding certificate trust from ca-certificates/: ${ca_files% }"
+else
+    echo "    No additional certificate trust was requested"
+fi
+
 # The fragments are the toolchain and package-cache selection, so the only build
 # arg left is the locale.
 build_args=(--build-arg "LOCALE=$container_locale")

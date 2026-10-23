@@ -352,6 +352,21 @@ $assembled = Remove-CodeItDockerfileComments $assembled
 $buildContext = Join-Path ([IO.Path]::GetTempPath()) ("code-it-build-" + [Guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Force -Path $buildContext
 [IO.File]::WriteAllText((Join-Path $buildContext 'Dockerfile'), $assembled, [System.Text.UTF8Encoding]::new($false))
+# Extra CA certificates (ca-certificates/ next to the Dockerfile) go into the
+# context, so a corporate TLS proxy's CA is trusted from the first apk fetch. The
+# Dockerfile always copies the folder, so it exists even when empty.
+$caContext = Join-Path $buildContext 'ca-certificates'
+$null = New-Item -ItemType Directory -Force -Path $caContext
+$caSource = Join-Path $dockerfileDir 'ca-certificates'
+if (Test-Path -Path $caSource -PathType Container) {
+    Copy-Item -Path (Join-Path $caSource '*') -Destination $caContext -Recurse -Force
+}
+$caFiles = @(Get-ChildItem -Path $caContext -File | Where-Object Extension -in '.crt', '.cer', '.pem' | ForEach-Object Name)
+if ($caFiles) {
+    "    Adding certificate trust from ca-certificates/: $($caFiles -join ' ')"
+} else {
+    "    No additional certificate trust was requested"
+}
 
 try {
     # The fragments are the toolchain and package-cache selection, so the only build

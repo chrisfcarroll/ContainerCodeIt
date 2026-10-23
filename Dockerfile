@@ -1,4 +1,28 @@
-FROM alpine:3.24
+FROM alpine:3.23
+# ===========================================================================
+# Extra CA certificates, e.g. for a corporate TLS-intercepting proxy
+# Any *.crt, *.cer or *.pem (PEM or DER) in ca-certificates/ is trusted before the
+# first apk fetch, by appending it to the stock bundle, and is kept in
+# /usr/local/share/ca-certificates so update-ca-certificates keeps it from then on.
+# code-it-build copies the folder into the build context. If the directory is
+# empty then is does nothing.
+# ===========================================================================
+COPY ca-certificates/ /tmp/ca-certificates/
+RUN mkdir -p /usr/local/share/ca-certificates && found=0 && \
+    for f in /tmp/ca-certificates/*.crt /tmp/ca-certificates/*.cer /tmp/ca-certificates/*.pem; do \
+        [ -f "$f" ] || continue; \
+        found=$((found + 1)); \
+        echo "Processing CA certificate file $(basename "$f")"; \
+        crt="/usr/local/share/ca-certificates/$(basename "${f%.*}").crt"; \
+        if grep -q -- '-----BEGIN CERTIFICATE-----' "$f"; then tr -d '\r' < "$f" > "$crt"; \
+        else { echo '-----BEGIN CERTIFICATE-----'; base64 "$f" | tr -d '\n' | fold -w 64; echo; echo '-----END CERTIFICATE-----'; } > "$crt"; fi; \
+        { echo; cat "$crt"; } >> /etc/ssl/certs/ca-certificates.crt; \
+        echo "  trusting $(grep -c -- '-----BEGIN CERTIFICATE-----' "$crt") certificate(s) as $(basename "$crt")"; \
+    done; \
+    [ "$found" -gt 0 ] || echo "No additional certificate trust was requested"; \
+    rm -rf /tmp/ca-certificates
+RUN apk add --no-cache ca-certificates && update-ca-certificates
+
 # ===========================================================================
 # Base image
 # Toolchains and package caches are assembled from the selected
@@ -65,7 +89,7 @@ RUN apk add --no-cache libgcc libstdc++
 USER agent1
 RUN curl -fsSL https://opencode.ai/install -o /tmp/opencode-install.sh \
     && bash /tmp/opencode-install.sh && rm -f /tmp/opencode-install.sh \
-    && test -x ~/.opencode/bin/opencode # last changed 2026-10-18
+    && test -x ~/.opencode/bin/opencode # last changed 2026-10-23
 USER root
 RUN printf '%s\n' 'opencode=/home/agent1/.opencode/bin/opencode' > /etc/code-it-agents
 USER agent1
