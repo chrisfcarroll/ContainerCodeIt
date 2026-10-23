@@ -8,6 +8,6 @@ Dockerfile.* text eol=lf
 *.env text eol=lf
 *.sh text eol=lf
 *.bash text eol=lf
-completions/_code-it text eol=lf
+completions/_code-it* text eol=lf
 *.json text eol=lf
 *.ps1 text eol=lf

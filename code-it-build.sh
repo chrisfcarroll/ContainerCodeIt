@@ -431,7 +431,14 @@ mkdir -p "$build_context/ca-certificates"
 if [[ -d "$dockerfile_dir/ca-certificates" ]]; then
     cp -R "$dockerfile_dir/ca-certificates/." "$build_context/ca-certificates/"
 fi
-ca_files=$(cd "$build_context/ca-certificates" && ls -1 -- *.[cC][rR][tT] *.[cC][eE][rR] *.[pP][eE][mM] 2>/dev/null | tr '\n' ' ')
+# A pattern that matches nothing stays literal, so test each name rather than
+# passing them to ls, which would fail and, under pipefail, end the script.
+ca_files=""
+for f in "$build_context/ca-certificates"/*.[cC][rR][tT] \
+         "$build_context/ca-certificates"/*.[cC][eE][rR] \
+         "$build_context/ca-certificates"/*.[pP][eE][mM]; do
+    if [[ -f "$f" ]]; then ca_files+="${f##*/} "; fi
+done
 if [[ -n "$ca_files" ]]; then
     echo "    Adding certificate trust from ca-certificates/: ${ca_files% }"
 else

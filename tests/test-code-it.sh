@@ -435,6 +435,10 @@ assert "extra CA certificates are trusted before the first apk add" "$?"
 rm -rf "$bdfdir/ca-certificates"
 
 # The /etc/code-it-agents write happens after "USER agent1"; it is root-owned, so
+printf -- '-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n' > "$bdfdir/ca-certificates/corp-root.cer"
+out=$(PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
+assert "code-it-build with .crt and .cer but no .pem certificates succeeds" "$?"
+assert_contains "code-it-build lists .crt and .cer certificates together" "$out" "test-proxy-ca.crt corp-root.cer"
 # the assembled Dockerfile must switch to root for that write (and back to agent1).
 do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime docker
 assert "code-it-build captured the assembled Dockerfile" "$([[ -s "$capture" ]]; echo $?)"
