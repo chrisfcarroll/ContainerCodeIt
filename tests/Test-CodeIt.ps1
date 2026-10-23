@@ -1013,6 +1013,7 @@ Assert "-noAgent appends nothing after the image" ($r.out.TrimEnd().EndsWith('co
 Assert-Contains "-noAgent stays interactive" $r.out 'docker run -it'
 Assert-Contains "-noAgent says it runs no agent" $r.out 'Using code agent: none (zsh shell)'
 Assert "-noAgent mounts no agent state" (-not $r.out.Contains('.config/opencode'))
+Assert "-noAgent shows no errors" (-not ($r.out -match 'Join-Path|Test-Path|Cannot bind'))
 $r = Invoke-Scenario $codeIt (@('-zsh') + $commonArgs) $stubPath
 Assert-Contains "-zsh is -noAgent" $r.out '-e CODE_AGENT_SHELL=1'
 # No agent to give a prompt to, nothing to run headlessly, and no agent to select

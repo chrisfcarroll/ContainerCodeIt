@@ -549,8 +549,9 @@ foreach ($f in $agentStateFileList) {
 }
 
 # Write the agent's default configuration file(s) on first run, preserving layout.
-$defaultConfigDir = Join-Path $agentsDir (Join-Path $codeAgent 'default-config')
-if (Test-Path -Path $defaultConfigDir -PathType Container) {
+# -noAgent has no agent, so no configuration to write.
+$defaultConfigDir = if ($codeAgent) { Join-Path $agentsDir (Join-Path $codeAgent 'default-config') } else { "" }
+if ($defaultConfigDir -and (Test-Path -Path $defaultConfigDir -PathType Container)) {
     $defaultConfigDir = (Resolve-Path $defaultConfigDir).Path
     foreach ($src in (Get-ChildItem -Force -Recurse -File -Path $defaultConfigDir | Sort-Object FullName)) {
         $rel = $src.FullName.Substring($defaultConfigDir.Length).TrimStart('/', '\')
