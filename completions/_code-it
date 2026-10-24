@@ -86,12 +86,12 @@ _code_it() {
         (--agent|-a)   compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
         (--toolchain|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
-        (--prompt|-p|--port|--run-arg|--docker-arg) return ;;   # free text: leave it to the user
+        (--prompt|-p|--run-arg|--docker-arg) return ;;   # free text: leave it to the user
     esac
 
     compadd -- --agent -a --list-agents --opencode -o --claude -c --no-agent --zsh --prompt -p --headless \
         --work-dir -w --save-dir -s --image -i \
-        --runtime -r --port --locale -l --agent-name --toolchain -t --stack \
+        --runtime -r --locale -l --agent-name --toolchain -t --stack \
         --package-caches --env -e --env-file --run-arg --docker-arg --dry-run -d --help -h --
 }
 

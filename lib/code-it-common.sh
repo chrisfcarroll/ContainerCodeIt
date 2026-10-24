@@ -32,7 +32,6 @@
 # An empty package-cache RAW means the caches the toolchains imply. An unknown name
 # prints a warning to stderr and returns 1, so the caller can exit.
 
-CI_CONTAINER_PORT=3000
 CI_DEFAULT_AGENTS="opencode claude"
 # --locale's default: match the host. C.UTF-8 when the host's locale cannot be told.
 CI_LOCALE_LIKE_HOST="like-host"

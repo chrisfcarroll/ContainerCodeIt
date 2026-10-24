@@ -20,9 +20,8 @@
     - A parameterisable set of toolchains (dotnet, node, bun, python, powershell) and package
       caches (nuget, npm, bun), chosen with -toolchain and -packageCaches
     - The enabled host package caches, mounted read-only
-    - Port mappings
 
-    The script supports optional image building and port mappings. Only the chosen
+    Only the chosen
     agent's state (from agents/<name>/config) is mounted, so sessions and logins persist.
 
 .PARAMETER environment
@@ -80,13 +79,6 @@
     Container runtime to use: "docker" or "container".
     Default: auto-detected as described above.
 
-.PARAMETER port
-    Host port to map to the container's port 3000 (so it takes a single "host" value,
-    not a "host:container" pair). Default: 0. With docker, 0 lets the runtime auto-assign
-    a free host port, so multiple containers can run at once without port collisions.
-    The Apple container CLI cannot, so on macOS 0 is resolved to a free port, starting
-    at 3000, then a random high port if 3000-3010 are all taken.
-
 .PARAMETER prompt
     Opens the agent with this text as its first prompt. A leading bare argument means the
     same thing, so `.\Code-It.ps1 -c "explain this repo"` is equivalent.
@@ -101,7 +93,8 @@
     e.g. `.\Code-It.ps1 -c --continue --model opus`. PowerShell has no usable `--`
     end-of-parameters token for scripts, so unlike code-it.sh no separator is needed -
     and none works. A short agent flag that PowerShell reads as one of this script's own
-    parameters (`-p` matches both -port and -prompt) is rejected before the script
+    parameters (`-p` matches several of this script's own parameters, like -prompt and
+    -packageCaches) is rejected before the script
     runs: spell it in full, `--print`, or pass it as `-agentArgs '-p','...'`.
     See https://code.claude.com/docs/en/cli-reference and https://opencode.ai/docs/cli/
 
@@ -151,8 +144,9 @@
     Runs the code-it-alpine-python image, built by Code-It-Build.ps1 -toolchain python.
 
 .EXAMPLE
-    .\Code-It.ps1 -port 8000
-    Maps host port 8000 to the container's port 3000.
+    .\Code-It.ps1 -runArg -p -runArg 8000:3000
+    Maps host port 8000 to the container's port 3000. No port is mapped by default;
+    -runArg is how ports are mapped now.
 
 .EXAMPLE
     .\Code-It.ps1 -c "explain this repo"
@@ -247,7 +241,6 @@ param (
     [string]$image          = "",
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$runtime        = "",
-    [int]$port              = 0,
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('like-host', 'C.UTF-8') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$locale         = 'like-host',
     [string]$agentName      = "Agent1",
@@ -502,27 +495,6 @@ if (-not (Get-Command git -EA Silent)) {
     Write-Warning "Git command not found. Please install Git and ensure it is in your PATH."
     exit 1
 }
-
-# Port mapping. The container listens on 3000; -port is the host port mapped to it.
-# The default, 0, means docker auto-assigns a free host port. The Apple container CLI
-# (macOS only) cannot, so resolve 0 to a free port, starting at 3000, then a random
-# high port if 3000-3010 are all taken.
-$containerPort = 3000
-function Test-PortInUse([int]$p) {
-    try {
-        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $p)
-        $listener.Start(); $listener.Stop(); return $false
-    } catch { return $true }
-}
-if ($port -eq 0 -and $runtime -eq "container") {
-    $resolved = $null
-    foreach ($candidate in 3000..3010) {
-        if (-not (Test-PortInUse $candidate)) { $resolved = $candidate; break }
-    }
-    if (-not $resolved) { $resolved = (Get-Random -Minimum 30000 -Maximum 40000) }
-    $port = $resolved
-}
-$portMapping = "${port}:${containerPort}"
 
 # Ensure required paths exist
 if (-not $WorkDirToMount -or -not (Test-Path -Path $WorkDirToMount -PathType Container -EA Silent)) {
@@ -882,7 +854,7 @@ $agentCmdPrint = ($agentCmd | ForEach-Object {
 if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
 
 @"
-    $runtime run $ttyArgs --rm -p $portMapping $containerArgs$agentEnvPrint `
+    $runtime run $ttyArgs --rm $containerArgs$agentEnvPrint `
                 -e CODE_IT_WORK_DIR=`"$containerWorkDir`" `
                 -e LANG=`"$containerLocale`" `
                 -e GIT_AUTHOR_NAME=`"$gitAuthorName`" `
@@ -899,7 +871,7 @@ if ($dryRun) {
 
 $runRc = 0
 try {
-    & $runtime run $ttyArgs --rm -p $portMapping `
+    & $runtime run $ttyArgs --rm `
                 $containerArgs `
                 $agentEnvArgs `
                 -e CODE_IT_WORK_DIR="$containerWorkDir" `

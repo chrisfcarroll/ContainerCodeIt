@@ -23,7 +23,6 @@
     host detection from each config. Spec 13.
 #>
 
-$script:CodeItContainerPort      = 3000
 $script:CodeItDefaultAgents      = @('opencode', 'claude')
 # -locale's default: match the host. C.UTF-8 when the host's locale cannot be told.
 $script:CodeItLocaleLikeHost     = 'like-host'

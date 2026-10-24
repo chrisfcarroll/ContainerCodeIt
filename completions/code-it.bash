@@ -12,7 +12,7 @@
 
 _code_it_opts='--agent -a --list-agents --opencode -o --claude -c --no-agent --zsh --prompt -p --headless
     --work-dir -w --save-dir -s --image -i
-    --runtime -r --port --locale -l --agent-name --toolchain -t --stack
+    --runtime -r --locale -l --agent-name --toolchain -t --stack
     --package-caches --env -e --env-file --run-arg --docker-arg --dry-run -d --help -h --'
 
 # The flags people reach for most, not the full list; add your own favourites here.
@@ -105,7 +105,7 @@ _code_it() {
             COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh" -- "$cur") ); return ;;
         --package-caches)
             COMPREPLY=( $(compgen -W "nuget npm bun" -- "$cur") ); return ;;
-        --prompt|-p|--port|--run-arg|--docker-arg)
+        --prompt|-p|--run-arg|--docker-arg)
             # free text: leave it to the user
             return ;;
     esac

@@ -74,13 +74,6 @@ case "$1" in
 esac
 EOF
 chmod +x "$stub_container/container"
-# Port probe used when resolving --port 0 for the Apple container runtime:
-# report every port free, so the first candidate (3000) is chosen deterministically.
-cat > "$stub_container/nc" <<'EOF'
-#!/bin/sh
-exit 1
-EOF
-chmod +x "$stub_container/nc"
 
 stub_darwin="$tmp/stub-darwin"
 mkdir -p "$stub_darwin"
@@ -173,7 +166,10 @@ case "$out" in
     *"/home/agent1/.claude"*) assert "opencode run mounts no claude state" 1 ;;
     *)                        assert "opencode run mounts no claude state" 0 ;;
 esac
-assert_contains "docker default auto-assign port" "$out" "-p 0:3000"
+case "$out" in
+    *" -p "*) assert "no port is mapped by default" 1 ;;
+    *)        assert "no port is mapped by default" 0 ;;
+esac
 
 # ---------------------------------------------------------------------------
 echo "4. Save dir structure is created for first run"
@@ -258,7 +254,10 @@ echo "7. Runtime detection"
 out=$(PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert_contains "macOS prefers apple container" "$out" "Using container runtime: container"
 assert_contains "container run command" "$out" "container run -it"
-assert_contains "container default resolves port 0 to a free port" "$out" "-p 3000:3000"
+case "$out" in
+    *" -p "*) assert "the Apple container runtime maps no port by default" 1 ;;
+    *)         assert "the Apple container runtime maps no port by default" 0 ;;
+esac
 # On non-macOS with both available, prefer docker
 out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert_contains "non-macOS prefers docker" "$out" "Using container runtime: docker"
@@ -716,10 +715,19 @@ assert "base Dockerfile puts the default agent's binary dir on zsh's PATH" "$?"
 
 # ---------------------------------------------------------------------------
 echo "11. Custom options"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --port 8000 "${common_args[@]}")
-assert_contains "custom --port maps the host port to container 3000" "$out" "-p 8000:3000"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --port 8000 -o "${common_args[@]}")
-assert_contains "flag after --port value is not eaten" "$out" 'CODE_AGENT="opencode"'
+# --port is gone: no port is mapped by default, and --run-arg is how ports are
+# mapped now (Spec 18)
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+case "$out" in
+    *" -p "*) assert "no port is mapped by default" 1 ;;
+    *)         assert "no port is mapped by default" 0 ;;
+esac
+out=$(PATH="$stub_docker:$PATH" "$code_it" --run-arg -p --run-arg 8000:3000 "${common_args[@]}" 2>&1)
+assert "--run-arg maps a port exit code" "$?"
+assert_contains "ports are mapped with --run-arg" "$out" "-p 8000:3000"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --port 8000 -o "${common_args[@]}" 2>&1)
+[[ "$?" != "0" ]]; assert "--port is no longer an option" "$?"
+assert_contains "--port says it is unknown" "$out" "Unknown option: --port"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent-name "MyAgent" "${common_args[@]}")
 assert_contains "agent name lowercased in mounts" "$out" "/home/myagent/.config/opencode"
 assert_contains "agent name in git author" "$out" 'GIT_AUTHOR_NAME="MyAgent for'

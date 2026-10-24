@@ -276,7 +276,7 @@ Assert-Contains "work dir env tells go.sh where to cd" $r.out "CODE_IT_WORK_DIR=
 Assert-Contains "opencode config mount" $r.out '/.config/opencode:/home/agent1/.config/opencode'
 Assert-Contains "opencode mount" $r.out '/.local/share/opencode:/home/agent1/.local/share/opencode'
 Assert "opencode run mounts no claude state" (-not $r.out.Contains('/home/agent1/.claude'))
-Assert-Contains "default auto-assign port" $r.out '-p 0:3000'
+Assert "no port is mapped by default" (-not $r.out.Contains(' -p '))
 
 # ---------------------------------------------------------------------------
 "3. Save dir structure is created for first run"
@@ -355,11 +355,11 @@ Assert-Contains "suggests an install link" $r.out 'docs.docker.com'
 
 # ---------------------------------------------------------------------------
 "7. Runtime selection"
-$r = Invoke-Scenario $codeIt (@('-runtime', 'container', '-port', '3000') + $commonArgs) "$stubContainer$sep$stubPath"
+$r = Invoke-Scenario $codeIt (@('-runtime', 'container') + $commonArgs) "$stubContainer$sep$stubPath"
 Assert "-runtime container exit code 0" ($r.code -eq 0)
 Assert-Contains "-runtime container forces apple container" $r.out 'Using container runtime: container'
 Assert-Contains "container run command" $r.out 'container run -it'
-Assert-Contains "container maps the single requested port" $r.out '-p 3000:3000'
+Assert "the Apple container runtime maps no port by default" (-not $r.out.Contains(' -p '))
 Assert-Contains "container dry-run shows memory limit" $r.out '--memory 3g'
 if (-not $onWindows) {
     $r = Invoke-Scenario $codeIt @('-runtime', 'container', '-WorkDirToMount', $scriptDir, '-saveDir', $save) "$stubContainer$sep$stubPath"
@@ -740,10 +740,16 @@ Assert-Contains "stripping keeps RUN lines" $r.out 'RUNLINE:1'
 
 # ---------------------------------------------------------------------------
 "10. Custom options"
+# -port is gone: no port is mapped by default, and -runArgs is how ports are
+# mapped now (Spec 18). -File binding does not split array parameters, so the
+# port scenario needs the command form.
+$r = Invoke-Scenario $codeIt $commonArgs $stubPath
+Assert "no port is mapped by default" (-not $r.out.Contains(' -p '))
+$r = Invoke-ScenarioCommand "& '$codeIt' -dryRun -WorkDirToMount '$scriptDir' -saveDir '$save' -runArgs '-p','8000:3000'" $stubPath
+Assert "-runArgs maps a port exit code 0" ($r.code -eq 0)
+Assert-Contains "ports are mapped with -runArgs" $r.out '-p 8000:3000'
 $r = Invoke-Scenario $codeIt (@('-port', '8000') + $commonArgs) $stubPath
-Assert-Contains "custom -port maps the host port to container 3000" $r.out '-p 8000:3000'
-$r = Invoke-Scenario $codeIt (@('-port', '0') + $commonArgs) $stubPath
-Assert-Contains "-port 0 lets docker auto-assign" $r.out '-p 0:3000'
+Assert-Contains "the removed -port goes to the agent verbatim" $r.out 'code-it-alpine-dotnet-node:latest -port 8000'
 $r = Invoke-Scenario $codeIt (@('-agentName', 'MyAgent') + $commonArgs) $stubPath
 Assert-Contains "agent name lowercased in mounts" $r.out '/home/myagent/.config/opencode'
 Assert-Contains "agent name in git author" $r.out 'GIT_AUTHOR_NAME="MyAgent for'

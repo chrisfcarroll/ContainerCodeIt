@@ -14,7 +14,6 @@
 # - Git author environment variables or config settings (name and email)
 # - Paths to preserve agent credentials, settings, and session data across container runs
 # - The host's NuGet package cache, mounted read-only as a fallback package folder
-# - Port mappings
 #
 # Usage:
 #   ./code-it.sh [OPTIONS] [PROMPT] [-- AGENT-ARGS...]
@@ -54,6 +53,9 @@
 #                            Repeatable; one argument each, so an option and its value
 #                            are two --run-args, or one if joined with =, e.g.
 #                              --run-arg --network=host --run-arg --dns --run-arg 10.0.0.2
+#                            Ports work this way too: there is no --port option, and
+#                            by default no port is mapped at all, e.g.
+#                              --run-arg -p --run-arg 8000:3000
 #                            The runtime's own flags differ, so these are not portable
 #                            between docker and container. --docker-arg is an alias.
 #                            Arguments in SAVE-DIR/run-args (see Notes) come first.
@@ -75,12 +77,6 @@
 #                            does not exist).
 #   --runtime, -r NAME       Container runtime to use: "docker" or "container".
 #                            Default: auto-detected as described above.
-#   --port PORT              Host port to map to the container's port 3000 (so it takes a
-#                            single "host" value, not a "host:container" pair). Default: 0.
-#                            With docker, 0 lets the runtime auto-assign a free host port.
-#                            The Apple container CLI cannot, so on macOS 0 is resolved by
-#                            this script to a free port, starting at 3000, then a random
-#                            high port if 3000-3010 are all taken.
 #   --locale, -l LOCALE      The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB.
 #                            Passed to the container when it runs, so it need not be
 #                            the image's. Default: like-host, the host's own locale
@@ -128,8 +124,9 @@
 #   ./code-it.sh --toolchain python
 #       Runs the code-it-alpine-python image, built by code-it-build.sh --toolchain python.
 #
-#   ./code-it.sh --port 8000
-#       Maps host port 8000 to the container's port 3000.
+#   ./code-it.sh --run-arg -p --run-arg 8000:3000
+#       Maps host port 8000 to the container's port 3000. No port is mapped by
+#       default; --run-arg is how ports are mapped now.
 #
 #   ./code-it.sh -c "explain this repo"
 #       Opens Claude Code with that opening prompt, and stays interactive.
@@ -245,7 +242,6 @@ save_dir="$HOME/.config/code-it"
 image=""
 image_explicit=false
 runtime=""
-port=0
 locale="$CI_LOCALE_LIKE_HOST"
 agent_name="Agent1"
 dry_run=false
@@ -314,10 +310,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --runtime|-r)
             runtime="$2"
-            shift 2
-            ;;
-        --port)
-            port="$2"
             shift 2
             ;;
         --locale|-l)
@@ -580,34 +572,6 @@ if ! command -v git &>/dev/null; then
     echo "Warning: Git command not found. Please install Git and ensure it is in your PATH." >&2
     exit 1
 fi
-
-# Port mapping. The container listens on 3000; --port is the host port to map to it.
-# The default, 0, means "no host port chosen here": docker auto-assigns a free port,
-# while the Apple container CLI (macOS only) cannot, so resolve 0 to a free port,
-# starting at 3000, or a random high port if none of those are free.
-container_port=3000
-
-# port_in_use PORT: true if something is listening on the loopback port. Needs nc;
-# if it is not available we cannot tell, so report the port as free.
-port_in_use() {
-    command -v nc &>/dev/null || return 1
-    nc -z 127.0.0.1 "$1" &>/dev/null
-}
-
-if [[ "$port" == "0" && "$runtime" == "container" ]]; then
-    resolved_port=""
-    for candidate in 3000 3001 3002 3003 3004 3005 3006 3007 3008 3009 3010; do
-        if ! port_in_use "$candidate"; then
-            resolved_port="$candidate"
-            break
-        fi
-    done
-    if [[ -z "$resolved_port" ]]; then
-        resolved_port=$(( (RANDOM % 10000) + 30000 ))
-    fi
-    port="$resolved_port"
-fi
-port_mapping="$port:$container_port"
 
 # Ensure required paths exist
 if [[ ! -d "$work_dir_to_mount" ]]; then
@@ -1025,8 +989,7 @@ done
 
 # Print the command
 cat <<EOF
-    $runtime run ${tty_args[*]} --rm -p $port_mapping \\
-                $container_args \\$agent_env_print
+    $runtime run ${tty_args[*]} --rm \\$container_args \\$agent_env_print
                 -e CODE_IT_WORK_DIR="$container_work_dir" \\
                 -e LANG="$container_locale" \\
                 -e GIT_AUTHOR_NAME="$git_author_name" \\
@@ -1042,7 +1005,7 @@ if [[ "$dry_run" == true ]]; then
 fi
 
 run_rc=0
-"$runtime" run "${tty_args[@]}" --rm -p "$port_mapping" \
+"$runtime" run "${tty_args[@]}" --rm \
             $container_args \
             "${agent_env[@]}" \
             -e CODE_IT_WORK_DIR="$container_work_dir" \

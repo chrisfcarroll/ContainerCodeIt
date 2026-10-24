@@ -94,12 +94,11 @@ Start a container without an agent with --no-agent / -noAgent
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
 | `--env`, `-e NAME[=VALUE]` (repeatable) | `-environment`, `-env`, `-e` *array* | none | Environment variable for the container; a bare `NAME` passes the host's value. See [Passing arguments to the container runtime](#passing-arguments-to-the-container-runtime) |
 | `--env-file FILE` (repeatable) | `-envFile` *array* | none | File of `KEY=VALUE` environment variables for the container |
-| `--run-arg ARG`, `--docker-arg ARG` (repeatable) | `-runArgs`, `-dockerArgs` *array* | none, plus `<save dir>/run-args` | One argument passed verbatim to `docker run` / `container run` |
+| `--run-arg ARG`, `--docker-arg ARG` (repeatable) | `-runArgs`, `-dockerArgs` *array* | none, plus `<save dir>/run-args` | One argument passed verbatim to `docker run` / `container run`; ports are mapped this way (`--run-arg -p --run-arg 8000:3000`) — no port is mapped by default |
 | `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted in the container at `/work/<parent>/<name>` (the parent's and its own names, so directories keep their names for agents' per-directory memory). A DIR whose parent is `/` mounts at `/work/<name>`; `/`, at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image`, `-i` | `-image` | `code-it-alpine-<toolchains>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
-| `--port` | `-port` | `0` | Host port mapped to the container's port 3000. `0` auto-assigns (docker) or finds a free port starting at 3000 (Apple `container`) |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
 | `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none: those of `--image`, else of the saved default toolchain (`code-it-defaults`), else of the remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`; see `code-it-build --list-toolchains`) |
@@ -486,7 +485,6 @@ Something like this:
 # docker build . -t code-it-alpine-dotnet-node:latest
 
 docker run -it --rm \
-    -p 0:3000 \
     -e CODE_AGENT=opencode \
     -e CODE_IT_WORK_DIR=/work/dev/my-repos \
     -e LANG=en_GB.UTF-8 \
