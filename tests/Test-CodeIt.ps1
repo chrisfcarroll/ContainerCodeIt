@@ -324,11 +324,19 @@ $r = Invoke-Scenario $codeIt (@('-agent','opencode') + $commonArgs) $stubPath
 Assert-Contains "-agent opencode selects opencode" $r.out 'CODE_AGENT="opencode"'
 $r = Invoke-Scenario $codeIt (@('-agent','opencode-v1') + $commonArgs) $stubPath
 Assert-Contains "-agent opencode-v1 selects v1" $r.out 'CODE_AGENT="opencode-v1"'
+$r = Invoke-Scenario $codeIt (@('-agent','codex') + $commonArgs) $stubPath
+Assert-Contains "-agent codex selects codex" $r.out 'CODE_AGENT="codex"'
+Assert-Contains "reports Codex config creation" $r.out 'Created Codex configuration'
+Assert "Codex config works free of permissions interruption" ((Get-Content "$save/.codex/config.toml" -Raw).Contains('approval_policy = "never"'))
+Assert "Codex config treats the container as its sandbox" ((Get-Content "$save/.codex/config.toml" -Raw).Contains('sandbox_mode = "danger-full-access"'))
+Assert-Contains "codex mounts its state" $r.out "$save/.codex:/home/agent1/.codex"
+Assert "codex mounts no other agent's state" (-not ($r.out.Contains('/home/agent1/.claude') -or $r.out.Contains('/home/agent1/.config/opencode')))
 $r = Invoke-ScenarioCommand "& '$codeIt' -listAgents" $stubPath
 Assert "listAgents exit code 0" ($r.code -eq 0)
 Assert-Contains "-listAgents lists claude" $r.out 'claude'
 Assert-Contains "-listAgents lists opencode" $r.out 'opencode'
 Assert-Contains "-listAgents lists opencode-v1" $r.out 'opencode-v1'
+Assert-Contains "-listAgents lists codex" $r.out 'codex'
 $r = Invoke-Scenario $codeIt (@('-agent','nosuchagent') + $commonArgs) $stubPath
 Assert "unknown -agent fails" ($r.code -ne 0)
 Assert-Contains "unknown agent lists the available agents" $r.out 'The available agents are:'
@@ -541,6 +549,14 @@ $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun','-doc
 Assert-Contains "-agent opencode-v1 selects the v1 installer" $r.out 'agents opencode-v1'
 Assert-Contains "opencode-v1 image label records the agent" $r.out '--label code-it.agents=opencode-v1'
 Assert-Contains "opencode-v1 image label records its binary" $r.out '--label code-it.agent-binaries=opencode-v1=/home/agent1/.opencode/bin/opencode'
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun','-dockerfileDir',$scriptDir,'-agent','codex') $stubPath
+Assert-Contains "-agent codex selects the codex installer" $r.out 'agents codex'
+Assert-Contains "codex image label records the agent" $r.out '--label code-it.agents=codex'
+Assert-Contains "codex image label records its binary" $r.out '--label code-it.agent-binaries=codex=/home/agent1/.local/bin/codex'
+$codexInstall = Get-Content (Join-Path $scriptDir 'agents/codex/install.dockerfile') -Raw
+Assert "codex installs the pinned official release" ($codexInstall.Contains('releases/download/rust-v0.164.0'))
+Assert "codex installs to its own AGENT_BINARY path" ($codexInstall.Contains('mv "/tmp/codex-${arch}-unknown-linux-musl" ~/.local/bin/codex'))
+Assert "codex needs no apk packages (its musl build is static)" (-not ($codexInstall -match '(?m)^RUN apk add'))
 $r = Invoke-ScenarioCommand "& '$codeItBuild' -toolchain 'dotnet,node' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
 Assert-Contains "agent-binaries label lists every agent" $r.out '--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode-v2/bin/opencode'
 $v2Install = Get-Content (Join-Path $scriptDir 'agents/opencode/install.dockerfile') -Raw
@@ -973,6 +989,8 @@ $r = Invoke-Scenario $codeIt (@('-o','explain this repo') + $commonArgs) $stubPa
 Assert-Contains "opencode (v2): prompt becomes mini --prompt" $r.out 'code-it-alpine-dotnet-node:latest mini --prompt "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-agent','opencode-v1','explain this repo') + $commonArgs) $stubPath
 Assert-Contains "opencode-v1 interactive prompt uses --prompt" $r.out 'code-it-alpine-dotnet-node:latest --prompt "explain this repo"'
+$r = Invoke-Scenario $codeIt (@('-agent','codex','explain this repo') + $commonArgs) $stubPath
+Assert-Contains "codex bare argument is the prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-o') + $commonArgs) $stubPath
 Assert "opencode (v2) interactive no-prompt appends nothing" ($r.out.TrimEnd().EndsWith('code-it-alpine-dotnet-node:latest'))
 Assert-Contains "opencode (v2) interactive no-prompt allocates a TTY" $r.out 'docker run -it'
@@ -992,6 +1010,8 @@ $r = Invoke-Scenario $codeIt (@('-o','-headless','fix the build') + $commonArgs)
 Assert-Contains "opencode (v2) -headless uses standalone run" $r.out 'code-it-alpine-dotnet-node:latest run --standalone "fix the build"'
 $r = Invoke-Scenario $codeIt (@('-agent','opencode-v1','-headless','fix the build') + $commonArgs) $stubPath
 Assert-Contains "opencode-v1 -headless uses run" $r.out 'code-it-alpine-dotnet-node:latest run "fix the build"'
+$r = Invoke-Scenario $codeIt (@('-agent','codex','-headless','fix the build') + $commonArgs) $stubPath
+Assert-Contains "codex -headless uses exec" $r.out 'code-it-alpine-dotnet-node:latest exec --skip-git-repo-check "fix the build"'
 $r = Invoke-Scenario $codeIt (@('-o','-headless') + $commonArgs) $stubPath
 Assert-Contains "opencode (v2) headless no-prompt still runs standalone" $r.out 'code-it-alpine-dotnet-node:latest run --standalone'
 Assert-Contains "opencode (v2) headless no-prompt has no TTY" $r.out 'docker run -i --rm'
@@ -1559,6 +1579,7 @@ function Complete([string]`$line) {
 "CLAUDE:"   + (Complete "& '$codeIt' -claude -agentArgs --mod")
 "OPENCODE:" + (Complete "& '$codeIt' -agentArgs --sta")
 "OPENCODEV1:" + (Complete "& '$codeIt' -agent opencode-v1 -agentArgs --th")
+"CODEX:" + (Complete "& '$codeIt' -agent codex -agentArgs --mo")
 "RUNTIME:"  + (Complete "& '$codeIt' -runtime ")
 "LOCALE:"   + (Complete "& '$codeIt' -locale ")
 "@
@@ -1567,6 +1588,7 @@ Assert "completion script loads" ($r.code -eq 0 -or $null -eq $r.code)
 Assert-Contains "-agentArgs completes claude flags" $r.out 'CLAUDE:--model'
 Assert-Contains "-agentArgs completes opencode (v2) flags" $r.out 'OPENCODE:--standalone'
 Assert-Contains "-agent opencode-v1 completes v1 flags" $r.out 'OPENCODEV1:--thinking'
+Assert-Contains "-agent codex completes its flags" $r.out 'CODEX:--model'
 Assert-Contains "-runtime completes its values" $r.out 'RUNTIME:docker container'
 Assert-Contains "-locale completes like-host" $r.out 'LOCALE:like-host C.UTF-8'
 

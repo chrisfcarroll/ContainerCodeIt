@@ -30,7 +30,7 @@ Use `code-it-defaults` and `code-it-build` to change your setup.
 
 See help with `--help` (bash) or `-help` (PowerShell).
 
-Initial agents are opencode and claude. Initial toolchains are dotnet, node, bun, uv/python.
+Initial agents are opencode (v2), opencode-v1, claude and codex. Initial toolchains are dotnet, node, bun, uv/python.
 
 ## Add new agents
 
@@ -304,6 +304,7 @@ also installs the .NET 10 SDK if `dotnet` is not selected.
 ./code-it.sh -t node --agent opencode                    # run it
 ./code-it-build.sh -t node --agent opencode,opencode-v1  # v2 and v1 side by side
 ./code-it.sh -t node --agent opencode-v1 --headless "summarise this repo"
+./code-it.sh -t node --agent codex --headless "summarise this repo"   # OpenAI Codex
 ./code-it.sh --list-agents                               # what is available
 ```
 

@@ -1,0 +1,27 @@
+# OpenAI Codex CLI agent definition. Readable from bash (it is sourced) and
+# PowerShell (parsed as key=value). Keep one key per line.
+AGENT_NAME=codex
+AGENT_SHORT=
+AGENT_COMMAND=codex
+AGENT_BINARY=/home/agent1/.local/bin/codex
+AGENT_INSTALL=install.dockerfile
+AGENT_CONFIG_LABEL='Codex configuration'
+# No AGENT_MODEL_FILE here: codex's config.toml is TOML, not the JSON that
+# code-it-defaults writes. Set its model with -- -m <model>, or with
+# model = "…" in config.toml under the save dir.
+# All of codex's state (config.toml, auth.json, sessions, its SQLite databases)
+# lives in one directory, CODEX_HOME, default ~/.codex
+AGENT_STATE_DIRS='.codex'
+AGENT_STATE_FILES=''
+# One container at a time: codex keeps SQLite databases in ~/.codex (sessions,
+# logs, memories) that concurrent containers would corrupt. A second container
+# gets its own copy, with auth.json carried over.
+AGENT_EXCLUSIVE_DIRS='.codex'
+AGENT_EXCLUSIVE_CARRY='.codex/auth.json'
+# Prompt translation: {args} is the agent arguments, {prompt} the opening prompt.
+# A bare argument is codex's opening prompt; `codex exec` runs it headlessly, and
+# needs --skip-git-repo-check to start outside a git repository.
+AGENT_CMD_INTERACTIVE_PROMPT='{prompt} {args}'
+AGENT_CMD_INTERACTIVE_NO_PROMPT='{args}'
+AGENT_CMD_HEADLESS_PROMPT='exec --skip-git-repo-check {args} {prompt}'
+AGENT_CMD_HEADLESS_NO_PROMPT='exec --skip-git-repo-check {args}'

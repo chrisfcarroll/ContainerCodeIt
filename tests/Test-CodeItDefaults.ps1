@@ -197,10 +197,11 @@ Assert "interactive exit code 0" ($r.code -eq 0)
 Assert "first agent answer is claude" ((Get-Content "$saveInt/defaults") -contains 'default-agent=claude')
 Assert "toolchain answered by numbers" ((Get-Content "$saveInt/defaults") -contains 'default-toolchain=node,python')
 Assert "blank model answer keeps (creates nothing)" (-not (Test-Path "$saveInt/.claude/settings.json"))
-# (Get-ChildItem lists agents alphabetically: claude, opencode, opencode-v1)
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('3', '', '', 'my-favourite-model', 'node')
+# (Get-ChildItem lists agents alphabetically: claude, codex, opencode, opencode-v1;
+# answer by name so the scenario does not depend on that order)
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('opencode-v1', '', '', 'my-favourite-model', 'node')
 Assert "second interactive run exit code 0" ($r.code -eq 0)
-Assert "agent answered as a number" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode-v1')
+Assert "agent answered as a name" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode-v1')
 Assert "a free-text model is accepted" ((Get-Content "$saveInt/defaults") -contains 'model.opencode-v1=my-favourite-model')
 Assert "kept model is not overwritten" (-not (Get-Content "$saveInt/defaults" -Raw).Contains("model.claude="))
 Assert-Contains "the interactive picker lists the bundled catalog" $r.out 'anthropic/claude-opus-5-5'
@@ -214,7 +215,10 @@ Assert "a model opencode-go does not serve keeps its provider" `
     (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) zai/glm-5\.3-flashx$' }).Count -gt 0)
 Assert "claude's list keeps Anthropic's models without the prefix" `
     (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) claude-sonnet-5-5$' }).Count -gt 0)
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('5', 'sonnet', '', 'none', 'none')
+# Model questions follow the agent list (codex has none, so it is skipped): on
+# Windows/PowerShell that is claude, opencode, opencode-v1, so the empty answer
+# clears opencode's and 'none' clears opencode-v1's
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('9', 'sonnet', '', 'none', 'none')
 Assert "third interactive run exit code 0" ($r.code -eq 0)
 Assert "out-of-range number keeps the saved agent" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode-v1')
 Assert "'sonnet' is accepted for claude" ((Get-Content "$saveInt/defaults") -contains 'model.claude=sonnet')

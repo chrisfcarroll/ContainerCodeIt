@@ -197,9 +197,9 @@ assert "interactive exit code" "$?"
 grep -q '^default-agent=claude$' "$save_i/defaults"; assert "first agent preselected answer is claude" "$?"
 grep -q '^default-toolchain=node,python$' "$save_i/defaults"; assert "toolchain answered by numbers" "$?"
 [[ ! -e "$save_i/.claude/settings.json" ]]; assert "blank model answer keeps (creates nothing)" "$?"
-out=$(printf '2\n\nmy-favourite-model\n\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
+out=$(printf 'opencode-v1\n\nmy-favourite-model\n\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "second interactive run exit code" "$?"
-grep -q '^default-agent=opencode-v1$' "$save_i/defaults"; assert "agent answered as a number" "$?"
+grep -q '^default-agent=opencode-v1$' "$save_i/defaults"; assert "agent answered as a name" "$?"
 grep -q '^model.opencode-v1=my-favourite-model$' "$save_i/defaults"; assert "a free-text model is accepted" "$?"
 grep -q '^model.claude=' "$save_i/defaults"
 [[ "$?" != "0" ]]; assert "kept model is not overwritten" "$?"
@@ -213,7 +213,7 @@ printf '%s\n' "$out" | grep -qE '^  [0-9]+\) zai/glm-5\.3-flashx$'
 assert "a model opencode-go does not serve keeps its provider" "$?"
 printf '%s\n' "$out" | grep -qE '^  [0-9]+\) claude-sonnet-5-5$'
 assert "claude's list keeps Anthropic's models without the prefix" "$?"
-out=$(printf '5\nsonnet\nnone\n\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
+out=$(printf '9\nsonnet\nnone\n\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "third interactive run exit code" "$?"
 grep -q '^default-agent=opencode-v1$' "$save_i/defaults"; assert "out-of-range number keeps the saved agent" "$?"
 grep -q '^model.claude=sonnet$' "$save_i/defaults"; assert "claude model set by number from its list" "$?"

@@ -225,11 +225,24 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode "${common_args[@]}")
 assert_contains "--agent opencode selects opencode" "$out" 'CODE_AGENT="opencode"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 "${common_args[@]}")
 assert_contains "--agent opencode-v1 selects v1" "$out" 'CODE_AGENT="opencode-v1"'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent codex "${common_args[@]}")
+assert_contains "--agent codex selects codex" "$out" 'CODE_AGENT="codex"'
+assert_contains "reports Codex config creation" "$out" "Created Codex configuration"
+grep -q 'approval_policy = "never"' "$save/.codex/config.toml"
+assert "Codex config works free of permissions interruption" "$?"
+grep -q 'sandbox_mode = "danger-full-access"' "$save/.codex/config.toml"
+assert "Codex config treats the container as its sandbox" "$?"
+assert_contains "codex mounts its state" "$out" "$save/.codex:/home/agent1/.codex"
+case "$out" in
+    *"/home/agent1/.claude"*|*"/home/agent1/.config/opencode"*) assert "codex mounts no other agent's state" 1 ;;
+    *)                                                                assert "codex mounts no other agent's state" 0 ;;
+esac
 out=$(PATH="$stub_docker:$PATH" "$code_it" --list-agents)
 assert "--list-agents exit code" "$?"
 assert_contains "--list-agents lists claude" "$out" "claude"
 assert_contains "--list-agents lists opencode" "$out" "opencode"
 assert_contains "--list-agents lists opencode-v1" "$out" "opencode-v1"
+assert_contains "--list-agents lists codex" "$out" "codex"
 assert_contains "--list-agents shows the short flag" "$out" "-o"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent nosuchagent "${common_args[@]}" 2>&1)
 [[ "$?" != "0" ]]; assert "unknown --agent fails" "$?"
@@ -505,6 +518,16 @@ out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --
 assert_contains "--agent opencode-v1 selects the v1 installer" "$out" "agents opencode-v1"
 assert_contains "opencode-v1 image label records the agent" "$out" "--label code-it.agents=opencode-v1"
 assert_contains "opencode-v1 image label records its binary" "$out" "--label code-it.agent-binaries=opencode-v1=/home/agent1/.opencode/bin/opencode"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent codex 2>&1)
+assert_contains "--agent codex selects the codex installer" "$out" "agents codex"
+assert_contains "codex image label records the agent" "$out" "--label code-it.agents=codex"
+assert_contains "codex image label records its binary" "$out" "--label code-it.agent-binaries=codex=/home/agent1/.local/bin/codex"
+grep -q 'releases/download/rust-v0.164.0' "$script_dir/agents/codex/install.dockerfile"
+assert "codex installs the pinned official release" "$?"
+grep -qF 'mv "/tmp/codex-${arch}-unknown-linux-musl" ~/.local/bin/codex' "$script_dir/agents/codex/install.dockerfile"
+assert "codex installs to its own AGENT_BINARY path" "$?"
+[[ "$(grep -c '^RUN apk add' "$script_dir/agents/codex/install.dockerfile")" == "0" ]]
+assert "codex needs no apk packages (its musl build is static)" "$?"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
 assert_contains "agent-binaries label lists every agent" "$out" "--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode-v2/bin/opencode"
 grep -q 'bash /tmp/opencode-v2-install.sh --version 2.0.6' "$script_dir/agents/opencode/install.dockerfile"
@@ -934,6 +957,8 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -o "explain this repo" "${common_args
 assert_contains "opencode (v2): prompt becomes mini --prompt" "$out" 'code-it-alpine-dotnet-node:latest mini --prompt explain\ this\ repo'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 "explain this repo" "${common_args[@]}")
 assert_contains "opencode-v1: interactive prompt uses --prompt" "$out" 'code-it-alpine-dotnet-node:latest --prompt explain\ this\ repo'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent codex "explain this repo" "${common_args[@]}")
+assert_contains "codex: bare argument is the prompt" "$out" 'code-it-alpine-dotnet-node:latest explain\ this\ repo'
 # No prompt and no agent args: nothing is appended, and the run stays interactive
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o "${common_args[@]}")
 [[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "opencode (v2): no prompt appends nothing" "$?"
@@ -953,6 +978,8 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "fix the build" "${comm
 assert_contains "opencode (v2) --headless uses standalone run" "$out" 'code-it-alpine-dotnet-node:latest run --standalone fix\ the\ build'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 --headless "fix the build" "${common_args[@]}")
 assert_contains "opencode-v1 --headless uses run" "$out" 'code-it-alpine-dotnet-node:latest run fix\ the\ build'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent codex --headless "fix the build" "${common_args[@]}")
+assert_contains "codex --headless uses exec" "$out" 'code-it-alpine-dotnet-node:latest exec --skip-git-repo-check fix\ the\ build'
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "${common_args[@]}" -- --session abc)
 assert_contains "opencode (v2) headless no-prompt still runs headless" "$out" 'code-it-alpine-dotnet-node:latest run --standalone --session abc'
 
@@ -1026,6 +1053,7 @@ completions_out=$(
     echo "OPENCODEDEF:$(comp ./code-it.sh -- --sta | tr '\n' ' ')"
     echo "OPENCODEALIAS:$(comp ./opencode-it.sh -- --se | tr '\n' ' ')"
     echo "OPENCODEV1:$(comp ./code-it.sh --agent opencode-v1 -- --th | tr '\n' ' ')"
+    echo "CODEX:$(comp ./code-it.sh --agent codex -- --mo | tr '\n' ' ')"
     echo "NOAGENT:$(comp ./code-it.sh --no- | tr '\n' ' ')"
 )
 assert_contains "completes launcher options" "$completions_out" "OPTS:--headless"
@@ -1043,6 +1071,7 @@ assert_contains "completes claude --permission-mode values" "$completions_out" "
 assert_contains "defaults to opencode (v2) flags after --" "$completions_out" "OPENCODEDEF:--standalone"
 assert_contains "opencode-it.sh completes opencode (v2) flags after --" "$completions_out" "OPENCODEALIAS:--server"
 assert_contains "opencode-v1 completes v1 flags after --" "$completions_out" "OPENCODEV1:--thinking"
+assert_contains "codex completes its flags after --" "$completions_out" "CODEX:--model"
 
 # ---------------------------------------------------------------------------
 echo "15. Container entrypoint (go.sh) passes its arguments to the agent"

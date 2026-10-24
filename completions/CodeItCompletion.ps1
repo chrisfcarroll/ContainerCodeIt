@@ -50,6 +50,15 @@ $script:CodeItOpenCodeV1Args = @(
     '--title', '--thinking', '--variant', '--dir', 'default', 'json'
 )
 
+$script:CodeItCodexArgs = @(
+    # OpenAI Codex: the flags people reach for most
+    'exec', 'resume', 'login', 'logout', 'review', 'mcp', '-m', '--model', '-s', '--sandbox',
+    '-a', '--ask-for-approval', '-p', '--profile', '-c', '--config', '-C', '--cd',
+    '--worktree', '--search', '--add-dir', '-i', '--image', '--oss',
+    'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'o4-mini',
+    'read-only', 'workspace-write', 'danger-full-access', 'on-request', 'never'
+)
+
 $codeItCommands = @(
     'Code-It.ps1', './Code-It.ps1', '.\Code-It.ps1',
     'Claude-It.ps1', './Claude-It.ps1', '.\Claude-It.ps1',
@@ -61,11 +70,11 @@ Register-ArgumentCompleter -CommandName $codeItCommands -ParameterName agentArgs
 
     # Which agent's flags to offer: the alias script chooses it, -claude/-opencode wins
     $agent = if ("$commandName" -like '*Claude-It*') { 'claude' } else { 'opencode' }
-    if ($fakeBoundParameters.ContainsKey('agent') -and $fakeBoundParameters['agent'] -eq 'opencode-v1') { $agent = 'opencode-v1' }
+    if ($fakeBoundParameters.ContainsKey('agent') -and $fakeBoundParameters['agent']) { $agent = "$($fakeBoundParameters['agent'])" }
     if ($fakeBoundParameters.ContainsKey('claude'))   { $agent = 'claude' }
     if ($fakeBoundParameters.ContainsKey('opencode')) { $agent = 'opencode' }
 
-    $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'opencode-v1') { $script:CodeItOpenCodeV1Args } else { $script:CodeItOpenCodeArgs }
+    $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'opencode-v1') { $script:CodeItOpenCodeV1Args } elseif ($agent -eq 'codex') { $script:CodeItCodexArgs } else { $script:CodeItOpenCodeArgs }
     $candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "$agent $_")
 }

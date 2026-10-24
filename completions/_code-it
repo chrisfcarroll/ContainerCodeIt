@@ -58,6 +58,18 @@ _code_it() {
                 (*) opts=(run mini --standalone --server --model --agent --prompt
                           --continue -c --session --format --file --help) ;;
             esac
+        elif [[ $agent == codex ]]; then
+            case $prev in
+                (-m|--model)   opts=(gpt-6.1-sol gpt-6-sol gpt-6-luna gpt-6-astra o4-mini) ;;
+                (-s|--sandbox) opts=(read-only workspace-write danger-full-access) ;;
+                (-a|--ask-for-approval) opts=(on-request never) ;;
+                (-c|--config)  return ;;   # free text key=value: leave it to the user
+                (*) opts=(
+                        exec resume login logout review mcp -m --model -s --sandbox
+                        -a --ask-for-approval -p --profile -c --config -C --cd
+                        --worktree --search --add-dir -i --image --oss
+                    ) ;;
+            esac
         else
             # opencode-v1: the flags people reach for most, not the full list
             case $prev in

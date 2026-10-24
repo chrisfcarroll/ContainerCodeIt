@@ -1,0 +1,5 @@
+# OpenAI Codex configuration, copied to <save dir>/.codex/config.toml on first
+# run. code-it's container is the sandbox, so codex needs no second one inside
+# it, and can work free of permissions interruption.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"

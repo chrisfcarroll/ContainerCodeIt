@@ -31,6 +31,14 @@ _code_it_opencode_v1_opts='run --continue -c --session -s --fork --prompt --mode
     --agent --auto --port --hostname --share --file -f --format --title --thinking
     --variant --dir'
 
+# OpenAI Codex: the flags people reach for most
+_code_it_codex_opts='exec resume login logout review mcp -m --model -s --sandbox
+    -a --ask-for-approval -p --profile -c --config -C --cd --worktree --search
+    --add-dir -i --image --oss'
+_code_it_codex_models='gpt-6.1-sol gpt-6-sol gpt-6-luna gpt-6-astra o4-mini'
+_code_it_codex_sandboxes='read-only workspace-write danger-full-access'
+_code_it_codex_approvals='on-request never'
+
 _code_it() {
     local cur prev agent seen_dashdash=0 i
 
@@ -72,6 +80,14 @@ _code_it() {
                 --file) COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
             esac
             COMPREPLY=( $(compgen -W "$_code_it_opencode_opts" -- "$cur") )
+        elif [[ "$agent" == codex ]]; then
+            case "$prev" in
+                -m|--model)   COMPREPLY=( $(compgen -W "$_code_it_codex_models" -- "$cur") ); return ;;
+                -s|--sandbox) COMPREPLY=( $(compgen -W "$_code_it_codex_sandboxes" -- "$cur") ); return ;;
+                -a|--ask-for-approval) COMPREPLY=( $(compgen -W "$_code_it_codex_approvals" -- "$cur") ); return ;;
+                -c|--config)  return ;; # free text key=value: leave it to the user
+            esac
+            COMPREPLY=( $(compgen -W "$_code_it_codex_opts" -- "$cur") )
         else
             # opencode-v1
             case "$prev" in
