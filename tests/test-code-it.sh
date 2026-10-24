@@ -235,8 +235,11 @@ assert_contains "--list-agents lists claude" "$out" "claude"
 assert_contains "--list-agents lists opencode" "$out" "opencode"
 assert_contains "--list-agents lists opencode-v1" "$out" "opencode-v1"
 assert_contains "--list-agents shows the short flag" "$out" "-o"
-PATH="$stub_docker:$PATH" "$code_it" --agent nosuchagent "${common_args[@]}" >/dev/null 2>&1
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent nosuchagent "${common_args[@]}" 2>&1)
 [[ "$?" != "0" ]]; assert "unknown --agent fails" "$?"
+assert_contains "unknown agent lists the available agents" "$out" "The available agents are:"
+assert_contains "the agent list includes a short flag" "$out" "  opencode   -o"
+assert_contains "unknown agent explains code-it-add-agent" "$out" "code-it-add-agent NAME adds a new one, if the agent has a recognised internet presence"
 
 # ---------------------------------------------------------------------------
 echo "6. Alias scripts"

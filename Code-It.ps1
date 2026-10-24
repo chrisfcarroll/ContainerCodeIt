@@ -283,10 +283,7 @@ $packageCachesDir = Join-Path $PSScriptRoot 'package-caches'
 
 # -listAgents lists the available agent definitions and exits.
 if ($listAgents) {
-    foreach ($name in (Get-CodeItListAgents $agentsDir)) {
-        $short = Get-CodeItAgentConfig $agentsDir $name 'AGENT_SHORT'
-        if ($short) { "  {0,-10} -{1}" -f $name, $short } else { "  $name" }
-    }
+    Get-CodeItPrintAgents $agentsDir
     exit 0
 }
 
@@ -334,8 +331,9 @@ $agentCmdHeadlessPrompt = ""
 $agentCmdHeadlessNoPrompt = ""
 if (-not $noAgent) {
     if (-not (Test-CodeItAgentExists $agentsDir $codeAgent)) {
-        Write-Warning "Unknown agent '$codeAgent'. Known agents: $((Get-CodeItListAgents $agentsDir) -join ' ')"
-        Write-Warning "Run .\Code-It.ps1 -listAgents to see them."
+        Write-Warning "Unknown agent '$codeAgent'. The available agents are:"
+        Get-CodeItPrintAgents $agentsDir | ForEach-Object { Write-Host $_ }
+        Write-Host "code-it-add-agent NAME adds a new one, if the agent has a recognised internet presence."
         exit 1
     }
     $agentBinary      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_BINARY'

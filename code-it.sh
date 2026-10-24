@@ -417,14 +417,7 @@ fi
 
 # --list-agents lists the available agent definitions and exits.
 if [[ "$list_agents" == true ]]; then
-    while IFS= read -r name; do
-        short=$(ci_agent_config "$agents_dir" "$name" AGENT_SHORT)
-        if [[ -n "$short" ]]; then
-            printf '  %-10s -%s\n' "$name" "$short"
-        else
-            printf '  %s\n' "$name"
-        fi
-    done < <(ci_list_agents "$agents_dir")
+    ci_print_agents "$agents_dir"
     exit 0
 fi
 
@@ -462,8 +455,9 @@ AGENT_EXCLUSIVE_DIRS=""
 AGENT_EXCLUSIVE_CARRY=""
 if [[ "$no_agent" == false ]]; then
     if ! ci_agent_exists "$agents_dir" "$code_agent"; then
-        echo "Warning: Unknown agent '$code_agent'. Known agents: $(ci_list_agents "$agents_dir" | tr '\n' ' ')" >&2
-        echo "Run $0 --list-agents to see them." >&2
+        echo "Warning: Unknown agent '$code_agent'. The available agents are:" >&2
+        ci_print_agents "$agents_dir" >&2
+        echo "code-it-add-agent NAME adds a new one, if the agent has a recognised internet presence." >&2
         exit 1
     fi
     # shellcheck disable=SC1090

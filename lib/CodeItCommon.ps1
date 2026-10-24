@@ -451,6 +451,15 @@ function Test-CodeItAgentExists([string]$dir, [string]$name) {
 
 function Get-CodeItListAgents([string]$dir) { return Get-CodeItDefinitions $dir }
 
+# Get-CodeItPrintAgents DIR: the available agents, one per line, with their short
+# flags: -listAgents and the unknown-agent error print the same list (Spec 18)
+function Get-CodeItPrintAgents([string]$dir) {
+    foreach ($name in (Get-CodeItListAgents $dir)) {
+        $short = Get-CodeItAgentConfig $dir $name 'AGENT_SHORT'
+        if ($short) { '  {0,-10} -{1}' -f $name, $short } else { "  $name" }
+    }
+}
+
 function Resolve-CodeItAgents([string]$raw, [string]$dir) {
     $requested = if ($raw) { Split-CodeItList $raw } else { $script:CodeItDefaultAgents }
     $out = @()

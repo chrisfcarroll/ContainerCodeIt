@@ -331,6 +331,9 @@ Assert-Contains "-listAgents lists opencode" $r.out 'opencode'
 Assert-Contains "-listAgents lists opencode-v1" $r.out 'opencode-v1'
 $r = Invoke-Scenario $codeIt (@('-agent','nosuchagent') + $commonArgs) $stubPath
 Assert "unknown -agent fails" ($r.code -ne 0)
+Assert-Contains "unknown agent lists the available agents" $r.out 'The available agents are:'
+Assert-Contains "the agent list includes a short flag" $r.out '  opencode   -o'
+Assert-Contains "unknown agent explains code-it-add-agent" $r.out 'code-it-add-agent NAME adds a new one, if the agent has a recognised internet presence'
 $r = Invoke-Scenario $codeIt (@('-c','-o') + $commonArgs) $stubPath
 Assert "-c and -o together fails" ($r.code -ne 0)
 

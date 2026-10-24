@@ -7,6 +7,7 @@
 #   ci_path_component NAME                            -> NAME as a mount path component
 #   ci_work_mount_path WORKDIR                        -> /work/<parent>/<name> mount path
 #   ci_list_definitions DIR                           one definition name per line
+#   ci_print_agents AGENTS_DIR                         the agents, one per line, with short flags
 #   ci_toolchain_alias DIR NAME                       canonical name for an alias
 #   ci_resolve_toolchain RAW DIR                      -> space-separated canonical list
 #   ci_known_toolchain LABEL DIR                      -> the known chains only, space-separated
@@ -466,6 +467,20 @@ ci_list_agents() {
         [[ -f "$d/config" ]] || continue
         basename "$d"
     done
+}
+
+# ci_print_agents AGENTS_DIR: the available agents, one per line, with their short
+# flags: --list-agents and the unknown-agent error print the same list (Spec 18)
+ci_print_agents() {
+    local name short
+    while IFS= read -r name; do
+        short=$(ci_agent_config "$1" "$name" AGENT_SHORT)
+        if [[ -n "$short" ]]; then
+            printf '  %-10s -%s\n' "$name" "$short"
+        else
+            printf '  %s\n' "$name"
+        fi
+    done < <(ci_list_agents "$1")
 }
 
 # ci_resolve_agents RAW AGENTS_DIR: canonical space-separated agent list, or return 1.
