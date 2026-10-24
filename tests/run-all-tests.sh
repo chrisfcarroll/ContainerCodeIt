@@ -35,6 +35,9 @@ if [[ -n "$pwsh_bin" ]]; then
     echo
     echo "=== pwsh: Test-CodeItDefaults.ps1 (using $pwsh_bin) ==="
     "$pwsh_bin" -NoProfile -File "$tests_dir/Test-CodeItDefaults.ps1" || rc=1
+    echo
+    echo "=== pwsh: Test-UpdateOpencodeNews.ps1 (using $pwsh_bin) ==="
+    "$pwsh_bin" -NoProfile -File "$tests_dir/Test-UpdateOpencodeNews.ps1" || rc=1
 else
     echo "No working pwsh found: skipping PowerShell tests"
 fi

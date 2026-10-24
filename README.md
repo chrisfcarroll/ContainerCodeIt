@@ -515,6 +515,21 @@ docker run -it --rm \
 
 `--dry-run` prints the exact command.
 
+## News
+
+`news/` holds generated summary pages, pwsh-only. `news/opencode/opencode-go-models-2026-10.html`
+lists the models OpenCode serves with their prices, from
+[models.dev](https://models.dev) — the registry OpenCode itself reads — and cites it
+in the page header. Refresh the page's model list and prices with:
+
+```bash
+pwsh -File news/update-opencode-news.ps1
+```
+
+which updates the page inline (its whole table is rendered from one data array) and
+the "snapshot" date. See `pwsh -File news/update-opencode-news.ps1 -help` for the
+options and the link to the source of the data.
+
 ## Rough Edges
 
 - Tested mostly on MacOs and Win11.
