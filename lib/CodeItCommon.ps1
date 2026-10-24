@@ -144,13 +144,13 @@ function Test-CodeItToolchainInclude([string]$imageChains, [string[]]$requested)
 }
 
 # Get-CodeItImageToolchain RUNTIME IMAGE: the comma-separated toolchains recorded on
-# IMAGE (its code-it.tool-chains label, or the code-it-alpine-<chains> name), or "".
+# IMAGE (its code-it.toolchains label, or the code-it-alpine-<chains> name), or "".
 function Get-CodeItImageToolchain([string]$runtime, [string]$image) {
     $chains = ""
     if ($runtime -eq 'docker') {
-        $chains = (docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' $image 2>$null)
+        $chains = (docker image inspect --format '{{ index .Config.Labels "code-it.toolchains" }}' $image 2>$null)
     } else {
-        $chains = (container image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' $image 2>$null)
+        $chains = (container image inspect --format '{{ index .Config.Labels "code-it.toolchains" }}' $image 2>$null)
     }
     $chains = "$chains".Trim()
     if ($chains -notmatch '^[a-z,]*$') { $chains = "" }
@@ -500,7 +500,7 @@ function Get-CodeItAgentStateMkdirPaths([string]$dir, [string[]]$names) {
 function Bool-Arg([bool]$on) { if ($on) { 'true' } else { 'false' } }
 
 # Invoke-CodeItAdder NAME BRANCH REPO CODEIT DRYRUN PROMPT: the plumbing shared by
-# Code-It-Add-Agent and Code-It-Add-Tool-Chain. Prints its banners to the host and
+# Code-It-Add-Agent and Code-It-Add-Toolchain. Prints its banners to the host and
 # returns the exit code. With DRYRUN it prints the prompt and command and does nothing
 # else. Otherwise it refuses a dirty repo or an existing branch, creates BRANCH, runs
 # CODEIT headless with PROMPT, prints the branch and diff summary, and returns

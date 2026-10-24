@@ -112,6 +112,6 @@ Do not push. Work only on the current branch.
 
 . "$PSScriptRoot/lib/CodeItCommon.ps1"
 
-# Hand off to the plumbing shared with Code-It-Add-Tool-Chain.ps1.
+# Hand off to the plumbing shared with Code-It-Add-Toolchain.ps1.
 $rc = Invoke-CodeItAdder -name $Name -branch $branch -repo $repo -codeIt $codeIt -dryRun $dryRun.IsPresent -prompt $prompt
 exit $rc

@@ -59,7 +59,7 @@ if "%~1"=="image" if "%~2"=="inspect" echo %* | findstr /c:"code-it.agents" >nul
     goto :eof
 )
 if "%~1"=="image" if "%~2"=="inspect" (
-    if defined STUB_IMAGE_TOOL_CHAINS (echo %STUB_IMAGE_TOOL_CHAINS%) else (echo dotnet,node)
+    if defined STUB_IMAGE_TOOLCHAINS (echo %STUB_IMAGE_TOOLCHAINS%) else (echo dotnet,node)
     goto :eof
 )
 if "%~1"=="build" echo STUB-DOCKER-BUILD %*& goto :eof
@@ -71,7 +71,7 @@ echo stub docker: %*
 #!/bin/sh
 case "$1" in
     images) [ -n "$STUB_IMAGES_FAIL" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
-    image)  case "$2" in inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
+    image)  case "$2" in inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOLCHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
     build)  [ -n "$STUB_BUILD_FAIL" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -96,7 +96,7 @@ if "%~1"=="image" if "%~2"=="inspect" echo %* | findstr /c:"code-it.agents" >nul
     goto :eof
 )
 if "%~1"=="image" if "%~2"=="inspect" (
-    if defined STUB_IMAGE_TOOL_CHAINS (echo %STUB_IMAGE_TOOL_CHAINS%) else (echo dotnet,node)
+    if defined STUB_IMAGE_TOOLCHAINS (echo %STUB_IMAGE_TOOLCHAINS%) else (echo dotnet,node)
     goto :eof
 )
 if "%~1"=="build" echo STUB-CONTAINER-BUILD %*& goto :eof
@@ -109,7 +109,7 @@ echo stub container: %*
 case "$1" in
     image)  case "$2" in
                 ls)      echo "code-it-alpine-dotnet-node  latest" ;;
-                inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;;
+                inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOLCHAINS-dotnet,node}" ;; esac ;;
                 *)       echo "stub container: $*" ;;
             esac ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
@@ -224,7 +224,7 @@ function Assert-NotInCapture([string]$desc, [string]$needle) {
 
 # ---------------------------------------------------------------------------
 "1. Parse checks"
-foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','Code-It-Defaults.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
+foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Toolchain.ps1','Code-It-Defaults.ps1','lib/CodeItCommon.ps1','Claude-It.ps1','OpenCode-It.ps1','tests/Test-CodeIt.ps1','completions/CodeItCompletion.ps1')) {
     $parseErrors = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptDir $f), [ref]$null, [ref]$parseErrors)
     Assert "parses: $f" ($parseErrors.Count -eq 0)
@@ -243,7 +243,7 @@ if (Get-Command git -EA Silent) {
 }
 # Comment-based help needs a blank line after the shebang: with the shebang directly
 # above it, Get-Help finds no help and prints only the one-line syntax.
-foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1','Code-It-Defaults.ps1')) {
+foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-It-Add-Agent.ps1','Code-It-Add-Toolchain.ps1','Code-It-Defaults.ps1')) {
     $path = Join-Path $scriptDir $f
     Assert "keeps its shebang: $f" ((Get-Content $path -TotalCount 1) -eq '#! /usr/bin/env pwsh')
     $help = Get-Help $path -Full | Out-String
@@ -256,7 +256,7 @@ Assert-Contains "-help documents -agent" $r.out 'Run the agent defined in agents
 Assert-Contains "-help documents -locale" $r.out "The container's locale (its LANG)"
 Assert "-help no longer offers building" (-not $r.out.Contains('-buildImage') -and -not $r.out.Contains('-dockerfileDir'))
 Assert-Contains "-help documents the remembered toolchain default" $r.out '<saveDir>/image-history'
-foreach ($f in @('Code-It-Add-Agent.ps1','Code-It-Add-Tool-Chain.ps1')) {
+foreach ($f in @('Code-It-Add-Agent.ps1','Code-It-Add-Toolchain.ps1')) {
     $help = Get-Help (Join-Path $scriptDir $f) -Full | Out-String
     Assert "help examples use PowerShell's -url: $f" (-not $help.Contains(' --url '))
 }
@@ -416,7 +416,7 @@ Assert-NotInCapture "Code-It-Build builds only the toolchain given" 'apk add --n
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
 Assert "Code-It-Build -dryRun exit code 0" ($r.code -eq 0)
 Assert-Contains "build dry-run prints the build command" $r.out 'docker build'
-Assert-Contains "build dry-run labels the toolchains" $r.out '--label code-it.tool-chains=dotnet,node'
+Assert-Contains "build dry-run labels the toolchains" $r.out '--label code-it.toolchains=dotnet,node'
 Assert-Contains "build dry-run labels the package caches" $r.out '--label code-it.package-caches=nuget,npm'
 Assert-Contains "build dry-run derives the default image name" $r.out '-t code-it-alpine-dotnet-node:latest'
 Assert "build dry-run does not execute the build" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
@@ -551,14 +551,14 @@ $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-do
 Assert "Code-It-Build unknown agent fails" ($r.code -ne 0)
 
 "9d. Code-It reads the image label"
-$env:STUB_IMAGE_TOOL_CHAINS = 'node,bun'
+$env:STUB_IMAGE_TOOLCHAINS = 'node,bun'
 try { $r = Invoke-Scenario $codeIt (@('-toolchain', 'dotnet,node', '-image', 'code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
-finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
+finally { $env:STUB_IMAGE_TOOLCHAINS = $null }
 Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for toolchains 'node,bun'"
 # There is no default toolchain: -image alone takes the image's own toolchains
-$env:STUB_IMAGE_TOOL_CHAINS = 'node,bun'
+$env:STUB_IMAGE_TOOLCHAINS = 'node,bun'
 try { $r = Invoke-Scenario $codeIt (@('-image', 'code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
-finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
+finally { $env:STUB_IMAGE_TOOLCHAINS = $null }
 Assert "-image without -toolchain runs" ($r.code -eq 0)
 Assert "-image without -toolchain does not assume dotnet,node" (-not $r.out.Contains('looks built for'))
 Assert "-image without -toolchain mounts the caches of the image's toolchains" (-not $r.out.Contains('NuGet'))
@@ -874,9 +874,9 @@ Assert-Contains "ts-bun aliases bun and dedupes with bun" $r.out '-t code-it-alp
 $r = Invoke-Scenario $codeIt (@('-toolchain','dotnet,node','-packages','npm') + $commonArgs) $stubPath
 Assert-Contains "removed -packages is forwarded to the agent" $r.out '-packages npm'
 
-$env:STUB_IMAGE_TOOL_CHAINS = 'dotnet'
+$env:STUB_IMAGE_TOOLCHAINS = 'dotnet'
 try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
-finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
+finally { $env:STUB_IMAGE_TOOLCHAINS = $null }
 Assert-Contains "warns when the image label disagrees with -toolchain" $r.out "looks built for toolchains 'dotnet'"
 # An image whose agents label lacks the chosen agent stops before docker run, readably
 # (the stub answers the agents label lookup with STUB_IMAGE_AGENTS)
@@ -912,9 +912,9 @@ finally { $env:STUB_IMAGE_AGENTS = $null }
 Assert "image without agent-binaries label still runs" ($r.code -eq 0 -and $r.out.Contains("docker run -it"))
 Assert-Contains "image without agent-binaries label warns it may be out of date" $r.out "predates code-it recording its agents' binaries"
 # Without a label (older images), fall back to the name-based guess
-$env:STUB_IMAGE_TOOL_CHAINS = ''
+$env:STUB_IMAGE_TOOLCHAINS = ''
 try { $r = Invoke-Scenario $codeIt (@('-toolchain','node,bun','-image','code-it-alpine-dotnet-node') + $commonArgs) $stubPath }
-finally { $env:STUB_IMAGE_TOOL_CHAINS = $null }
+finally { $env:STUB_IMAGE_TOOLCHAINS = $null }
 Assert-Contains "falls back to the image-name guess without a label" $r.out "looks built for toolchains 'dotnet,node'"
 
 # Unknown names are hard errors
@@ -1097,42 +1097,42 @@ $r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoC, '-codeIt', $stubCi) 
 Assert "add-agent refuses an existing branch" ($r.code -ne 0)
 
 # ---------------------------------------------------------------------------
-"12c. Code-It-Add-Tool-Chain.ps1"
-$addTc = Join-Path $scriptDir 'Code-It-Add-Tool-Chain.ps1'
+"12c. Code-It-Add-Toolchain.ps1"
+$addTc = Join-Path $scriptDir 'Code-It-Add-Toolchain.ps1'
 
 # -dryRun prints the prompt (with the security gate) and the command
 $repoD = Join-Path $tmp 'addtc-a'; New-GitRepo $repoD
 $r = Invoke-Scenario $addTc @('java', '-repo', $repoD, '-codeIt', $stubCi, '-dryRun') $stubPath
-Assert "add-tool-chain -dryRun exit code 0" ($r.code -eq 0)
-Assert-Contains "add-tool-chain prompt names the toolchain" $r.out 'Toolchain to add: java'
-Assert-Contains "add-tool-chain prompt includes the gate" $r.out 'Gate first'
-Assert-Contains "add-tool-chain prompt requires a secure install" $r.out 'installs securely'
-Assert-Contains "add-tool-chain prompt requires musl builds" $r.out 'musl builds for x86_64 and aarch64'
-Assert-Contains "add-tool-chain -dryRun prints -headless" $r.out '-headless'
-Assert "add-tool-chain -dryRun creates no branch" (-not (& git -C $repoD branch --list 'add-tool-chain/*'))
+Assert "add-toolchain -dryRun exit code 0" ($r.code -eq 0)
+Assert-Contains "add-toolchain prompt names the toolchain" $r.out 'Toolchain to add: java'
+Assert-Contains "add-toolchain prompt includes the gate" $r.out 'Gate first'
+Assert-Contains "add-toolchain prompt requires a secure install" $r.out 'installs securely'
+Assert-Contains "add-toolchain prompt requires musl builds" $r.out 'musl builds for x86_64 and aarch64'
+Assert-Contains "add-toolchain -dryRun prints -headless" $r.out '-headless'
+Assert "add-toolchain -dryRun creates no branch" (-not (& git -C $repoD branch --list 'add-toolchain/*'))
 
 # -url is included
 $r = Invoke-Scenario $addTc @('java', '-url', 'https://openjdk.org/install/', '-repo', $repoD, '-codeIt', $stubCi, '-dryRun') $stubPath
-Assert-Contains "add-tool-chain prompt includes the docs URL" $r.out 'https://openjdk.org/install/'
+Assert-Contains "add-toolchain prompt includes the docs URL" $r.out 'https://openjdk.org/install/'
 
 # a dirty repo is refused
 Add-Content -Path (Join-Path $repoD 'x') -Value 'y'
 $r = Invoke-Scenario $addTc @('java', '-repo', $repoD, '-codeIt', $stubCi) $stubPath
-Assert "add-tool-chain refuses a dirty repo" ($r.code -ne 0)
+Assert "add-toolchain refuses a dirty repo" ($r.code -ne 0)
 & git -C $repoD checkout -q -- .
 
 # branch creation and summary
 $r = Invoke-Scenario $addTc @('java', '-repo', $repoD, '-codeIt', $stubCi) $stubPath
-Assert "add-tool-chain run exit code 0" ($r.code -eq 0)
-Assert "add-tool-chain checks out the new branch" ((& git -C $repoD rev-parse --abbrev-ref HEAD) -eq 'add-tool-chain/java')
-Assert-Contains "add-tool-chain prints the branch" $r.out 'Branch: add-tool-chain/java'
+Assert "add-toolchain run exit code 0" ($r.code -eq 0)
+Assert "add-toolchain checks out the new branch" ((& git -C $repoD rev-parse --abbrev-ref HEAD) -eq 'add-toolchain/java')
+Assert-Contains "add-toolchain prints the branch" $r.out 'Branch: add-toolchain/java'
 
 # a gate refusal exit code is propagated
 $repoE = Join-Path $tmp 'addtc-b'; New-GitRepo $repoE
 $env:STUB_CODE_IT_EXIT = '4'
 try { $r = Invoke-Scenario $addTc @('java', '-repo', $repoE, '-codeIt', $stubCi) $stubPath }
 finally { $env:STUB_CODE_IT_EXIT = $null }
-Assert "add-tool-chain propagates a gate refusal" ($r.code -eq 4)
+Assert "add-toolchain propagates a gate refusal" ($r.code -eq 4)
 
 # ---------------------------------------------------------------------------
 "12d. Code-It-FirstRun.ps1"

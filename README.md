@@ -51,7 +51,7 @@ It will refuse to run on a dirty repository, and works on a new branch
 
 ## Add new toolchains and languages
 
-`code-it-add-tool-chain NAME [--url URL]` will use code-it to attempt to add a new
+`code-it-add-toolchain NAME [--url URL]` will use code-it to attempt to add a new
 supported toolchain to your repo and image.
 The agent doing the install is prompted to first check whether NAME is a well-known 
 language/runtime whose toolchain installs securely (Alpine repos or the vendor's 
@@ -63,9 +63,9 @@ the existing ones, an optional `package-caches/NAME/` read-only cache, completio
 README, tests, and a commit.
 
 ```bash
-./code-it-add-tool-chain.sh java --url https://openjdk.org/install/
-./code-it-add-tool-chain.sh java --dry-run
-.\Code-It-Add-Tool-Chain.ps1 java -url https://openjdk.org/install/
+./code-it-add-toolchain.sh java --url https://openjdk.org/install/
+./code-it-add-toolchain.sh java --dry-run
+.\Code-It-Add-Toolchain.ps1 java -url https://openjdk.org/install/
 ```
 
 ## tmux, zsh, --no-agent, -noAgent
@@ -108,7 +108,7 @@ Start a container without an agent with --no-agent / -noAgent
 
 When the image derived from `--toolchain` (e.g. `code-it-alpine-dotnet`) does not
 exist, `code-it` uses the most-recently built existing image whose
-`code-it.tool-chains` label contains every requested chain (e.g.
+`code-it.toolchains` label contains every requested chain (e.g.
 `code-it-alpine-dotnet-bun` for `dotnet`), and says which image it chose. If no image
 contains them, it warns, builds the missing image with `code-it-build` (the requested
 toolchains, package caches and locale; the default agents plus the one about to run),
@@ -143,7 +143,7 @@ toolchains and package caches). They accept the same logical parameters:
 
 With no parameters, `code-it-build` runs the same toolchain and agent selection used by first-run, confirms, and builds the image. `--yes` accepts the detected toolchains and agents without prompting. `code-it-build --toolchain node --dry-run` remains a non-interactive build.
 
-The image is labelled `code-it.tool-chains=<chains>` and
+The image is labelled `code-it.toolchains=<chains>` and
 `code-it.package-caches=<caches>`; `code-it` reads that label to warn if the image was
 built for a different toolchain set, falling back to the image-name guess for images
 that predate the label.
@@ -459,7 +459,7 @@ own favourites.
 source /path/to/ContainerCodeIt/completions/code-it.bash
 source /path/to/ContainerCodeIt/completions/code-it-build.bash
 source /path/to/ContainerCodeIt/completions/code-it-add-agent.bash
-source /path/to/ContainerCodeIt/completions/code-it-add-tool-chain.bash
+source /path/to/ContainerCodeIt/completions/code-it-add-toolchain.bash
 source /path/to/ContainerCodeIt/completions/code-it-first-run.bash
 source /path/to/ContainerCodeIt/completions/code-it-doctor.bash
 source /path/to/ContainerCodeIt/completions/code-it-defaults.bash

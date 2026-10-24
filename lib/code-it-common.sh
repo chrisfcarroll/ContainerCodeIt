@@ -12,7 +12,7 @@
 #   ci_resolve_toolchain RAW DIR                      -> space-separated canonical list
 #   ci_known_toolchain LABEL DIR                      -> the known chains only, space-separated
 #   ci_resolve_package_caches RAW TOOLCHAINS TC_DIR PC_DIR -> space-separated list
-#   ci_default_image_name TOOL_CHAINS                 -> code-it-alpine-<chains>
+#   ci_default_image_name TOOLCHAINS                 -> code-it-alpine-<chains>
 #   ci_has LIST ITEM                                  return 0 if ITEM is in LIST
 #   ci_agent_state_mkdir_paths AGENTS_DIR AGENTS      home paths to pre-create for mounts
 #   ci_detect_runtime REQUESTED                       -> docker|container, or return 1
@@ -165,7 +165,7 @@ ci_resolve_package_caches() {
     printf '%s' "$out"
 }
 
-# ci_default_image_name TOOL_CHAINS: e.g. code-it-alpine-dotnet or code-it-alpine-node-bun
+# ci_default_image_name TOOLCHAINS: e.g. code-it-alpine-dotnet or code-it-alpine-node-bun
 ci_default_image_name() {
     printf 'code-it-alpine-%s' "$(ci_join - "$1")"
 }
@@ -181,13 +181,13 @@ ci_toolchain_include() {
 }
 
 # ci_image_toolchain RUNTIME IMAGE: echo the comma-separated toolchains recorded on
-# IMAGE (its code-it.tool-chains label, or the code-it-alpine-<chains> name), or
+# IMAGE (its code-it.toolchains label, or the code-it-alpine-<chains> name), or
 # nothing if it cannot be told.
 ci_image_toolchain() {
     local runtime="$1" image="$2" chains=""
     case "$runtime" in
-        docker)    chains=$(docker image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image" 2>/dev/null || true) ;;
-        container) chains=$(container image inspect --format '{{ index .Config.Labels "code-it.tool-chains" }}' "$image" 2>/dev/null || true) ;;
+        docker)    chains=$(docker image inspect --format '{{ index .Config.Labels "code-it.toolchains" }}' "$image" 2>/dev/null || true) ;;
+        container) chains=$(container image inspect --format '{{ index .Config.Labels "code-it.toolchains" }}' "$image" 2>/dev/null || true) ;;
     esac
     # A runtime that does not know the format prints its own error text to stdout; keep
     # only a plausible comma-separated toolchain list.
@@ -596,7 +596,7 @@ ci_agent_detected() {
 }
 
 # ci_add_via_code_it NAME BRANCH REPO CODE_IT DRY_RUN PROMPT: the plumbing shared by
-# code-it-add-agent and code-it-add-tool-chain. With DRY_RUN=true it prints the prompt
+# code-it-add-agent and code-it-add-toolchain. With DRY_RUN=true it prints the prompt
 # and command and returns 0. Otherwise it refuses a dirty repo or an existing branch,
 # creates BRANCH, runs CODE_IT headless with PROMPT, prints the branch and a diff
 # summary, and returns code-it's exit code.

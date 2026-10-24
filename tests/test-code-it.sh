@@ -50,7 +50,7 @@ cat > "$stub_docker/docker" <<'EOF'
 #!/bin/sh
 case "$1" in
     images) [ -n "${STUB_IMAGES_FAIL:-}" ] && exit 1; echo "code-it-alpine-dotnet-node:latest" ;;
-    image)  case "$2" in inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
+    image)  case "$2" in inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOLCHAINS-dotnet,node}" ;; esac ;; *) echo "stub docker: $*" ;; esac ;;
     build)  [ -n "${STUB_BUILD_FAIL:-}" ] && exit 3; echo "STUB-DOCKER-BUILD $*" ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
@@ -65,7 +65,7 @@ cat > "$stub_container/container" <<'EOF'
 case "$1" in
     image)  case "$2" in
                 ls)      echo "code-it-alpine-dotnet-node  latest" ;;
-                inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;;
+                inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOLCHAINS-dotnet,node}" ;; esac ;;
                 *)       echo "stub container: $*" ;;
             esac ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
@@ -107,17 +107,17 @@ common_args=(--dry-run --work-dir "$script_dir" --save-dir "$save")
 # ---------------------------------------------------------------------------
 echo "1. Syntax checks (bash -n)"
 for f in code-it.sh code-it-build.sh code-it-first-run.sh code-it-add-agent.sh \
-         code-it-add-tool-chain.sh code-it-defaults.sh lib/code-it-common.sh claude-it.sh opencode-it.sh \
+         code-it-add-toolchain.sh code-it-defaults.sh lib/code-it-common.sh claude-it.sh opencode-it.sh \
          tests/test-code-it.sh tests/test-code-it-defaults.sh \
          completions/code-it.bash completions/code-it-build.bash \
-         completions/code-it-add-agent.bash completions/code-it-add-tool-chain.bash \
+         completions/code-it-add-agent.bash completions/code-it-add-toolchain.bash \
          completions/code-it-first-run.bash completions/code-it-defaults.bash; do
     bash -n "$script_dir/$f"
     assert "bash -n $f" "$?"
 done
 if command -v zsh &>/dev/null; then
     for f in completions/_code-it completions/_code-it-build completions/_code-it-add-agent \
-             completions/_code-it-add-tool-chain completions/_code-it-first-run \
+             completions/_code-it-add-toolchain completions/_code-it-first-run \
              completions/_code-it-defaults; do
         zsh -n "$script_dir/$f"
         assert "zsh -n $f" "$?"
@@ -367,7 +367,7 @@ assert_not_in_df "code-it-build builds only the toolchain given" "apk add --no-c
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" 2>&1)
 assert "code-it-build --dry-run exit code" "$?"
 assert_contains "build dry-run prints the build command" "$out" "docker build"
-assert_contains "build dry-run labels the toolchains" "$out" "--label code-it.tool-chains=dotnet,node"
+assert_contains "build dry-run labels the toolchains" "$out" "--label code-it.toolchains=dotnet,node"
 assert_contains "build dry-run labels the package caches" "$out" "--label code-it.package-caches=nuget,npm"
 assert_contains "build dry-run derives the default image name" "$out" "-t code-it-alpine-dotnet-node:latest"
 case "$out" in
@@ -527,10 +527,10 @@ PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --docker
 [[ "$?" != "0" ]]; assert "code-it-build unknown agent fails" "$?"
 
 echo "10d. code-it reads the image label"
-out=$(STUB_IMAGE_TOOL_CHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --toolchain dotnet,node --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+out=$(STUB_IMAGE_TOOLCHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --toolchain dotnet,node --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for toolchains 'node,bun'"
 # There is no default toolchain: --image alone takes the image's own toolchains
-out=$(STUB_IMAGE_TOOL_CHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+out=$(STUB_IMAGE_TOOLCHAINS=node,bun PATH="$stub_docker:$PATH" "$code_it" --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert "--image without --toolchain runs" "$?"
 [[ "$out" != *"looks built for"* ]]; assert "--image without --toolchain does not assume dotnet,node" "$?"
 [[ "$out" != *NuGet* ]]; assert "--image without --toolchain mounts the caches of the image's toolchains" "$?"
@@ -855,7 +855,7 @@ PATH="$stub_docker:$PATH" "$code_it" --packages npm "${common_args[@]}" >/dev/nu
 [[ "$?" != "0" ]]; assert "removed --packages spelling fails" "$?"
 
 # An image label that disagrees with --toolchain is called out
-out=$(STUB_IMAGE_TOOL_CHAINS=dotnet PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+out=$(STUB_IMAGE_TOOLCHAINS=dotnet PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "warns when the image label disagrees with --toolchain" "$out" "looks built for toolchains 'dotnet'"
 # An image whose agents label lacks the chosen agent stops before docker run, readably
 # (the stub answers the agents label lookup with STUB_IMAGE_AGENTS)
@@ -881,7 +881,7 @@ out=$(STUB_IMAGE_AGENTS=opencode,opencode-v1 PATH="$stub_docker:$PATH" "$code_it
 assert "image without agent-binaries label still runs" "$?"
 assert_contains "image without agent-binaries label warns it may be out of date" "$out" "predates code-it recording its agents' binaries"
 # Without a label (older images), fall back to the name-based guess
-out=$(STUB_IMAGE_TOOL_CHAINS="" PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+out=$(STUB_IMAGE_TOOLCHAINS="" PATH="$stub_docker:$PATH" "$code_it" --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
 assert_contains "falls back to the image-name guess without a label" "$out" "looks built for toolchains 'dotnet,node'"
 
 # Unknown names are hard errors
@@ -1173,41 +1173,41 @@ PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_c" --code-it "$stub_
 [[ "$?" != "0" ]]; assert "add-agent refuses an existing branch" "$?"
 
 # ---------------------------------------------------------------------------
-echo "17. code-it-add-tool-chain"
-add_tc="$script_dir/code-it-add-tool-chain.sh"
+echo "17. code-it-add-toolchain"
+add_tc="$script_dir/code-it-add-toolchain.sh"
 
 # (a) --dry-run prints the prompt (with the security gate) and the command
 repo_d="$tmp/addtc-a"; mkrepo "$repo_d"
 out=$(PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_d" --code-it "$stub_ci" --dry-run 2>&1)
-assert "add-tool-chain --dry-run exit code" "$?"
-assert_contains "add-tool-chain prompt names the toolchain" "$out" "Toolchain to add: java"
-assert_contains "add-tool-chain prompt includes the gate" "$out" "Gate first"
-assert_contains "add-tool-chain prompt requires a secure install" "$out" "installs securely"
-assert_contains "add-tool-chain prompt requires musl builds" "$out" "musl builds for x86_64 and aarch64"
-assert_contains "add-tool-chain dry-run prints the command" "$out" "--headless"
-[[ -z "$(git -C "$repo_d" branch --list 'add-tool-chain/*')" ]]; assert "add-tool-chain --dry-run creates no branch" "$?"
+assert "add-toolchain --dry-run exit code" "$?"
+assert_contains "add-toolchain prompt names the toolchain" "$out" "Toolchain to add: java"
+assert_contains "add-toolchain prompt includes the gate" "$out" "Gate first"
+assert_contains "add-toolchain prompt requires a secure install" "$out" "installs securely"
+assert_contains "add-toolchain prompt requires musl builds" "$out" "musl builds for x86_64 and aarch64"
+assert_contains "add-toolchain dry-run prints the command" "$out" "--headless"
+[[ -z "$(git -C "$repo_d" branch --list 'add-toolchain/*')" ]]; assert "add-toolchain --dry-run creates no branch" "$?"
 
 # (b) --url is included
 out=$(PATH="$stub_docker:$PATH" "$add_tc" java --url "https://openjdk.org/install/" --repo "$repo_d" --code-it "$stub_ci" --dry-run 2>&1)
-assert_contains "add-tool-chain prompt includes the docs URL" "$out" "https://openjdk.org/install/"
+assert_contains "add-toolchain prompt includes the docs URL" "$out" "https://openjdk.org/install/"
 
 # (c) dirty repo refusal
 printf 'y\n' >> "$repo_d/x"
 PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_d" --code-it "$stub_ci" >/dev/null 2>&1
-[[ "$?" != "0" ]]; assert "add-tool-chain refuses a dirty repo" "$?"
+[[ "$?" != "0" ]]; assert "add-toolchain refuses a dirty repo" "$?"
 git -C "$repo_d" checkout -q -- .
 
 # (d) branch creation and summary
 out=$(PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_d" --code-it "$stub_ci" 2>&1)
-assert "add-tool-chain run exit code" "$?"
-[[ "$(git -C "$repo_d" rev-parse --abbrev-ref HEAD)" == "add-tool-chain/java" ]]
-assert "add-tool-chain checks out the new branch" "$?"
-assert_contains "add-tool-chain prints the branch" "$out" "Branch: add-tool-chain/java"
+assert "add-toolchain run exit code" "$?"
+[[ "$(git -C "$repo_d" rev-parse --abbrev-ref HEAD)" == "add-toolchain/java" ]]
+assert "add-toolchain checks out the new branch" "$?"
+assert_contains "add-toolchain prints the branch" "$out" "Branch: add-toolchain/java"
 
 # (e) gate refusal exit code is propagated
 repo_e="$tmp/addtc-b"; mkrepo "$repo_e"
 STUB_CODE_IT_EXIT=4 PATH="$stub_docker:$PATH" "$add_tc" java --repo "$repo_e" --code-it "$stub_ci" >/dev/null 2>&1
-[[ "$?" == "4" ]]; assert "add-tool-chain propagates a gate refusal" "$?"
+[[ "$?" == "4" ]]; assert "add-toolchain propagates a gate refusal" "$?"
 
 # ---------------------------------------------------------------------------
 echo "18. code-it-first-run"
@@ -1609,7 +1609,7 @@ cat > "$stub_locks/docker" <<'EOF'
 #!/bin/sh
 case "$1" in
     images) echo "code-it-alpine-dotnet-node:latest" ;;
-    image)  echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;;
+    image)  echo "${STUB_IMAGE_TOOLCHAINS-dotnet,node}" ;;
     run)    echo "STUB-DOCKER-RUN $*"; echo "LOCKS-DURING-RUN: $(cd "$STUB_LOCK_DIR" && ls *.lock | tr '\n' ' ')" ;;
     *)      echo "stub docker: $*" ;;
 esac

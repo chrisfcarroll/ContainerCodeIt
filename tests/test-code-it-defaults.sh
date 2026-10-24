@@ -62,7 +62,7 @@ case "$1" in
         echo "code-it-alpine-dotnet-node:latest"
         if [ -n "${STUB_IMAGES_EXTRA-}" ]; then echo "$STUB_IMAGES_EXTRA"; fi
         ;;
-    image)  case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOL_CHAINS-dotnet,node}" ;; esac ;;
+    image)  case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOLCHAINS-dotnet,node}" ;; esac ;;
     run)    echo "STUB-DOCKER-RUN $*" ;;
     *)      echo "stub docker: $*" ;;
 esac

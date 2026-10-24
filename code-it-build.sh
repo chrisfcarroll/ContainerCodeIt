@@ -50,7 +50,7 @@
 #   --help, -h               Show this help message.
 #
 # The image is labelled with its toolchains, package caches and locale
-# (code-it.tool-chains=..., code-it.package-caches=..., code-it.locale=...), so
+# (code-it.toolchains=..., code-it.package-caches=..., code-it.locale=...), so
 # code-it.sh can detect a mismatch between the image and the --toolchain it was
 # asked to run.
 
@@ -451,7 +451,7 @@ build_args=(--build-arg "LOCALE=$container_locale")
 
 # Label the image with its resolution, so code-it.sh can check it rather than guess
 # from the image name.
-build_args+=(--label "code-it.tool-chains=$(ci_join , "$enabled_toolchain")")
+build_args+=(--label "code-it.toolchains=$(ci_join , "$enabled_toolchain")")
 build_args+=(--label "code-it.package-caches=$(ci_join , "$enabled_package_caches")")
 build_args+=(--label "code-it.agents=$(ci_join , "$enabled_agents")")
 build_args+=(--label "code-it.locale=$container_locale")

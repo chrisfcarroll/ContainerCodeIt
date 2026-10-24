@@ -26,13 +26,13 @@
     code-it launcher to invoke. Default: Code-It.ps1 next to this script.
 
 .PARAMETER branch
-    Branch to create. Default: add-tool-chain/<name>.
+    Branch to create. Default: add-toolchain/<name>.
 
 .PARAMETER dryRun
     Print the prompt and the code-it command, and do nothing else.
 
 .EXAMPLE
-    .\Code-It-Add-Tool-Chain.ps1 java -url https://openjdk.org/install/
+    .\Code-It-Add-Toolchain.ps1 java -url https://openjdk.org/install/
 #>
 
 [CmdletBinding(PositionalBinding = $false)]
@@ -54,14 +54,14 @@ if ($help) {
 }
 
 if (-not $Name) {
-    Write-Warning "Usage: Code-It-Add-Tool-Chain.ps1 NAME [-url URL] [-dryRun]"
+    Write-Warning "Usage: Code-It-Add-Toolchain.ps1 NAME [-url URL] [-dryRun]"
     exit 1
 }
 if ($Name -notmatch '^[a-z][a-z0-9-]*$') {
     Write-Warning "'$Name' is not a valid toolchain name; use lowercase letters, digits and dashes."
     exit 1
 }
-if (-not $branch) { $branch = "add-tool-chain/$Name" }
+if (-not $branch) { $branch = "add-toolchain/$Name" }
 
 if (-not (Test-Path -Path (Join-Path $repo '.git'))) {
     Write-Warning "'$repo' is not a git repository."

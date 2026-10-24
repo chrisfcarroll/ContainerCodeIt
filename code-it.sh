@@ -68,7 +68,7 @@
 #   --image, -i NAME         Image name to run. Default: "code-it-alpine-<toolchains>", a
 #                            slug of the resolved --toolchain list, e.g. code-it-alpine-dotnet,
 #                            code-it-alpine-node-bun. When that image does not exist, the
-#                            most-recently built existing image whose code-it.tool-chains
+#                            most-recently built existing image whose code-it.toolchains
 #                            label contains every requested toolchain is used instead;
 #                            failing that, code-it-build.sh builds it first.
 #                            Set it explicitly to force a particular image (an error if it

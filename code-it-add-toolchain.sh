@@ -5,14 +5,14 @@
 # added, adds tests, and commits.
 #
 # Usage:
-#   ./code-it-add-tool-chain.sh NAME [OPTIONS]
+#   ./code-it-add-toolchain.sh NAME [OPTIONS]
 #
 # Options:
 #   --url URL         URL of the language/runtime's official documentation (optional).
 #   --repo DIR        Repository to add the toolchain to. Default: this script's directory.
 #   --code-it PATH    code-it launcher to invoke. Default: ./code-it.sh next to this
 #                     script. Mainly useful for testing.
-#   --branch NAME     Branch to create. Default: add-tool-chain/<name>.
+#   --branch NAME     Branch to create. Default: add-toolchain/<name>.
 #   --dry-run, -d     Print the prompt and the code-it command, and do nothing else.
 #   --help, -h        Show this help message.
 #
@@ -86,7 +86,7 @@ if [[ ! "$name" =~ ^[a-z][a-z0-9-]*$ ]]; then
 fi
 
 if [[ -z "$branch" ]]; then
-    branch="add-tool-chain/$name"
+    branch="add-toolchain/$name"
 fi
 
 if [[ ! -d "$repo/.git" && ! -f "$repo/.git" ]]; then

@@ -71,7 +71,7 @@
 .PARAMETER image
     Image name to run. Default: "code-it-alpine-<toolchains>", a slug of the resolved -toolchain
     list, e.g. code-it-alpine-dotnet or code-it-alpine-node-bun. When that image does not
-    exist, the most-recently built existing image whose code-it.tool-chains label contains
+    exist, the most-recently built existing image whose code-it.toolchains label contains
     every requested toolchain is used instead; failing that, Code-It-Build.ps1 builds it
     first. Set it explicitly to force a particular
     image (an error if it does not exist).

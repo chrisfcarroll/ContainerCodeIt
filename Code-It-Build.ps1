@@ -372,7 +372,7 @@ try {
     # The fragments are the toolchain and package-cache selection, so the only build
     # arg left is the locale; labels record the resolution.
     $buildArgs = @('--build-arg', "LOCALE=$containerLocale")
-    $buildArgs += @('--label', "code-it.tool-chains=$($enabledToolchain -join ',')")
+    $buildArgs += @('--label', "code-it.toolchains=$($enabledToolchain -join ',')")
     $buildArgs += @('--label', "code-it.package-caches=$($enabledPackageCaches -join ',')")
     $buildArgs += @('--label', "code-it.agents=$($enabledAgents -join ',')")
     $buildArgs += @('--label', "code-it.locale=$containerLocale")
