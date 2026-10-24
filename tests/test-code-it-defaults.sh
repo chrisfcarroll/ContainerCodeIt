@@ -192,10 +192,10 @@ assert_contains "dry-run says what it would set" "$out" "would set"
 echo "9. Interactive: picks by number, blanks keep, none clears"
 save_i="$tmp/save-int"; mkdir -p "$save_i"
 # Toolchains are listed as code-it-build lists them: bun, dotnet, node, powershell, python
-out=$(printf '1\n\n\n\n3,5\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
+out=$(printf '1\n\n\n\nnode,python\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "interactive exit code" "$?"
 grep -q '^default-agent=claude$' "$save_i/defaults"; assert "first agent preselected answer is claude" "$?"
-grep -q '^default-toolchain=node,python$' "$save_i/defaults"; assert "toolchain answered by numbers" "$?"
+grep -q '^default-toolchain=node,python$' "$save_i/defaults"; assert "toolchain answered by name" "$?"
 [[ ! -e "$save_i/.claude/settings.json" ]]; assert "blank model answer keeps (creates nothing)" "$?"
 out=$(printf 'opencode-v1\n\nmy-favourite-model\n\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "second interactive run exit code" "$?"

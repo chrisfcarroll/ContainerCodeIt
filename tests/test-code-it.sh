@@ -361,13 +361,14 @@ assert_not_in_df() {
     if grep -q -- "$needle" "$capture" 2>/dev/null; then assert "$desc (found: $needle)" 1; else assert "$desc" 0; fi
 }
 
-# With no toolchain, build asks interactively; menu numbers select the requested items.
-out=$(printf '2\n1\ny\n' | PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+# With no toolchain, build asks interactively; menu items select by name or number.
+# The names, not the numbers, so the scenario does not depend on the menu's order.
+out=$(printf 'dotnet\nclaude\ny\n' | PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
 assert "code-it-build without parameters offers interactive selection" "$?"
 assert_contains "interactive build asks about toolchains" "$out" "Toolchains to build"
 assert_contains "interactive build asks about agents" "$out" "Agents to install"
-assert_contains "interactive build selects the numbered toolchain" "$out" "toolchains dotnet"
-assert_contains "interactive build selects the numbered agent" "$out" "agents claude"
+assert_contains "interactive build selects the named toolchain" "$out" "toolchains dotnet"
+assert_contains "interactive build selects the named agent" "$out" "agents claude"
 [[ "$out" != *STUB-DOCKER-BUILD* ]]; assert "interactive build dry-run does not build" "$?"
 PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain , >/dev/null 2>&1
 [[ "$?" == "1" ]]; assert "code-it-build with an empty --toolchain list exits 1" "$?"
@@ -401,6 +402,19 @@ assert_not_in_df "build leaves bun out" "bun.sh/install"
 assert_not_in_df "build leaves python out" "apk add --no-cache python3 uv"
 assert_not_in_df "build leaves powershell out" "PowerShell/releases/download"
 assert_not_in_df "build has no toolchain build switches" "ARG DOTNET"
+
+# The new native-musl toolchains (Spec 18): rust and go from Alpine's own packages
+do_capture --dockerfile-dir "$script_dir" --toolchain rust --runtime docker
+assert_in_df "build assembles rust" "apk add --no-cache rust cargo"
+assert_not_in_df "build --toolchain rust leaves go out" "apk add --no-cache go "
+do_capture --dockerfile-dir "$script_dir" --toolchain go --runtime docker
+assert_in_df "build assembles go" "apk add --no-cache go "
+assert_in_df "go pins its toolchain to the image's own" "ENV GOTOOLCHAIN=local"
+assert_not_in_df "build --toolchain go leaves rust out" "apk add --no-cache rust cargo"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain rust 2>&1)
+assert_contains "rust derives the image name" "$out" "-t code-it-alpine-rust:latest"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain go 2>&1)
+assert_contains "go derives the image name" "$out" "-t code-it-alpine-go:latest"
 
 # --tech is the kept alias of --toolchain
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tech bun 2>&1)

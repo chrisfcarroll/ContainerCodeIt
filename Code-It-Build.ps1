@@ -20,7 +20,7 @@
 .PARAMETER toolchain
     Comma-separated toolchains to build. Known: dotnet, node (aliases js-node,
     ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell
-    (alias pwsh). Alias: -stack.
+    (alias pwsh), rust, go. Alias: -stack.
     With no selection, interactive setup asks which detected toolchains to build.
 
 .PARAMETER packageCaches

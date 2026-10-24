@@ -192,10 +192,10 @@ Assert "-dryRun wrote no files" (@(Get-ChildItem $saveDry -Recurse -File).Count 
 $saveInt = Join-Path $tmp 'interactive'; $null = New-Item -ItemType Directory -Force -Path $saveInt
 # Agents are listed alphabetically: claude, opencode, opencode-v1. The toolchains
 # are listed as Code-It-Build lists them: bun, dotnet, node, powershell, python.
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('1', '', '', '', '3,5')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('1', '', '', '', 'node,python')
 Assert "interactive exit code 0" ($r.code -eq 0)
 Assert "first agent answer is claude" ((Get-Content "$saveInt/defaults") -contains 'default-agent=claude')
-Assert "toolchain answered by numbers" ((Get-Content "$saveInt/defaults") -contains 'default-toolchain=node,python')
+Assert "toolchain answered by name" ((Get-Content "$saveInt/defaults") -contains 'default-toolchain=node,python')
 Assert "blank model answer keeps (creates nothing)" (-not (Test-Path "$saveInt/.claude/settings.json"))
 # (Get-ChildItem lists agents alphabetically: claude, codex, opencode, opencode-v1;
 # answer by name so the scenario does not depend on that order)

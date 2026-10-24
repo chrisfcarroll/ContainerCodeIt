@@ -96,7 +96,7 @@ _code_it() {
         (--agent-name) compadd -- Agent1; return ;;
         (--locale|-l)  compadd -- like-host C.UTF-8; return ;;
         (--agent|-a)   compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
-        (--toolchain|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
+        (--toolchain|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh rust go; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
         (--prompt|-p|--run-arg|--docker-arg) return ;;   # free text: leave it to the user
     esac

@@ -409,11 +409,11 @@ Assert "interactive build does not invoke docker" (-not $r.out.Contains('STUB-DO
 # Menu numbers select the requested items (toolchains and agents listed alphabetically).
 $env:PATH = $stubPath
 try {
-    $out = "2`n1`ny" | & $pwshExe -NoProfile -Command "& '$codeItBuild' -dryRun -dockerfileDir '$scriptDir'" 2>&1 | Out-String
+    $out = "dotnet`nclaude`ny" | & $pwshExe -NoProfile -Command "& '$codeItBuild' -dryRun -dockerfileDir '$scriptDir'" 2>&1 | Out-String
 } finally { $env:PATH = $origPath }
 Assert-Contains "interactive build asks about agents" $out 'Agents to install'
-Assert-Contains "interactive build selects the numbered toolchain" $out 'toolchains dotnet'
-Assert-Contains "interactive build selects the numbered agent" $out 'agents claude'
+Assert-Contains "interactive build selects the named toolchain" $out 'toolchains dotnet'
+Assert-Contains "interactive build selects the named agent" $out 'agents claude'
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', ',') $stubPath
 Assert "Code-It-Build with an empty -toolchain list exits 1" ($r.code -eq 1)
 Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet', '-runtime', 'docker')
@@ -451,6 +451,18 @@ Assert-InCapture "claude state dir is pre-created for mounts" '~/.claude'
 Assert-NotInCapture "claude state file is not created as a directory" '~/.claude.json'
 Assert-NotInCapture "an assembled image has only the selected agents" 'opencode.ai/install'
 Assert-InCapture "a single agent's binary dir goes on zsh's PATH" 'export PATH="/home/agent1/.local/bin:$PATH"'
+# The new native-musl toolchains (Spec 18): rust and go from Alpine's own packages
+Invoke-Capture $codeItBuild @('-toolchain', 'rust', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
+Assert-InCapture "build assembles rust" 'apk add --no-cache rust cargo'
+Assert-NotInCapture "build -toolchain rust leaves go out" 'apk add --no-cache go '
+Invoke-Capture $codeItBuild @('-toolchain', 'go', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
+Assert-InCapture "build assembles go" 'apk add --no-cache go '
+Assert-InCapture "go pins its toolchain to the image's own" 'ENV GOTOOLCHAIN=local'
+Assert-NotInCapture "build -toolchain go leaves rust out" 'apk add --no-cache rust cargo'
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'rust', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+Assert-Contains "rust derives the image name" $r.out '-t code-it-alpine-rust:latest'
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'go', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+Assert-Contains "go derives the image name" $r.out '-t code-it-alpine-go:latest'
 
 # -tech is the kept alias of -toolchain
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath

@@ -99,7 +99,7 @@
 #                            instead.
 #                            Known: dotnet, node (aliases js-node, ts-node), bun
 #                            (aliases js-bun, ts-bun), python (alias uv),
-#                            powershell (alias pwsh).
+#                            powershell (alias pwsh), rust, go.
 #   --package-caches LIST    Comma-separated package repos whose host cache is mounted
 #                            read-only. 
 #                            Known: nuget, npm, bun.
