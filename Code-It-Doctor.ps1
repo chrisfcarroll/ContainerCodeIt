@@ -181,8 +181,8 @@ if ($runtimeOk) {
 Section "Save dir"
 if (Test-Path $saveDir -PathType Container) { Ok "$saveDir exists" }
 else { Warn "$saveDir does not exist yet; code-it will run first-run" }
-# opencode's session databases: opencode-v1's at the save dir root, opencode (v2)'s
-# under opencode-v2/, and the copies a second container gets (Spec 12). A corrupt one
+# opencode's session databases: under opencode-v2/, and the copies a second
+# container gets (Spec 12). A corrupt one
 # gives "can't create session".
 $opencodeDbs = @()
 if (Test-Path $saveDir -PathType Container) {

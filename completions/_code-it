@@ -7,10 +7,9 @@
 #
 # Completes the launcher's own options, and, after `--`, the flags of whichever
 # coding agent the command line selects: claude-it.sh (or -c) completes Claude Code
-# flags, opencode-it.sh (or -o, the default) completes OpenCode v2 flags; select
-# opencode-v1 with --agent to complete v1 flags.
+# flags, opencode-it.sh (or -o, the default) completes OpenCode flags.
 #     https://code.claude.com/docs/en/cli-reference
-#     https://opencode.ai/docs/cli/
+#     https://opencode.ai/v2/docs/cli/
 
 _code_it() {
     local cur prev agent=opencode seen_dashdash=0 i
@@ -68,18 +67,6 @@ _code_it() {
                         exec resume login logout review mcp -m --model -s --sandbox
                         -a --ask-for-approval -p --profile -c --config -C --cd
                         --worktree --search --add-dir -i --image --oss
-                    ) ;;
-            esac
-        else
-            # opencode-v1: the flags people reach for most, not the full list
-            case $prev in
-                (--format)   opts=(default json) ;;
-                (--file|-f)  _files; return ;;
-                (--dir)      _files -/; return ;;
-                (*) opts=(
-                        run --continue -c --session -s --fork --prompt --model -m
-                        --agent --auto --port --hostname --share --file -f --format
-                        --title --thinking --variant --dir
                     ) ;;
             esac
         fi

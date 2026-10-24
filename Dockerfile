@@ -74,8 +74,7 @@ USER agent1
 RUN mkdir -p ~/.local/bin ~/.local/share
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
 
-# The default agent: opencode (v2, GA — `opencode` means v2 since its GA; v1 is the
-# separate opencode-v1 agent). code-it-build replaces this whole marked region
+# The default agent: opencode (v2). code-it-build replaces this whole marked region
 # with the selected agents' install fragments (agents/<name>/install.dockerfile)
 # plus the /etc/code-it-agents name=binary map go.sh reads, so an assembled image
 # contains exactly the agents it was asked for. Built directly, this region
@@ -85,8 +84,8 @@ RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
 USER root
 RUN apk add --no-cache libgcc libstdc++
 USER agent1
-# Its installer always writes ~/.opencode/bin/opencode, where opencode-v1 lives, so
-# install into a scratch HOME and move the binary to its own directory.
+# Its installer writes ~/.opencode/bin/opencode, so install into a scratch HOME and
+# move the binary to ~/.opencode-v2/bin, the AGENT_BINARY existing images record.
 # Download the installer before running it: with "curl | bash" a failed download
 # runs an empty script and the layer succeeds without the agent. The final test
 # fails the build if the binary still is not there.

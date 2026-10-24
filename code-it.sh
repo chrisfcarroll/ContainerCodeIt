@@ -162,7 +162,7 @@
 #   - Volume mounts preserve the selected agent's state between container runs, so you
 #     can destroy the container and create a new one without logging in again. Only
 #     the paths in AGENT_STATE_DIRS and AGENT_STATE_FILES of agents/NAME/config are
-#     mounted, under SAVE-DIR (or SAVE-DIR/AGENT_SAVE_SUBDIR, e.g. for opencode, v2,
+#     mounted, under SAVE-DIR (or SAVE-DIR/AGENT_SAVE_SUBDIR, e.g. for opencode,
 #     whose state lives under opencode-v2/)
 #   - Only one container at a time may use an agent's AGENT_EXCLUSIVE_DIRS (opencode's
 #     session database, ~/.local/share/opencode, is corrupted if two share it). When
@@ -424,8 +424,8 @@ if [[ "$no_agent" == false && "$agent_explicit" == false ]]; then
     saved_agent=$(ci_config_value "$save_dir/defaults" "default-agent") || saved_agent=""
     if [[ -n "$saved_agent" ]]; then
         code_agent="$saved_agent"
-        # Say so: the agent's own state comes with it, and v2's login lives
-        # elsewhere from v1's, so the switch is otherwise invisible
+        # Say so: the agent's own state, and its login, come with it, so the
+        # switch is otherwise invisible
         echo "    Using saved default agent: $saved_agent"
     fi
 fi
@@ -589,8 +589,8 @@ container_work_dir=$(ci_work_mount_path "$work_dir_to_mount")
 # Create the save dir structure so mounts always work, even on first run. State
 # paths come from the agent definition: directories are created; single files are
 # pre-created so the runtime does not make a directory in their place.
-# An agent whose state would clash with another's (opencode-v2 reads the same
-# paths as opencode, but rejects its config) keeps it under AGENT_SAVE_SUBDIR.
+# An agent whose state would clash with another's, or that has always kept it in
+# a subdirectory (opencode, under opencode-v2/), keeps it under AGENT_SAVE_SUBDIR.
 agent_save_dir="$save_dir${AGENT_SAVE_SUBDIR:+/$AGENT_SAVE_SUBDIR}"
 mkdir -p "$agent_save_dir"
 agent_state_dirs=()
@@ -938,7 +938,7 @@ if [[ -n "${AGENT_EXCLUSIVE_DIRS:-}" ]]; then
                     fi
                 done
             fi
-            # A new copy with no credentials to carry (opencode-v2 keeps its login in
+            # A new copy with no credentials to carry (opencode keeps its login in
             # the database) starts logged out
             has_login=false
             IFS=':' read -r -a carry_files <<< "${AGENT_EXCLUSIVE_CARRY:-}"

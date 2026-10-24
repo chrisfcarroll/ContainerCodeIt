@@ -5,10 +5,9 @@
 #
 # Completes the launcher's own options, and, after `--`, the flags of whichever
 # coding agent the command line selects: claude-it.sh (or -c) completes Claude Code
-# flags, opencode-it.sh (or -o, the default) completes OpenCode v2 flags; select
-# opencode-v1 with --agent to complete v1 flags.
+# flags, opencode-it.sh (or -o, the default) completes OpenCode flags.
 #     https://code.claude.com/docs/en/cli-reference
-#     https://opencode.ai/docs/cli/
+#     https://opencode.ai/v2/docs/cli/
 
 _code_it_opts='--agent -a --list-agents --opencode -o --claude -c --no-agent --zsh --prompt -p --headless
     --work-dir -w --save-dir -s --image -i
@@ -23,13 +22,9 @@ _code_it_claude_opts='--print -p --continue -c --resume -r --fork-session --mode
 _code_it_claude_models='opus sonnet haiku claude-opus-5 claude-sonnet-5 claude-haiku-4-5'
 _code_it_claude_permission_modes='default acceptEdits plan auto dontAsk bypassPermissions manual'
 
-# OpenCode v2 (`opencode` since v2's GA): the flags people reach for most
+# OpenCode: the flags people reach for most
 _code_it_opencode_opts='run mini --standalone --server --model --agent --prompt
     --continue -c --session --format --file --help'
-# OpenCode v1: the flags people reach for most
-_code_it_opencode_v1_opts='run --continue -c --session -s --fork --prompt --model -m
-    --agent --auto --port --hostname --share --file -f --format --title --thinking
-    --variant --dir'
 
 # OpenAI Codex: the flags people reach for most
 _code_it_codex_opts='exec resume login logout review mcp -m --model -s --sandbox
@@ -88,14 +83,6 @@ _code_it() {
                 -c|--config)  return ;; # free text key=value: leave it to the user
             esac
             COMPREPLY=( $(compgen -W "$_code_it_codex_opts" -- "$cur") )
-        else
-            # opencode-v1
-            case "$prev" in
-                --format)     COMPREPLY=( $(compgen -W "default json" -- "$cur") ); return ;;
-                --file|-f)    COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
-                --dir)        COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
-            esac
-            COMPREPLY=( $(compgen -W "$_code_it_opencode_v1_opts" -- "$cur") )
         fi
         return
     fi

@@ -129,27 +129,25 @@ Assert "unknown toolchain fails" ($r.code -ne 0)
 # ---------------------------------------------------------------------------
 "5. -model writes each agent's own config under the save dir"
 # Reusing $save, which has the agent and toolchain set above, so -show lists them
-$r = Invoke-Scenario "& '$defaults' -saveDir '$save' -model 'opencode-v1=anthropic/claude-sonnet-4-5','claude=opus','opencode=zhipuai/glm-4.6'" $stubPath
+$r = Invoke-Scenario "& '$defaults' -saveDir '$save' -model 'claude=opus','opencode=zhipuai/glm-4.6'" $stubPath
 Assert "-model exit code 0" ($r.code -eq 0)
 $c = Get-Content "$save/defaults"
-Assert "defaults records opencode-v1's model" ($c -contains 'model.opencode-v1=anthropic/claude-sonnet-4-5')
 Assert "defaults records claude's model" ($c -contains 'model.claude=opus')
-Assert "defaults records opencode (v2)'s model" ($c -contains 'model.opencode=zhipuai/glm-4.6')
-$freshConfig = (Get-Content "$save/.config/opencode/config.json" -Raw | ConvertFrom-Json)
-Assert "opencode-v1 config gets the model key" ($freshConfig.model -eq 'anthropic/claude-sonnet-4-5')
+Assert "defaults records opencode's model" ($c -contains 'model.opencode=zhipuai/glm-4.6')
 Assert "claude settings get the model key" ((Get-Content "$save/.claude/settings.json" -Raw | ConvertFrom-Json).model -eq 'opus')
-Assert "opencode (v2) config, under its save subdir, gets the model key" `
-    ((Get-Content "$save/opencode-v2/.config/opencode/opencode.json" -Raw | ConvertFrom-Json).model -eq 'zhipuai/glm-4.6')
+$ocConfig = "$save/opencode-v2/.config/opencode/opencode.json"
+Assert "opencode config, under its save subdir, gets the model key" `
+    ((Get-Content $ocConfig -Raw | ConvertFrom-Json).model -eq 'zhipuai/glm-4.6')
 
 # Models survive a round-trip into an existing, other-keyed config
-$null = New-Item -ItemType Directory -Force -Path "$save/.config/opencode", "$save/.claude"
-Copy-Item "$scriptDir/agents/opencode-v1/default-config/.config/opencode/config.json" "$save/.config/opencode/config.json"
+$null = New-Item -ItemType Directory -Force -Path (Split-Path $ocConfig), "$save/.claude"
+Copy-Item "$scriptDir/agents/opencode/default-config/.config/opencode/opencode.json" $ocConfig
 Copy-Item "$scriptDir/agents/claude/default-config/.claude/settings.json" "$save/.claude/settings.json"
-$r = Invoke-Scenario "& '$defaults' -saveDir '$save' -model 'opencode-v1=openai/gpt-5','claude=claude-opus-4-5'" $stubPath
+$r = Invoke-Scenario "& '$defaults' -saveDir '$save' -model 'opencode=openai/gpt-5','claude=claude-opus-4-5'" $stubPath
 Assert "model round-trip exit code 0" ($r.code -eq 0)
-$rtConfig = Get-Content "$save/.config/opencode/config.json" -Raw | ConvertFrom-Json
-Assert "other opencode config keys survive" ($null -ne $rtConfig.'$schema')
-Assert "opencode-v1 model set in existing config" ($rtConfig.model -eq 'openai/gpt-5')
+$rtConfig = Get-Content $ocConfig -Raw | ConvertFrom-Json
+Assert "other opencode config keys survive" ($null -ne $rtConfig.'$schema' -and $null -ne $rtConfig.permissions)
+Assert "opencode model set in existing config" ($rtConfig.model -eq 'openai/gpt-5')
 $rtSettings = Get-Content "$save/.claude/settings.json" -Raw | ConvertFrom-Json
 Assert "other claude settings keys survive" ($rtSettings.permissions.defaultMode -eq 'auto')
 Assert "claude model set in existing settings" ($rtSettings.model -eq 'claude-opus-4-5')
@@ -190,23 +188,22 @@ Assert "-dryRun wrote no files" (@(Get-ChildItem $saveDry -Recurse -File).Count 
 # ---------------------------------------------------------------------------
 "8. Interactive: picks by number, blanks keep, none clears"
 $saveInt = Join-Path $tmp 'interactive'; $null = New-Item -ItemType Directory -Force -Path $saveInt
-# Agents are listed alphabetically: claude, opencode, opencode-v1. The toolchains
+# Agents are listed alphabetically: claude, codex, opencode. The toolchains
 # are listed as Code-It-Build lists them: bun, dotnet, node, powershell, python.
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('1', '', '', '', 'node,python')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('1', '', '', 'node,python')
 Assert "interactive exit code 0" ($r.code -eq 0)
 Assert "first agent answer is claude" ((Get-Content "$saveInt/defaults") -contains 'default-agent=claude')
 Assert "toolchain answered by name" ((Get-Content "$saveInt/defaults") -contains 'default-toolchain=node,python')
 Assert "blank model answer keeps (creates nothing)" (-not (Test-Path "$saveInt/.claude/settings.json"))
-# (Get-ChildItem lists agents alphabetically: claude, codex, opencode, opencode-v1;
-# answer by name so the scenario does not depend on that order)
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('opencode-v1', '', '', 'my-favourite-model', 'node')
+# (answer by name so the scenario does not depend on the agent order)
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('opencode', '', 'my-favourite-model', 'node')
 Assert "second interactive run exit code 0" ($r.code -eq 0)
-Assert "agent answered as a name" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode-v1')
-Assert "a free-text model is accepted" ((Get-Content "$saveInt/defaults") -contains 'model.opencode-v1=my-favourite-model')
+Assert "agent answered as a name" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode')
+Assert "a free-text model is accepted" ((Get-Content "$saveInt/defaults") -contains 'model.opencode=my-favourite-model')
 Assert "kept model is not overwritten" (-not (Get-Content "$saveInt/defaults" -Raw).Contains("model.claude="))
 Assert-Contains "the interactive picker lists the bundled catalog" $r.out 'anthropic/claude-opus-5-5'
 Assert-Contains "claude's list offers bare aliases" $r.out "  1) opus"
-# The opencode agents' lists prefer opencode-go's models; Claude Code's keeps
+# The opencode list prefers opencode-go's models; Claude Code's keeps
 # Anthropic's bare names, which is all it takes
 Assert-Contains "the opencode picker offers opencode-go's models under opencode-go" $r.out 'opencode-go/glm-5.3'
 Assert "a model opencode-go serves is not also offered under its other provider" `
@@ -215,17 +212,16 @@ Assert "a model opencode-go does not serve keeps its provider" `
     (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) zai/glm-5\.3-flashx$' }).Count -gt 0)
 Assert "claude's list keeps Anthropic's models without the prefix" `
     (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) claude-sonnet-5-5$' }).Count -gt 0)
-# Model questions follow the agent list (codex has none, so it is skipped): on
-# Windows/PowerShell that is claude, opencode, opencode-v1, so the empty answer
-# clears opencode's and 'none' clears opencode-v1's
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('9', 'sonnet', '', 'none', 'none')
+# Model questions follow the agent list (codex has none, so it is skipped):
+# claude, then opencode
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('9', 'sonnet', 'none', 'none')
 Assert "third interactive run exit code 0" ($r.code -eq 0)
-Assert "out-of-range number keeps the saved agent" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode-v1')
+Assert "out-of-range number keeps the saved agent" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode')
 Assert "'sonnet' is accepted for claude" ((Get-Content "$saveInt/defaults") -contains 'model.claude=sonnet')
 Assert "'none' clears a model" `
-    (-not (Get-Content "$saveInt/defaults" -Raw).Contains("model.opencode-v1="))
+    (-not (Get-Content "$saveInt/defaults" -Raw).Contains("model.opencode="))
 Assert "'none' clears the model from the agent's config" `
-    ($null -eq (Get-Content "$saveInt/.config/opencode/config.json" -Raw | ConvertFrom-Json).PSObject.Properties['model'])
+    ($null -eq (Get-Content "$saveInt/opencode-v2/.config/opencode/opencode.json" -Raw | ConvertFrom-Json).PSObject.Properties['model'])
 Assert "'none' clears the toolchain" `
     (-not (Get-Content "$saveInt/defaults" -Raw).Contains("default-toolchain="))
 
@@ -281,21 +277,21 @@ Assert-Contains "it says the agent was set" $r.out 'Default agent: opencode'
 
 # -show names where each agent's model was set
 $showD = Join-Path $tmp 'show-d'
-$null = New-Item -ItemType Directory -Force -Path "$showD/.config/opencode"
+$null = New-Item -ItemType Directory -Force -Path "$showD/opencode-v2/.config/opencode"
 Set-Content -Path "$showD/defaults" -Value "default-agent=opencode`nmodel.opencode=anthropic/claude-sonnet-4-5"
-Set-Content -Path "$showD/.config/opencode/config.json" -Value "{`n  `"model`": `"anthropic/claude-sonnet-4-5`"`n}"
+Set-Content -Path "$showD/opencode-v2/.config/opencode/opencode.json" -Value "{`n  `"model`": `"anthropic/claude-sonnet-4-5`"`n}"
 $r = Invoke-Scenario "& '$defaults' -saveDir '$showD' -show" $stubPath
 Assert-Contains "-show shows the model" $r.out 'model for opencode:'
 Assert-Contains "-show shows the model value" $r.out 'anthropic/claude-sonnet-4-5'
-Assert-Contains "-show names the model file" $r.out "(set in $showD/.config/opencode/config.json)"
+Assert-Contains "-show names the model file" $r.out "(set in $showD/opencode-v2/.config/opencode/opencode.json)"
 
 # Switching the default agent interactively explains that the agent's own state,
 # and login, come with it
 $noteD = Join-Path $tmp 'note-d'
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$noteD'" $stubPath @('opencode-v1', 'none', 'none', 'none', 'none')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$noteD'" $stubPath @('opencode', 'none', 'none', 'none')
 Assert "interactive switch exits 0" ($r.code -eq 0)
 Assert-Contains "the switch explains each agent's own state and login" $r.out 'log in again'
-Assert "the switched agent is saved" ((Get-Content "$noteD/defaults") -contains 'default-agent=opencode-v1')
+Assert "the switched agent is saved" ((Get-Content "$noteD/defaults") -contains 'default-agent=opencode')
 
 # Plain Code-It says when the saved agent is what it launches
 $agentD = Join-Path $tmp 'agent-note'; $null = New-Item -ItemType Directory -Force -Path $agentD

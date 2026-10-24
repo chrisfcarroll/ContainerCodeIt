@@ -358,7 +358,7 @@ function Invoke-Interactive {
     if ($chosen -and $chosen -ne $savedAgent) {
         Write-Host "    Note: each agent keeps its own state, and its own login, under the"
         Write-Host "    save dir, so switching the default agent switches that state too."
-        Write-Host "    opencode, v2, keeps its login in the database under its own directory,"
+        Write-Host "    opencode keeps its login in the database under its own directory,"
         Write-Host "    so its first run there can ask you to log in again."
     }
 

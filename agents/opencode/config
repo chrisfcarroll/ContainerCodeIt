@@ -1,4 +1,4 @@
-# OpenCode (v2, GA) agent definition: `opencode` now means v2. Readable from bash
+# OpenCode (v2) agent definition. Readable from bash
 # (it is sourced) and PowerShell (parsed as key=value). Keep one key per line.
 AGENT_NAME=opencode
 AGENT_SHORT=o
@@ -9,9 +9,8 @@ AGENT_CONFIG_LABEL='OpenCode configuration'
 # How code-it-defaults sets the agent's default model: a JSON file under its save
 # dir (which is AGENT_SAVE_SUBDIR below), and the top-level key to set there
 AGENT_MODEL_FILE='.config/opencode/opencode.json:model'
-# opencode-v1 reads the same paths and rejects v2's config, so v2 keeps its state
-# under its own subdirectory of --save-dir. The name predates v2's GA: it is where
-# v2's state has lived all along, so keep it.
+# Its state lives under its own subdirectory of --save-dir. The name dates from when
+# v1 shared these paths: it is where the state has lived all along, so keep it.
 AGENT_SAVE_SUBDIR=opencode-v2
 # V2 stores global config, session/auth data, and the shared-service record here.
 AGENT_STATE_DIRS='.config/opencode:.local/share/opencode:.local/state/opencode'
@@ -19,8 +18,8 @@ AGENT_STATE_FILES=''
 # One container at a time: concurrent containers corrupt its SQLite session database,
 # and another container's shared-service record (state/opencode/service.json) names a
 # service it cannot reach. A second container gets its own copy of both. Nothing is
-# carried over: V2 keeps its login in that database, not in auth.json (2.0.6 does not
-# import a v1 auth.json into a new database), so a new copy needs a new login.
+# carried over: V2 keeps its login in that database, not in auth.json, so a new copy
+# needs a new login.
 AGENT_EXCLUSIVE_DIRS='.local/share/opencode:.local/state/opencode'
 AGENT_EXCLUSIVE_CARRY=''
 # Prompt translation: {args} is the agent arguments, {prompt} the opening prompt

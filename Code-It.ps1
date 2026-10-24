@@ -191,7 +191,7 @@
     - Volume mounts preserve the selected agent's state between container runs, so you
       can destroy the container and create a new one without logging in again. Only
       the paths in AGENT_STATE_DIRS and AGENT_STATE_FILES of agents/<name>/config are
-      mounted, under <saveDir> (or <saveDir>/AGENT_SAVE_SUBDIR, e.g. for opencode, v2,
+      mounted, under <saveDir> (or <saveDir>/AGENT_SAVE_SUBDIR, e.g. for opencode,
       whose state lives under opencode-v2/)
     - Only one container at a time may use an agent's AGENT_EXCLUSIVE_DIRS (opencode's
       session database, ~/.local/share/opencode, is corrupted if two share it). When
@@ -301,8 +301,8 @@ if ($noAgent) {
         $savedAgent = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-agent'
         if ($savedAgent) {
             $codeAgent = $savedAgent
-            # Say so: the agent's own state comes with it, and v2's login lives
-            # elsewhere from v1's, so the switch is otherwise invisible
+            # Say so: the agent's own state, and its login, come with it, so the
+            # switch is otherwise invisible
             "    Using saved default agent: $savedAgent"
         } else {
             $codeAgent = "opencode"
@@ -514,8 +514,8 @@ $containerWorkDir = Get-CodeItWorkMountPath $WorkDirToMount
 # Create the save dir structure so mounts always work, even on first run. State
 # paths come from the agent definition: directories are created; single files are
 # pre-created so the runtime does not make a directory in their place.
-# An agent whose state would clash with another's (opencode-v2 reads the same
-# paths as opencode, but rejects its config) keeps it under AGENT_SAVE_SUBDIR.
+# An agent whose state would clash with another's, or that has always kept it in
+# a subdirectory (opencode, under opencode-v2/), keeps it under AGENT_SAVE_SUBDIR.
 $agentSaveDir = if ($agentSaveSubdir) { "$saveDir/$agentSaveSubdir" } else { $saveDir }
 $null = New-Item -ItemType Directory -Force -Path $agentSaveDir
 $agentStateDirList   = Split-CodeItList ($agentStateDirs -replace ':', ',')
@@ -774,7 +774,7 @@ if ($exclusiveDirList.Count -gt 0) {
                     }
                 }
             }
-            # A new copy with no credentials to carry (opencode-v2 keeps its login in
+            # A new copy with no credentials to carry (opencode keeps its login in
             # the database) starts logged out
             $hasLogin = $false
             foreach ($f in (Split-CodeItList ($agentExclusiveCarry -replace ':', ','))) {

@@ -280,24 +280,13 @@ Assert "no port is mapped by default" (-not $r.out.Contains(' -p '))
 
 # ---------------------------------------------------------------------------
 "3. Save dir structure is created for first run"
-# The default agent is opencode, which since v2's GA is v2: its state lives under
-# save/opencode-v2/ (AGENT_SAVE_SUBDIR), where it has always lived
+# The default agent is opencode: its state lives under save/opencode-v2/
+# (AGENT_SAVE_SUBDIR), where it has always lived
 Assert "save/opencode-v2/.config/opencode created" (Test-Path "$save/opencode-v2/.config/opencode" -PathType Container)
 Assert "save/opencode-v2/.local/share/opencode created" (Test-Path "$save/opencode-v2/.local/share/opencode" -PathType Container)
 Assert "save/opencode-v2/.local/state/opencode created" (Test-Path "$save/opencode-v2/.local/state/opencode" -PathType Container)
 $opencodeV2Config = Get-Content "$save/opencode-v2/.config/opencode/opencode.json" -Raw | ConvertFrom-Json
-Assert "OpenCode v2 default config permits all actions" ($opencodeV2Config.permissions[0].action -eq '*' -and $opencodeV2Config.permissions[0].effect -eq 'allow')
-$r = Invoke-Scenario $codeIt (@('-agent','opencode-v1') + $commonArgs) $stubPath
-Assert-Contains "reports OpenCode v1 config creation" $r.out 'Created OpenCode v1 configuration'
-$opencodeV1Config = Get-Content "$save/.config/opencode/config.json" -Raw | ConvertFrom-Json
-Assert "OpenCode v1 config permits all actions" ($opencodeV1Config.permission -eq 'allow')
-# opencode-v1 reads the same paths as opencode (v2), so it keeps its state at the
-# save-dir root while v2's stays under save/opencode-v2/
-Assert "opencode-v1 config is not written where opencode (v2) reads it" (-not (Test-Path "$save/opencode-v2/.config/opencode/config.json"))
-Assert-Contains "opencode-v1 mounts config" $r.out "$save/.config/opencode:/home/agent1/.config/opencode"
-Assert-Contains "opencode-v1 mounts data and auth" $r.out "$save/.local/share/opencode:/home/agent1/.local/share/opencode"
-Assert "opencode-v1 mounts no v2 shared-service state" (-not $r.out.Contains('/home/agent1/.local/state/opencode'))
-Assert "opencode-v1 mounts no claude state" (-not $r.out.Contains('/home/agent1/.claude'))
+Assert "OpenCode default config permits all actions" ($opencodeV2Config.permissions[0].action -eq '*' -and $opencodeV2Config.permissions[0].effect -eq 'allow')
 Assert "opencode run creates no claude state" (-not (Test-Path "$save/.claude"))
 
 # ---------------------------------------------------------------------------
@@ -322,8 +311,6 @@ $r = Invoke-Scenario $codeIt (@('-agent','claude') + $commonArgs) $stubPath
 Assert-Contains "-agent claude selects claude" $r.out 'CODE_AGENT="claude"'
 $r = Invoke-Scenario $codeIt (@('-agent','opencode') + $commonArgs) $stubPath
 Assert-Contains "-agent opencode selects opencode" $r.out 'CODE_AGENT="opencode"'
-$r = Invoke-Scenario $codeIt (@('-agent','opencode-v1') + $commonArgs) $stubPath
-Assert-Contains "-agent opencode-v1 selects v1" $r.out 'CODE_AGENT="opencode-v1"'
 $r = Invoke-Scenario $codeIt (@('-agent','codex') + $commonArgs) $stubPath
 Assert-Contains "-agent codex selects codex" $r.out 'CODE_AGENT="codex"'
 Assert-Contains "reports Codex config creation" $r.out 'Created Codex configuration'
@@ -335,7 +322,6 @@ $r = Invoke-ScenarioCommand "& '$codeIt' -listAgents" $stubPath
 Assert "listAgents exit code 0" ($r.code -eq 0)
 Assert-Contains "-listAgents lists claude" $r.out 'claude'
 Assert-Contains "-listAgents lists opencode" $r.out 'opencode'
-Assert-Contains "-listAgents lists opencode-v1" $r.out 'opencode-v1'
 Assert-Contains "-listAgents lists codex" $r.out 'codex'
 $r = Invoke-Scenario $codeIt (@('-agent','nosuchagent') + $commonArgs) $stubPath
 Assert "unknown -agent fails" ($r.code -ne 0)
@@ -520,16 +506,16 @@ foreach ($t in @('dotnet', 'bun')) {
     $p = Join-Path $bDfDir "toolchains/$t/install.dockerfile"
     [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'))
 }
-foreach ($a in @('opencode', 'claude', 'opencode-v1')) {
+foreach ($a in @('opencode', 'claude', 'codex')) {
     $p = Join-Path $bDfDir "agents/$a/install.dockerfile"
     [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'))
 }
-$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker', '-agent', 'opencode,claude,opencode-v1') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker', '-agent', 'opencode,claude,codex') $stubPath
 Assert "Code-It-Build -rebuild exit code 0" ($r.code -eq 0)
 Assert-Contains "Code-It-Build -rebuild invokes docker build" $r.out 'STUB-DOCKER-BUILD'
 Assert "Code-It-Build -rebuild bumps the opencode fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the claude fragment" ((Get-Content (Join-Path $bDfDir 'agents/claude/install.dockerfile') -Raw).Contains("# last changed $today"))
-Assert "Code-It-Build -rebuild bumps the opencode-v1 fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode-v1/install.dockerfile') -Raw).Contains("# last changed $today"))
+Assert "Code-It-Build -rebuild bumps the codex fragment" ((Get-Content (Join-Path $bDfDir 'agents/codex/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the selected toolchain fragment" ((Get-Content (Join-Path $bDfDir 'toolchains/dotnet/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild leaves unselected toolchain fragments alone" ((Get-Content (Join-Path $bDfDir 'toolchains/bun/install.dockerfile') -Raw).Contains('# last changed 2000-01-01'))
 # A missing Dockerfile is an error
@@ -566,10 +552,6 @@ Assert-Contains "-agent opencode selects only opencode" $r.out 'agents opencode'
 Assert "default -agent excludes claude" (-not $r.out.Contains('agents opencode,claude'))
 $r = Invoke-ScenarioCommand "& '$codeItBuild' -toolchain 'dotnet,node' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
 Assert-Contains "-agent accepts a list" $r.out 'agents claude,opencode'
-$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun','-dockerfileDir',$scriptDir,'-agent','opencode-v1') $stubPath
-Assert-Contains "-agent opencode-v1 selects the v1 installer" $r.out 'agents opencode-v1'
-Assert-Contains "opencode-v1 image label records the agent" $r.out '--label code-it.agents=opencode-v1'
-Assert-Contains "opencode-v1 image label records its binary" $r.out '--label code-it.agent-binaries=opencode-v1=/home/agent1/.opencode/bin/opencode'
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun','-dockerfileDir',$scriptDir,'-agent','codex') $stubPath
 Assert-Contains "-agent codex selects the codex installer" $r.out 'agents codex'
 Assert-Contains "codex image label records the agent" $r.out '--label code-it.agents=codex'
@@ -582,7 +564,6 @@ $r = Invoke-ScenarioCommand "& '$codeItBuild' -toolchain 'dotnet,node' -dryRun -
 Assert-Contains "agent-binaries label lists every agent" $r.out '--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode-v2/bin/opencode'
 $v2Install = Get-Content (Join-Path $scriptDir 'agents/opencode/install.dockerfile') -Raw
 Assert "opencode (v2) uses the pinned official installer" ($v2Install.Contains('https://opencode.ai/v2/install -o') -and $v2Install -match 'HOME=\S+ bash \S+ --version 2\.0\.6')
-Assert "opencode and opencode-v1 binaries do not overwrite each other" ((Select-String -Path (Join-Path $scriptDir 'agents/opencode/config') -Pattern '^AGENT_BINARY=').Line -ne (Select-String -Path (Join-Path $scriptDir 'agents/opencode-v1/config') -Pattern '^AGENT_BINARY=').Line)
 Assert "opencode (v2) installs to its own AGENT_BINARY path" ($v2Install -match 'mv \S+/\.opencode/bin/opencode ~/\.opencode-v2/bin/opencode')
 $r = Invoke-ScenarioCommand "& '$codeItBuild' -listAgents" $stubPath
 Assert "Code-It-Build -listAgents exit code 0" ($r.code -eq 0)
@@ -645,10 +626,8 @@ Assert "Dockerfile base installs no GUI, Kerberos or docs packages" (-not ($dfTe
 Assert "Dockerfile does not mix in the edge repository" (-not $dfText.Contains('edge/main'))
 Assert "Dockerfile base keeps musl-locales for international text" ($dfText -match 'apk add --no-cache .*musl-locales')
 Assert "PowerShell tarball layer adds the libraries it needs" ((Get-Content (Join-Path $scriptDir 'toolchains/powershell/install.dockerfile') -Raw).Contains('apk add --no-cache libgcc libstdc++ icu-libs libssl3 && '))
-foreach ($a in @('opencode', 'opencode-v1')) {
-    $fragment = Get-Content (Join-Path $scriptDir "agents/$a/install.dockerfile") -Raw
-    Assert "$a install fragment adds libgcc and libstdc++" ($fragment -match '(?m)^RUN apk add --no-cache libgcc libstdc\+\+\r?$')
-}
+$fragment = Get-Content (Join-Path $scriptDir "agents/opencode/install.dockerfile") -Raw
+Assert "opencode install fragment adds libgcc and libstdc++" ($fragment -match '(?m)^RUN apk add --no-cache libgcc libstdc\+\+\r?$')
 
 "9g. Choosing an existing image that contains the requested toolchains"
 $superDocker = Join-Path $tmp 'super-docker'
@@ -736,9 +715,9 @@ exit ([int]$env:STUB_BUILD_RC)
 $env:CODE_IT_BUILD = $stubBuild
 $env:STUB_IMAGES = 'code-it-alpine-dotnet:latest'
 try {
-    $r = Invoke-Scenario $codeIt (@('-toolchain', 'python', '-packageCaches', 'npm', '-locale', 'en-GB', '-agent', 'opencode-v1') + $commonArgs) $superPath
+    $r = Invoke-Scenario $codeIt (@('-toolchain', 'python', '-packageCaches', 'npm', '-locale', 'en-GB', '-agent', 'codex') + $commonArgs) $superPath
     Assert-Contains "build gets the toolchains and package caches" $r.out 'STUB-BUILD toolchain=python packageCaches=npm'
-    Assert-Contains "build gets the defaults plus the chosen agent" $r.out 'agent=opencode,claude,opencode-v1'
+    Assert-Contains "build gets the defaults plus the chosen agent" $r.out 'agent=opencode,claude,codex'
     Assert-Contains "build gets the locale, runtime and image" $r.out 'locale=en-GB runtime=docker image=code-it-alpine-python yes=True dryRun=True'
     $r = Invoke-Scenario $codeIt (@('-toolchain', 'python', '-claude') + $commonArgs) $superPath
     Assert-Contains "an agent already in the defaults is not repeated" $r.out 'agent=opencode,claude locale'
@@ -940,23 +919,23 @@ try { $r = Invoke-Scenario $codeIt (@('-agent','claude') + $commonArgs) $stubPat
 finally { $env:STUB_IMAGE_AGENTS = $null }
 Assert "image with the chosen agent runs" ($r.code -eq 0)
 # An image whose recorded agent binary differs from the agent's definition is out of
-# date (e.g. opencode-v1 built when it shared opencode, v2's, path): stop before docker run
-$env:STUB_IMAGE_AGENTS = 'opencode,opencode-v1'
-$env:STUB_IMAGE_AGENT_BINARIES = 'opencode=/home/agent1/.opencode-v2/bin/opencode,opencode-v1=/home/agent1/.opencode-v2/bin/opencode'
-try { $r = Invoke-Scenario $codeIt (@('-agent','opencode-v1') + $commonArgs) $stubPath }
+# date (e.g. codex built when its definition named another path): stop before docker run
+$env:STUB_IMAGE_AGENTS = 'opencode,codex'
+$env:STUB_IMAGE_AGENT_BINARIES = 'opencode=/home/agent1/.opencode-v2/bin/opencode,codex=/home/agent1/.codex/bin/codex'
+try { $r = Invoke-Scenario $codeIt (@('-agent','codex') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_AGENTS = $null; $env:STUB_IMAGE_AGENT_BINARIES = $null }
 Assert "image with an out-of-date agent binary fails" ($r.code -ne 0)
-Assert-Contains "names the recorded and expected binaries" $r.out "runs agent 'opencode-v1' from /home/agent1/.opencode-v2/bin/opencode, but agents/opencode-v1/config now names /home/agent1/.opencode/bin/opencode"
-Assert-Contains "out-of-date agent binary suggests the rebuild" $r.out 'Code-It-Build.ps1 -toolchain dotnet,node -agent opencode,opencode-v1'
+Assert-Contains "names the recorded and expected binaries" $r.out "runs agent 'codex' from /home/agent1/.codex/bin/codex, but agents/codex/config now names /home/agent1/.local/bin/codex"
+Assert-Contains "out-of-date agent binary suggests the rebuild" $r.out 'Code-It-Build.ps1 -toolchain dotnet,node -agent opencode,codex'
 Assert "image with an out-of-date agent binary is not run" (-not $r.out.Contains('STUB-DOCKER-RUN'))
-$env:STUB_IMAGE_AGENTS = 'opencode,opencode-v1'
-$env:STUB_IMAGE_AGENT_BINARIES = 'opencode=/home/agent1/.opencode-v2/bin/opencode,opencode-v1=/home/agent1/.opencode/bin/opencode'
-try { $r = Invoke-Scenario $codeIt (@('-agent','opencode-v1') + $commonArgs) $stubPath }
+$env:STUB_IMAGE_AGENTS = 'opencode,codex'
+$env:STUB_IMAGE_AGENT_BINARIES = 'opencode=/home/agent1/.opencode-v2/bin/opencode,codex=/home/agent1/.local/bin/codex'
+try { $r = Invoke-Scenario $codeIt (@('-agent','codex') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_AGENTS = $null; $env:STUB_IMAGE_AGENT_BINARIES = $null }
 Assert "image with the current agent binary runs" ($r.code -eq 0 -and $r.out.Contains("docker run -it"))
 Assert "current agent binary gives no out-of-date warning" (-not $r.out.Contains('out of date') -and -not $r.out.Contains('predates'))
-$env:STUB_IMAGE_AGENTS = 'opencode,opencode-v1'
-try { $r = Invoke-Scenario $codeIt (@('-agent','opencode-v1') + $commonArgs) $stubPath }
+$env:STUB_IMAGE_AGENTS = 'opencode,codex'
+try { $r = Invoke-Scenario $codeIt (@('-agent','codex') + $commonArgs) $stubPath }
 finally { $env:STUB_IMAGE_AGENTS = $null }
 Assert "image without agent-binaries label still runs" ($r.code -eq 0 -and $r.out.Contains("docker run -it"))
 Assert-Contains "image without agent-binaries label warns it may be out of date" $r.out "predates code-it recording its agents' binaries"
@@ -1008,8 +987,6 @@ $r = Invoke-Scenario $codeIt (@('-c','-prompt','explain this repo') + $commonArg
 Assert-Contains "claude: -prompt is the same as a bare prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-o','explain this repo') + $commonArgs) $stubPath
 Assert-Contains "opencode (v2): prompt becomes mini --prompt" $r.out 'code-it-alpine-dotnet-node:latest mini --prompt "explain this repo"'
-$r = Invoke-Scenario $codeIt (@('-agent','opencode-v1','explain this repo') + $commonArgs) $stubPath
-Assert-Contains "opencode-v1 interactive prompt uses --prompt" $r.out 'code-it-alpine-dotnet-node:latest --prompt "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-agent','codex','explain this repo') + $commonArgs) $stubPath
 Assert-Contains "codex bare argument is the prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-o') + $commonArgs) $stubPath
@@ -1029,8 +1006,6 @@ Assert-Contains "-headless passes CODE_AGENT_HEADLESS" $r.out '-e CODE_AGENT_HEA
 Assert-Contains "-headless allocates no TTY" $r.out 'docker run -i --rm'
 $r = Invoke-Scenario $codeIt (@('-o','-headless','fix the build') + $commonArgs) $stubPath
 Assert-Contains "opencode (v2) -headless uses standalone run" $r.out 'code-it-alpine-dotnet-node:latest run --standalone "fix the build"'
-$r = Invoke-Scenario $codeIt (@('-agent','opencode-v1','-headless','fix the build') + $commonArgs) $stubPath
-Assert-Contains "opencode-v1 -headless uses run" $r.out 'code-it-alpine-dotnet-node:latest run "fix the build"'
 $r = Invoke-Scenario $codeIt (@('-agent','codex','-headless','fix the build') + $commonArgs) $stubPath
 Assert-Contains "codex -headless uses exec" $r.out 'code-it-alpine-dotnet-node:latest exec --skip-git-repo-check "fix the build"'
 $r = Invoke-Scenario $codeIt (@('-o','-headless') + $commonArgs) $stubPath
@@ -1042,8 +1017,6 @@ $r = Invoke-Scenario $codeIt (@('-c') + $commonArgs + @('--continue','--model','
 Assert-Contains "unrecognised flags pass through" $r.out 'code-it-alpine-dotnet-node:latest --continue --model opus'
 $r = Invoke-Scenario $codeIt (@('-c','-headless','-prompt','tidy') + $commonArgs + @('--max-turns','5')) $stubPath
 Assert-Contains "agent flags precede the prompt for claude" $r.out 'code-it-alpine-dotnet-node:latest -p --max-turns 5 tidy'
-$r = Invoke-Scenario $codeIt (@('-agent','opencode-v1','-headless','-prompt','tidy') + $commonArgs + @('--model','opus')) $stubPath
-Assert-Contains "agent flags follow run for opencode-v1" $r.out 'code-it-alpine-dotnet-node:latest run --model opus tidy'
 $r = Invoke-Scenario $codeIt (@('-o','-headless','-prompt','tidy') + $commonArgs + @('--model','example/coder')) $stubPath
 Assert-Contains "opencode (v2) headless flags precede prompt" $r.out 'code-it-alpine-dotnet-node:latest run --standalone --model example/coder tidy'
 # -headless without a prompt leaves the agent command to the caller. Short agent flags
@@ -1246,29 +1219,23 @@ Assert-Contains "first-run receives the selected agent from build" $r.out 'Code-
 Assert "delegated build dry-run makes no save directory" (-not (Test-Path -Path $actualSave))
 
 # --yes copies state over but never overwrites
+# opencode has AGENT_SAVE_SUBDIR, so its copy goes under opencode-v2/
 $fs = Join-Path $tmp 'firstcopy-save'
-$null = New-Item -ItemType Directory -Force -Path "$fs/.config/opencode"
-Set-Content -Path "$fs/.config/opencode/config.json" -Value 'KEEP'
+$null = New-Item -ItemType Directory -Force -Path "$fs/opencode-v2/.config/opencode"
+Set-Content -Path "$fs/opencode-v2/.config/opencode/config.json" -Value 'KEEP'
 Set-Content -Path "$fh/.config/opencode/new.json" -Value 'NEW'
-$env:HOME = $fh; $env:USERPROFILE = $fh
-try {
-    $r = Invoke-Scenario $firstRun @('-yes', '-toolchain', 'node', '-agents', 'opencode-v1',
-        '-saveDir', $fs, '-codeItBuild', $stubFirst) $stubPath
-} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
-Assert "first-run copy exit code 0" ($r.code -eq 0)
-Assert-Contains "first-run invoked the build" $r.out 'STUB-FIRST-BUILD'
-Assert "first-run never overwrites existing state" ((Get-Content "$fs/.config/opencode/config.json" -Raw).Trim() -eq 'KEEP')
-Assert "first-run copies missing state" ((Get-Content "$fs/.config/opencode/new.json" -Raw).Trim() -eq 'NEW')
-Assert-Contains "first-run warns that credentials are copied" $r.out 'credentials'
-Assert-Contains "first-run prints the start command" $r.out 'Code-It.ps1 -agent opencode-v1'
-# an agent with AGENT_SAVE_SUBDIR (opencode, v2, whose state lives under opencode-v2/)
-# gets its copy in that subdirectory
 $env:HOME = $fh; $env:USERPROFILE = $fh
 try {
     $r = Invoke-Scenario $firstRun @('-yes', '-toolchain', 'node', '-agents', 'opencode',
         '-saveDir', $fs, '-codeItBuild', $stubFirst) $stubPath
 } finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
-Assert "first-run copies opencode (v2) state into its save subdir" ((Get-Content "$fs/opencode-v2/.config/opencode/new.json" -Raw).Trim() -eq 'NEW')
+Assert "first-run copy exit code 0" ($r.code -eq 0)
+Assert-Contains "first-run invoked the build" $r.out 'STUB-FIRST-BUILD'
+Assert "first-run never overwrites existing state" ((Get-Content "$fs/opencode-v2/.config/opencode/config.json" -Raw).Trim() -eq 'KEEP')
+Assert "first-run copies missing state into the agent's save subdir" ((Get-Content "$fs/opencode-v2/.config/opencode/new.json" -Raw).Trim() -eq 'NEW')
+Assert "first-run copies nothing to the save dir root for opencode" (-not (Test-Path "$fs/.config/opencode/new.json"))
+Assert-Contains "first-run warns that credentials are copied" $r.out 'credentials'
+Assert-Contains "first-run prints the start command" $r.out 'Code-It.ps1 -agent opencode'
 
 # ---------------------------------------------------------------------------
 "12e. Image memory and default toolchains"
@@ -1599,7 +1566,6 @@ function Complete([string]`$line) {
 }
 "CLAUDE:"   + (Complete "& '$codeIt' -claude -agentArgs --mod")
 "OPENCODE:" + (Complete "& '$codeIt' -agentArgs --sta")
-"OPENCODEV1:" + (Complete "& '$codeIt' -agent opencode-v1 -agentArgs --th")
 "CODEX:" + (Complete "& '$codeIt' -agent codex -agentArgs --mo")
 "RUNTIME:"  + (Complete "& '$codeIt' -runtime ")
 "LOCALE:"   + (Complete "& '$codeIt' -locale ")
@@ -1608,36 +1574,35 @@ $r = Invoke-ScenarioCommand $completerTest $stubPath
 Assert "completion script loads" ($r.code -eq 0 -or $null -eq $r.code)
 Assert-Contains "-agentArgs completes claude flags" $r.out 'CLAUDE:--model'
 Assert-Contains "-agentArgs completes opencode (v2) flags" $r.out 'OPENCODE:--standalone'
-Assert-Contains "-agent opencode-v1 completes v1 flags" $r.out 'OPENCODEV1:--thinking'
 Assert-Contains "-agent codex completes its flags" $r.out 'CODEX:--model'
 Assert-Contains "-runtime completes its values" $r.out 'RUNTIME:docker container'
 Assert-Contains "-locale completes like-host" $r.out 'LOCALE:like-host C.UTF-8'
 
 # ---------------------------------------------------------------------------
-"14. Exclusive agent state: one container per opencode session database"
+"14. Exclusive agent state: one container per agent session database"
 $excl = Join-Path $tmp 'save-excl'
 $null = New-Item -ItemType Directory -Force -Path $excl
 $exclArgs  = @('-WorkDirToMount', $scriptDir, '-saveDir', $excl)
-# opencode-v1 keeps its state at the save-dir root; its lock dir is named for it
-$exclLocks = "$excl/.code-it-instances/opencode-v1"
-$slot1Mount = "-v `"$excl/.local/share/opencode:/home/agent1/.local/share/opencode`""
+# codex keeps its state at the save-dir root and carries auth.json into a copy;
+# its lock dir is named for it
+$exclLocks = "$excl/.code-it-instances/codex"
+$slot1Mount = "-v `"$excl/.codex:/home/agent1/.codex`""
 # A pid that is certainly not running: a child that has already exited
 $deadPid = (Start-Process -FilePath $pwshExe -ArgumentList '-NoProfile', '-Command', 'exit 0' -PassThru -Wait).Id
 
 # (a) no lock: slot 1, no warning, and a dry run takes no lock
-$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v1', '-dryRun') + $exclArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-agent', 'codex', '-dryRun') + $exclArgs) $stubPath
 Assert-Contains "no lock: slot 1 is mounted" $r.out $slot1Mount
-Assert "no lock: no warning" (-not $r.out.Contains('Another opencode-v1 container'))
+Assert "no lock: no warning" (-not $r.out.Contains('Another codex container'))
 Assert "dry run takes no lock" (-not (Test-Path "$exclLocks/1.lock"))
 
 # (b) slot 1 held by a live process (this test): warn and mount slot 2
-$null = New-Item -ItemType Directory -Force -Path $exclLocks, "$excl/.local/share/opencode"
-Set-Content -Path "$excl/.local/share/opencode/auth.json" -Value '{"anthropic":{"type":"api"}}'
+$null = New-Item -ItemType Directory -Force -Path $exclLocks, "$excl/.codex"
+Set-Content -Path "$excl/.codex/auth.json" -Value '{"anthropic":{"type":"api"}}'
 Set-Content -Path "$exclLocks/1.lock" -Value "$PID"
-$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v1', '-dryRun') + $exclArgs) $stubPath
-Assert-Contains "held lock: warns of the other container" $r.out "Another opencode-v1 container is using $excl/.local/share/opencode"
-Assert-Contains "held lock: slot 2 is mounted" $r.out "-v `"$exclLocks/2/.local/share/opencode:/home/agent1/.local/share/opencode`""
-Assert-Contains "held lock: config is still shared" $r.out "-v `"$excl/.config/opencode:/home/agent1/.config/opencode`""
+$r = Invoke-Scenario $codeIt (@('-agent', 'codex', '-dryRun') + $exclArgs) $stubPath
+Assert-Contains "held lock: warns of the other container" $r.out "Another codex container is using $excl/.codex"
+Assert-Contains "held lock: slot 2 is mounted" $r.out "-v `"$exclLocks/2/.codex:/home/agent1/.codex`""
 Assert "dry run copies nothing" (-not (Test-Path "$exclLocks/2"))
 
 # (c) a real (stub) run holds slot 2's lock while the container runs, carries auth.json
@@ -1670,39 +1635,39 @@ esac
 }
 $stubLocksPath = "$stubLocks$sep$origPath"
 $env:STUB_LOCK_DIR = $exclLocks
-$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v1') + $exclArgs) $stubLocksPath
-Assert-Contains "real run mounts slot 2" $r.out "$exclLocks/2/.local/share/opencode:/home/agent1/.local/share/opencode"
+$r = Invoke-Scenario $codeIt (@('-agent', 'codex') + $exclArgs) $stubLocksPath
+Assert-Contains "real run mounts slot 2" $r.out "$exclLocks/2/.codex:/home/agent1/.codex"
 Assert-Contains "real run holds slot 2's lock while running" $r.out 'LOCK-DURING-RUN: 2.lock'
 Assert-Contains "real run sees the other run's lock" $r.out 'LOCK-DURING-RUN: 1.lock'
 Assert "auth.json to carry: no login note" (-not $r.out.Contains('no saved login'))
 Assert "real run frees its lock afterwards" (-not (Test-Path "$exclLocks/2.lock"))
 Assert "real run leaves the other run's lock alone" (Test-Path "$exclLocks/1.lock")
-$slot2Auth = "$exclLocks/2/.local/share/opencode/auth.json"
+$slot2Auth = "$exclLocks/2/.codex/auth.json"
 Assert "auth.json is carried into the copy" ((Test-Path $slot2Auth) -and
-    (Get-Content $slot2Auth -Raw) -eq (Get-Content "$excl/.local/share/opencode/auth.json" -Raw))
+    (Get-Content $slot2Auth -Raw) -eq (Get-Content "$excl/.codex/auth.json" -Raw))
 
 # (d) a newer auth.json in slot 1 refreshes the copy's; an older one does not
-Set-Content -Path "$excl/.local/share/opencode/auth.json" -Value '{"anthropic":{"type":"oauth"}}'
-(Get-Item "$excl/.local/share/opencode/auth.json").LastWriteTimeUtc = [datetime]'2030-01-01'
-$null = Invoke-Scenario $codeIt (@('-agent', 'opencode-v1') + $exclArgs) $stubLocksPath
+Set-Content -Path "$excl/.codex/auth.json" -Value '{"anthropic":{"type":"oauth"}}'
+(Get-Item "$excl/.codex/auth.json").LastWriteTimeUtc = [datetime]'2030-01-01'
+$null = Invoke-Scenario $codeIt (@('-agent', 'codex') + $exclArgs) $stubLocksPath
 Assert "a newer auth.json refreshes the copy" ((Get-Content $slot2Auth -Raw).Contains('oauth'))
 Set-Content -Path $slot2Auth -Value '{"in":"copy"}'
 (Get-Item $slot2Auth).LastWriteTimeUtc = [datetime]'2031-01-01'
-$null = Invoke-Scenario $codeIt (@('-agent', 'opencode-v1') + $exclArgs) $stubLocksPath
+$null = Invoke-Scenario $codeIt (@('-agent', 'codex') + $exclArgs) $stubLocksPath
 Assert "an older auth.json leaves the copy's alone" ((Get-Content $slot2Auth -Raw).Contains('"in":"copy"'))
 
 # (e) slots 1 and 2 held: slot 3
 Set-Content -Path "$exclLocks/2.lock" -Value "$PID"
-$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v1', '-dryRun') + $exclArgs) $stubPath
-Assert-Contains "slots 1 and 2 held: slot 3 is mounted" $r.out "$exclLocks/3/.local/share/opencode:/home/agent1/.local/share/opencode"
+$r = Invoke-Scenario $codeIt (@('-agent', 'codex', '-dryRun') + $exclArgs) $stubPath
+Assert-Contains "slots 1 and 2 held: slot 3 is mounted" $r.out "$exclLocks/3/.codex:/home/agent1/.codex"
 Remove-Item -Force "$exclLocks/2.lock"
 
 # (f) a stale lock (its process has exited): slot 1, no warning; a real run replaces it
 Set-Content -Path "$exclLocks/1.lock" -Value "$deadPid"
-$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v1', '-dryRun') + $exclArgs) $stubPath
+$r = Invoke-Scenario $codeIt (@('-agent', 'codex', '-dryRun') + $exclArgs) $stubPath
 Assert-Contains "stale lock: slot 1 is mounted" $r.out $slot1Mount
-Assert "stale lock: no warning" (-not $r.out.Contains('Another opencode-v1 container'))
-$r = Invoke-Scenario $codeIt (@('-agent', 'opencode-v1') + $exclArgs) $stubLocksPath
+Assert "stale lock: no warning" (-not $r.out.Contains('Another codex container'))
+$r = Invoke-Scenario $codeIt (@('-agent', 'codex') + $exclArgs) $stubLocksPath
 Assert-Contains "stale lock: a real run takes slot 1" $r.out 'LOCK-DURING-RUN: 1.lock'
 Assert "stale lock: removed after the run" (-not (Test-Path "$exclLocks/1.lock"))
 Remove-Item Env:STUB_LOCK_DIR
@@ -1712,8 +1677,8 @@ Remove-Item -Recurse -Force "$excl/.code-it-instances"
 $null = Invoke-Scenario $codeIt (@('-c') + $exclArgs) $stubPath
 Assert "claude takes no lock" (-not (Test-Path "$excl/.code-it-instances"))
 
-# (h) opencode (v2, the default agent): both its data and its shared-service state are
-# exclusive, locked under its own save subdir, apart from opencode-v1's
+# (h) opencode (the default agent): both its data and its shared-service state are
+# exclusive, locked under its own save subdir, apart from codex's
 $v2Locks = "$excl/opencode-v2/.code-it-instances/opencode"
 $null = New-Item -ItemType Directory -Force -Path $v2Locks, "$excl/opencode-v2/.local/share/opencode"
 Set-Content -Path "$v2Locks/1.lock" -Value "$PID"
@@ -1723,7 +1688,7 @@ Assert-Contains "v2 held lock: data from slot 2" $r.out "-v `"$v2Locks/2/.local/
 Assert-Contains "v2 held lock: shared-service state from slot 2" $r.out "-v `"$v2Locks/2/.local/state/opencode:/home/agent1/.local/state/opencode`""
 Assert-Contains "v2 held lock: config is still shared" $r.out "-v `"$excl/opencode-v2/.config/opencode:/home/agent1/.config/opencode`""
 Assert-Contains "v2 new copy: says it has no saved login" $r.out 'This copy has no saved login'
-Set-Content -Path "$excl/opencode-v2/.local/share/opencode/auth.json" -Value '{"v1":"style"}'
+Set-Content -Path "$excl/opencode-v2/.local/share/opencode/auth.json" -Value '{"old":"style"}'
 $env:STUB_LOCK_DIR = $v2Locks
 $r = Invoke-Scenario $codeIt (@('-agent', 'opencode') + $exclArgs) $stubLocksPath
 Assert-Contains "v2 real run holds slot 2's lock" $r.out 'LOCK-DURING-RUN: 2.lock'
@@ -1738,7 +1703,7 @@ Assert-Contains "v2 free: slot 1 state is mounted" $r.out "-v `"$excl/opencode-v
 $null = New-Item -ItemType Directory -Force -Path $exclLocks
 Set-Content -Path "$exclLocks/1.lock" -Value "$PID"
 $r = Invoke-Scenario $codeIt (@('-agent', 'opencode', '-dryRun') + $exclArgs) $stubPath
-Assert "an opencode-v1 lock does not affect opencode (v2)" (-not $r.out.Contains('Another opencode container'))
+Assert "a codex lock does not affect opencode" (-not $r.out.Contains('Another opencode container'))
 Remove-Item -Recurse -Force "$excl/.code-it-instances"
 
 # (i) help documents it

@@ -124,30 +124,26 @@ PATH="$cleanbin:$PATH" "$defaults" -s "$save" -t '' >/dev/null 2>&1
 # ---------------------------------------------------------------------------
 echo "6. --model writes each agent's own config under the save dir"
 save="$tmp/save"; mkdir -p "$save"
-out=$(PATH="$cleanbin:$PATH" "$defaults" -s "$save" --model 'opencode-v1=anthropic/claude-sonnet-4-5' \
-    --model 'claude=opus' --model 'opencode=zhipuai/glm-4.6' 2>&1)
+out=$(PATH="$cleanbin:$PATH" "$defaults" -s "$save" --model 'claude=opus' --model 'opencode=zhipuai/glm-4.6' 2>&1)
 assert "--model exit code" "$?"
-grep -q '^model.opencode-v1=anthropic/claude-sonnet-4-5$' "$save/defaults"; assert "defaults records opencode-v1's model" "$?"
 grep -q '^model.claude=opus$' "$save/defaults"; assert "defaults records claude's model" "$?"
-grep -q '^model.opencode=zhipuai/glm-4.6$' "$save/defaults"; assert "defaults records opencode (v2)'s model" "$?"
-grep -q '"model": "anthropic/claude-sonnet-4-5"' "$save/.config/opencode/config.json"
-assert "opencode-v1 config gets the model key" "$?"
+grep -q '^model.opencode=zhipuai/glm-4.6$' "$save/defaults"; assert "defaults records opencode's model" "$?"
 grep -q '"model": "opus"' "$save/.claude/settings.json"; assert "claude settings get the model key" "$?"
-grep -q '"model": "zhipuai/glm-4.6"' "$save/opencode-v2/.config/opencode/opencode.json"
-assert "opencode (v2) config, under its save subdir, gets the model key" "$?"
-pwsh -NoProfile -Command "try { Get-Content '$save/.config/opencode/config.json' -Raw | ConvertFrom-Json | Out-Null; exit 0 } catch { exit 1 }"
+oc_config="$save/opencode-v2/.config/opencode/opencode.json"
+grep -q '"model": "zhipuai/glm-4.6"' "$oc_config"
+assert "opencode config, under its save subdir, gets the model key" "$?"
+pwsh -NoProfile -Command "try { Get-Content '$oc_config' -Raw | ConvertFrom-Json | Out-Null; exit 0 } catch { exit 1 }"
 assert "edited opencode config is valid JSON" "$?"
 
 # Records survive a round-trip into an existing, other-keyed config
-mkdir -p "$save/.config/opencode" "$save/.claude"
-cp "$script_dir/agents/opencode-v1/default-config/.config/opencode/config.json" "$save/.config/opencode/config.json"
+mkdir -p "$(dirname "$oc_config")" "$save/.claude"
+cp "$script_dir/agents/opencode/default-config/.config/opencode/opencode.json" "$oc_config"
 cp "$script_dir/agents/claude/default-config/.claude/settings.json" "$save/.claude/settings.json"
-PATH="$cleanbin:$PATH" "$defaults" -s "$save" --model 'opencode-v1=openai/gpt-5' --model 'claude=claude-opus-4-5' >/dev/null 2>&1
+PATH="$cleanbin:$PATH" "$defaults" -s "$save" --model 'opencode=openai/gpt-5' --model 'claude=claude-opus-4-5' >/dev/null 2>&1
 assert "model round-trip exit code" "$?"
-grep -q '"schema": "https://opencode.ai/config.json"' "$save/.config/opencode/config.json" \
-    || grep -q '"\$schema": "https://opencode.ai/config.json"' "$save/.config/opencode/config.json"
+grep -q '"\$schema": "https://opencode.ai/config.json"' "$oc_config" && grep -q '"permissions"' "$oc_config"
 assert "other opencode config keys survive" "$?"
-grep -q '"model": "openai/gpt-5"' "$save/.config/opencode/config.json"; assert "opencode-v1 model set in existing config" "$?"
+grep -q '"model": "openai/gpt-5"' "$oc_config"; assert "opencode model set in existing config" "$?"
 grep -q '"defaultMode": "auto"' "$save/.claude/settings.json"; assert "other claude settings keys survive" "$?"
 grep -q '"model": "claude-opus-4-5"' "$save/.claude/settings.json"; assert "claude model set in existing settings" "$?"
 pwsh -NoProfile -Command "try { Get-Content '$save/.claude/settings.json' -Raw | ConvertFrom-Json | Out-Null; exit 0 } catch { exit 1 }"
@@ -192,18 +188,18 @@ assert_contains "dry-run says what it would set" "$out" "would set"
 echo "9. Interactive: picks by number, blanks keep, none clears"
 save_i="$tmp/save-int"; mkdir -p "$save_i"
 # Toolchains are listed as code-it-build lists them: bun, dotnet, node, powershell, python
-out=$(printf '1\n\n\n\nnode,python\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
+out=$(printf '1\n\n\nnode,python\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "interactive exit code" "$?"
 grep -q '^default-agent=claude$' "$save_i/defaults"; assert "first agent preselected answer is claude" "$?"
 grep -q '^default-toolchain=node,python$' "$save_i/defaults"; assert "toolchain answered by name" "$?"
 [[ ! -e "$save_i/.claude/settings.json" ]]; assert "blank model answer keeps (creates nothing)" "$?"
-out=$(printf 'opencode-v1\n\nmy-favourite-model\n\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
+out=$(printf 'opencode\n\nmy-favourite-model\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "second interactive run exit code" "$?"
-grep -q '^default-agent=opencode-v1$' "$save_i/defaults"; assert "agent answered as a name" "$?"
-grep -q '^model.opencode-v1=my-favourite-model$' "$save_i/defaults"; assert "a free-text model is accepted" "$?"
+grep -q '^default-agent=opencode$' "$save_i/defaults"; assert "agent answered as a name" "$?"
+grep -q '^model.opencode=my-favourite-model$' "$save_i/defaults"; assert "a free-text model is accepted" "$?"
 grep -q '^model.claude=' "$save_i/defaults"
 [[ "$?" != "0" ]]; assert "kept model is not overwritten" "$?"
-# The opencode agents' lists prefer opencode-go's models; Claude Code's keeps
+# The opencode list prefers opencode-go's models; Claude Code's keeps
 # Anthropic's bare names, which is all it takes
 printf '%s\n' "$out" | grep -qE '^  [0-9]+\) opencode-go/glm-5\.3$'
 assert "the opencode picker offers opencode-go's models under opencode-go" "$?"
@@ -213,14 +209,13 @@ printf '%s\n' "$out" | grep -qE '^  [0-9]+\) zai/glm-5\.3-flashx$'
 assert "a model opencode-go does not serve keeps its provider" "$?"
 printf '%s\n' "$out" | grep -qE '^  [0-9]+\) claude-sonnet-5-5$'
 assert "claude's list keeps Anthropic's models without the prefix" "$?"
-out=$(printf '9\nsonnet\nnone\n\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
+out=$(printf '9\nsonnet\nnone\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "third interactive run exit code" "$?"
-grep -q '^default-agent=opencode-v1$' "$save_i/defaults"; assert "out-of-range number keeps the saved agent" "$?"
+grep -q '^default-agent=opencode$' "$save_i/defaults"; assert "out-of-range number keeps the saved agent" "$?"
 grep -q '^model.claude=sonnet$' "$save_i/defaults"; assert "claude model set by number from its list" "$?"
-grep -q '^model.opencode-v1=' "$save_i/defaults"
+grep -q '^model.opencode=' "$save_i/defaults"
 [[ "$?" != "0" ]]; assert "'none' clears a model" "$?"
-grep -q '^model.opencode-v1=my-favourite-model$' "$save_i/.claude/settings.json" 2>/dev/null
-[[ -z "$(cat "$save_i/.config/opencode/config.json" 2>/dev/null | grep '"model"')" ]]
+[[ -z "$(cat "$save_i/opencode-v2/.config/opencode/opencode.json" 2>/dev/null | grep '"model"')" ]]
 assert "'none' clears the model from the agent's config" "$?"
 grep -q '^default-toolchain=' "$save_i/defaults"
 [[ "$?" != "0" ]]; assert "'none' clears the toolchain" "$?"
@@ -249,14 +244,14 @@ assert "--refresh-models exit code" "$?"
 assert_contains "--refresh-models reports it" "$out" "Refreshed"
 grep -q '^prov1/m-one$' "$save_r/model-catalog.txt"; assert "cache has the fetched models, sorted" "$?"
 grep -qv '^#' "$save_r/model-catalog.txt"; assert "cache has more than the header" "$?"
-out=$(printf '1\n99\n\n\nnode\n' | PATH="$stubbin:$cleanbin:$PATH" "$defaults" -s "$save_r" 2>&1)
+out=$(printf '1\n99\n\nnode\n' | PATH="$stubbin:$cleanbin:$PATH" "$defaults" -s "$save_r" 2>&1)
 assert_contains "the interactive picker offers the fetched catalog" "$out" "prov1/m-one"
 # opencode-go's models from a refreshed catalog are offered in its own name, once
 assert_contains "the refreshed catalog's opencode-go models are offered" "$out" "opencode-go/m-three"
 printf '%s\n' "$out" | grep -qE '^  [0-9]+\) prov2/m-three$'
 [[ "$?" != "0" ]]; assert "the fetched model opencode-go serves is not offered under its other provider" "$?"
 n=$(printf '%s\n' "$out" | grep -cE '^  [0-9]+\) opencode-go/m-three$')
-[[ "$n" == "2" ]]; assert "the mapped model appears once per opencode-style agent's list (two agents)" "$?"
+[[ "$n" == "1" ]]; assert "the mapped model appears once in opencode's list" "$?"
 grep -q '^model.claude=' "$save_r/defaults"
 [[ "$?" != "0" ]]; assert "picker out-of-range number is refused" "$?"
 
@@ -319,22 +314,22 @@ assert_contains "it says the agent was set" "$out" "Default agent: opencode"
 
 # --show names where each agent's model was set
 show_d="$tmp/show-d"
-mkdir -p "$show_d/.config/opencode"
+mkdir -p "$show_d/opencode-v2/.config/opencode"
 printf '%s\n' "default-agent=opencode" "model.opencode=anthropic/claude-sonnet-4-5" > "$show_d/defaults"
-printf '{\n  "model": "anthropic/claude-sonnet-4-5"\n}\n' > "$show_d/.config/opencode/config.json"
+printf '{\n  "model": "anthropic/claude-sonnet-4-5"\n}\n' > "$show_d/opencode-v2/.config/opencode/opencode.json"
 out=$(PATH="$cleanbin:$PATH" "$defaults" --save-dir "$show_d" --show)
 printf '%s\n' "$out" | grep -q 'model for opencode:.*anthropic/claude-sonnet-4-5'
 assert "--show shows the model" "$?"
-assert_contains "--show names the model file" "$out" "(set in $show_d/.config/opencode/config.json)"
+assert_contains "--show names the model file" "$out" "(set in $show_d/opencode-v2/.config/opencode/opencode.json)"
 
 # Switching the default agent interactively explains that the agent's own state,
 # and login, come with it
 note_d="$tmp/note-d"
-out=$(printf 'opencode-v1\nnone\nnone\nnone\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" --save-dir "$note_d" 2>&1)
+out=$(printf 'opencode\nnone\nnone\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" --save-dir "$note_d" 2>&1)
 rc=$?
 assert "interactive switch exits 0" "$rc"
 assert_contains "the switch explains each agent's own state and login" "$out" "log in again"
-[[ -f "$note_d/defaults" ]] && grep -q '^default-agent=opencode-v1$' "$note_d/defaults"
+[[ -f "$note_d/defaults" ]] && grep -q '^default-agent=opencode$' "$note_d/defaults"
 assert "the switched agent is saved" "$?"
 
 # Plain code-it says when the saved agent is what it launches

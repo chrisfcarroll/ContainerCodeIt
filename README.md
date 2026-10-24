@@ -18,7 +18,7 @@ Your agents get work done by having a _single mounted directory_, typically one 
 
 ### Exiting a container
 
-Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succession. In OpenCode v2, press `Ctrl-C`.
+Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succession. In OpenCode, press `Ctrl-C`.
 
 ## First run
 
@@ -30,7 +30,7 @@ Use `code-it-defaults` and `code-it-build` to change your setup.
 
 See help with `--help` (bash) or `-help` (PowerShell).
 
-Initial agents are opencode (v2), opencode-v1, claude and codex. Initial toolchains are dotnet, node, bun, python, powershell, rust, go, gcc, g++ and clang.
+Initial agents are opencode, claude and codex. Initial toolchains are dotnet, node, bun, python, powershell, rust, go, gcc, g++ and clang.
 
 ## Add new agents
 
@@ -191,7 +191,7 @@ saved toolchain — which in turn beats the remembered-image heuristic of
 [Specs 09/10](Specs/10-default-first-run-or-existing-image.md). When it launches the
 saved agent it says so (`Using saved default agent: …`), because the agent brings its
 own state with it: each agent's state, and its login, live in its own directory under
-the save dir, so switching the default agent switches those too — opencode, v2,
+the save dir, so switching the default agent switches those too — opencode
 keeps its login in the database under its own state directory, and its first run
 there can ask you to log in
 again. Models are data: the catalog offered by the interactive picker (from
@@ -312,20 +312,16 @@ also installs the .NET 10 SDK if `dotnet` is not selected.
 ## Agents
 
 ```bash
-./code-it-build.sh -t node --agent opencode              # a leaner image, OpenCode (v2) only
+./code-it-build.sh -t node --agent opencode              # a leaner image, OpenCode only
 ./code-it.sh -t node --agent opencode                    # run it
-./code-it-build.sh -t node --agent opencode,opencode-v1  # v2 and v1 side by side
-./code-it.sh -t node --agent opencode-v1 --headless "summarise this repo"
 ./code-it.sh -t node --agent codex --headless "summarise this repo"   # OpenAI Codex
 ./code-it.sh --list-agents                               # what is available
 ```
 
-OpenCode v2 (the default `opencode` since v2's GA) and v1 can be built into the same
-image: v2's binary is moved to `~/.opencode-v2/bin` so it does not overwrite v1's
-`~/.opencode/bin`. They read the same config and data paths, and v1 exits at once on
-v2's `opencode.json`, so v2 sets `AGENT_SAVE_SUBDIR=opencode-v2` in its config and
-keeps its state under `<save dir>/opencode-v2/` while v1 keeps its at the save dir
-itself.
+OpenCode (v2) keeps its binary in `~/.opencode-v2/bin` and its state under
+`<save dir>/opencode-v2/` (`AGENT_SAVE_SUBDIR=opencode-v2`). The names date from when
+v1 and v2 were built side by side; they are kept so existing state and images still
+work.
 
 ### Multiple containers
 
@@ -352,7 +348,7 @@ Each agent is a directory, `agents/<name>/`, so adding one needs no script chang
   | `AGENT_CONFIG_LABEL` | How messages name its config, e.g. `'Claude Code settings'` |
   | `AGENT_STATE_DIRS`, `AGENT_STATE_FILES` | `:`-separated paths, relative to home, kept under the save dir and mounted into the container |
   | `AGENT_SAVE_SUBDIR` | Optional subdirectory of the save dir for its state, when it would clash with another agent's |
-  | `AGENT_MODEL_FILE` | Optional `path:key`: the JSON file, under the agent's save dir, whose top-level `key` holds its default model; how `code-it-defaults` sets the model. Claude: `.claude/settings.json:model`; opencode (v2): `.config/opencode/opencode.json:model`; opencode-v1: `.config/opencode/config.json:model` (v1 exits on v2's `opencode.json`, so each keeps its own file) |
+  | `AGENT_MODEL_FILE` | Optional `path:key`: the JSON file, under the agent's save dir, whose top-level `key` holds its default model; how `code-it-defaults` sets the model. Claude: `.claude/settings.json:model`; opencode: `.config/opencode/opencode.json:model` |
   | `AGENT_EXCLUSIVE_DIRS` | Optional `:`-separated directories, from `AGENT_STATE_DIRS`, that only one container at a time may use. See [Several containers at once](#several-containers-at-once) |
   | `AGENT_EXCLUSIVE_CARRY` | Optional `:`-separated files, relative to home, inside those directories (credentials), copied into a run's own copy |
   | `AGENT_CMD_INTERACTIVE_PROMPT`, `AGENT_CMD_INTERACTIVE_NO_PROMPT`, `AGENT_CMD_HEADLESS_PROMPT`, `AGENT_CMD_HEADLESS_NO_PROMPT` | Its command line in each mode, where `{args}` is the arguments after `--` and `{prompt}` the opening prompt |
@@ -446,14 +442,12 @@ container from `~/.docker/config.json`
 
 The launcher translates the prompt into each agent's own command line
 ([Claude Code](https://code.claude.com/docs/en/cli-reference),
-[OpenCode v1](https://opencode.ai/docs/cli/),
-[OpenCode v2](https://opencode.ai/v2/docs/cli/)):
+[OpenCode](https://opencode.ai/v2/docs/cli/)):
 
 | | interactive | `--headless` |
 |---|---|---|
 | Claude Code | `claude PROMPT` | `claude -p PROMPT` |
-| OpenCode | `opencode --prompt PROMPT` | `opencode run PROMPT` |
-| OpenCode v2 | `opencode mini --prompt PROMPT` | `opencode run --standalone PROMPT` |
+| OpenCode | `opencode mini --prompt PROMPT` | `opencode run --standalone PROMPT` |
 
 Interactively the agent still runs inside tmux. With `--headless` it runs in the
 foreground with no TTY allocated (`docker run -i`), so output can be piped or redirected
@@ -568,9 +562,9 @@ The launcher scripts keep the chosen agent's state under one save dir (default `
 | `/work/<parent>/<name>` | Host directory containing git repos for the agent to work on, keeping the host directory's own (and its parent's) name so agents' per-directory memory does not collide between projects |
 | `/home/agent1/.claude` | Claude only: credentials, settings, permissions, memory |
 | `/home/agent1/.claude.json` | Claude only: OAuth session data, MCP configs, preferences |
-| `/home/agent1/.config/opencode` | OpenCode v1/v2: configuration, including `opencode.json` and `cli.json` (v2's from `<save dir>/opencode-v2/`) |
-| `/home/agent1/.local/share/opencode` | OpenCode v1/v2: session data and provider auth database |
-| `/home/agent1/.local/state/opencode` | OpenCode v2 only: shared-service state |
+| `/home/agent1/.config/opencode` | OpenCode: configuration, including `opencode.json` and `cli.json`, from `<save dir>/opencode-v2/` |
+| `/home/agent1/.local/share/opencode` | OpenCode: session data and provider auth database |
+| `/home/agent1/.local/state/opencode` | OpenCode: shared-service state |
 | `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache (a `fallbackPackageFolder`), if `nuget` is enabled and a cache is found |
 | `/home/agent1/.npm-host` | **Read-only.** Host npm cache, if `npm` is enabled and a cache is found; seeded into `~/.npm` at startup |
 | `/home/agent1/.bun-host` | **Read-only.** Host Bun cache, if `bun` is enabled and a cache is found; seeded into `~/.bun/install/cache` at startup |

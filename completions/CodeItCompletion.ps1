@@ -9,7 +9,6 @@
     -agentArgs, the arguments passed straight to the coding agent, offering the flags
     people reach for most:
         https://code.claude.com/docs/en/cli-reference
-        https://opencode.ai/docs/cli/
         https://opencode.ai/v2/docs/cli/
 
     and, for Code-It-Defaults.ps1, the agents to install next to -agent and the
@@ -39,15 +38,9 @@ $script:CodeItClaudeArgs = @(
 )
 
 $script:CodeItOpenCodeArgs = @(
-    # OpenCode v2, the default `opencode` since v2's GA
+    # OpenCode, the default agent
     'run', 'mini', '--standalone', '--server', '--model', '--agent', '--prompt',
     '--continue', '-c', '--session', '--format', '--file', '--help', 'text', 'json'
-)
-
-$script:CodeItOpenCodeV1Args = @(
-    'run', '--continue', '-c', '--session', '-s', '--fork', '--prompt', '--model', '-m',
-    '--agent', '--auto', '--port', '--hostname', '--share', '--file', '-f', '--format',
-    '--title', '--thinking', '--variant', '--dir', 'default', 'json'
 )
 
 $script:CodeItCodexArgs = @(
@@ -74,7 +67,7 @@ Register-ArgumentCompleter -CommandName $codeItCommands -ParameterName agentArgs
     if ($fakeBoundParameters.ContainsKey('claude'))   { $agent = 'claude' }
     if ($fakeBoundParameters.ContainsKey('opencode')) { $agent = 'opencode' }
 
-    $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'opencode-v1') { $script:CodeItOpenCodeV1Args } elseif ($agent -eq 'codex') { $script:CodeItCodexArgs } else { $script:CodeItOpenCodeArgs }
+    $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'codex') { $script:CodeItCodexArgs } else { $script:CodeItOpenCodeArgs }
     $candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "$agent $_")
 }

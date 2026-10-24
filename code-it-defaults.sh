@@ -490,7 +490,7 @@ interactive() {
             if [[ "$a" != "$saved_agent" ]]; then
                 echo "    Note: each agent keeps its own state, and its own login, under the"
                 echo "    save dir, so switching the default agent switches that state too."
-                echo "    opencode, v2, keeps its login in the database under its own directory,"
+                echo "    opencode keeps its login in the database under its own directory,"
                 echo "    so its first run there can ask you to log in again."
             fi
         else
