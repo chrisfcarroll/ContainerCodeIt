@@ -98,6 +98,9 @@ RUN curl -fsSL https://opencode.ai/v2/install -o /tmp/opencode-v2-install.sh \
 USER root
 RUN printf '%s\n' 'opencode=/home/agent1/.opencode-v2/bin/opencode' > /etc/code-it-agents
 USER agent1
+# Each installed agent's binary directory goes on zsh's PATH, so a --no-agent
+# shell can invoke it (Spec 18): the default agent is opencode (v2)
+RUN echo 'export PATH="/home/agent1/.opencode-v2/bin:$PATH"' >> ~/.zshrc
 # @@CODE_IT_AGENTS_END@@
 
 RUN git config --global rerere.enabled true

@@ -385,6 +385,14 @@ done
 agent_block+=$'\n'"USER root"
 agent_block+=$'\n'"RUN printf '%s\\n'$agent_file_entries > /etc/code-it-agents"
 agent_block+=$'\n'"USER agent1"
+# Each installed agent's binary directory goes on zsh's PATH, so a --no-agent
+# shell can invoke any of them (Spec 18)
+agent_path=""
+for a in $enabled_agents; do
+    d=$(dirname "$(ci_agent_config "$agents_dir" "$a" AGENT_BINARY)")
+    case ":$agent_path:" in *":$d:"*) ;; *) agent_path+="${agent_path:+:}$d" ;; esac
+done
+[[ -n "$agent_path" ]] && agent_block+=$'\n'"RUN echo 'export PATH=\"$agent_path:\$PATH\"' >> ~/.zshrc"
 
 # The markers the Dockerfile declares. The agents' default region is replaced
 # wholesale, so the base file can carry the default agent (opencode) and still

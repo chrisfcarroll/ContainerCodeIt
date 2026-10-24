@@ -304,6 +304,17 @@ $entries = foreach ($a in $enabledAgents) {
 $block += "USER root`n"
 $block += "RUN printf '%s\n' $($entries -join ' ') > /etc/code-it-agents`n"
 $block += "USER agent1`n"
+# Each installed agent's binary directory goes on zsh's PATH, so a --no-agent
+# shell can invoke any of them (Spec 18)
+$agentPath = @()
+foreach ($a in $enabledAgents) {
+    $bin = Get-CodeItAgentConfig $agentsDir $a 'AGENT_BINARY'
+    $dir = Split-Path -Parent $bin
+    if ($agentPath -notcontains $dir) { $agentPath += $dir }
+}
+if ($agentPath) {
+    $block += "RUN echo 'export PATH=`"$($agentPath -join ':'):`$PATH`" >> ~/.zshrc`n"
+}
 $agentBlock = $block
 
 # The markers the Dockerfile declares. The agents' default region is replaced

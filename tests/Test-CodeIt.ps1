@@ -435,10 +435,14 @@ Assert-NotInCapture "build leaves python out" 'apk add --no-cache python3 uv'
 Assert-NotInCapture "build leaves powershell out" 'PowerShell/releases/download'
 Assert "assembled Dockerfile is under Apple's 16KB limit" ((Get-CaptureText).Length -lt 16384)
 Assert-InCapture "agent state dirs are pre-created for mounts" '~/.local/share/opencode'
+# Each installed agent's binary directory goes on zsh's PATH, so a --no-agent
+# shell can invoke any of them (Spec 18)
+Assert-InCapture "each installed agent's binary dir goes on zsh's PATH" 'export PATH="/home/agent1/.opencode-v2/bin:/home/agent1/.local/bin:$PATH"'
 Invoke-Capture $codeItBuild @('-toolchain', 'dotnet', '-agent', 'claude', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
 Assert-InCapture "claude state dir is pre-created for mounts" '~/.claude'
 Assert-NotInCapture "claude state file is not created as a directory" '~/.claude.json'
 Assert-NotInCapture "an assembled image has only the selected agents" 'opencode.ai/install'
+Assert-InCapture "a single agent's binary dir goes on zsh's PATH" 'export PATH="/home/agent1/.local/bin:$PATH"'
 
 # -tech is the kept alias of -toolchain
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath
@@ -593,6 +597,8 @@ Assert-NotInCapture "a build without python leaves it out" 'python3'
 $r = Invoke-Scenario $codeIt (@('-stack', 'python') + $commonArgs) $stubPath
 Assert-Contains "code-it -stack python looks for the python image" $r.out "image 'code-it-alpine-python' does not exist; building it"
 $dfText = Get-Content (Join-Path $scriptDir 'Dockerfile') -Raw
+Assert "base Dockerfile puts the default agent's binary dir on zsh's PATH" `
+    ($dfText.Contains('RUN echo ''export PATH="/home/agent1/.opencode-v2/bin:$PATH"'' >> ~/.zshrc'))
 Assert "the python fragment installs uv with Python" ((Get-Content (Join-Path $scriptDir 'toolchains/python/install.dockerfile') -Raw).Contains('apk add --no-cache python3 uv'))
 Assert "the base Dockerfile has no toolchain switches" (-not ($dfText -match '(?m)^ARG (DOTNET|NODE|BUN|PYTHON|POWERSHELL)='))
 Assert "Dockerfile does not install uv in the base image" (-not ($dfText -match '(?m)^RUN apk add --no-cache uv\s*$'))

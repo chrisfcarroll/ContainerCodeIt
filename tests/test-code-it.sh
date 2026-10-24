@@ -486,6 +486,11 @@ do_capture --toolchain dotnet,node --dockerfile-dir "$script_dir" --runtime dock
 assert "assembled Dockerfile writes /etc/code-it-agents as root" "$?"
 [[ "$(awk '/printf .* > \/etc\/code-it-agents/{found=1; next} found && /^USER /{print $2; exit}' "$capture")" == "agent1" ]]
 assert "assembled Dockerfile drops back to agent1 after the root write" "$?"
+# Each installed agent's binary directory goes on zsh's PATH, so a --no-agent
+# shell can invoke any of them (Spec 18)
+assert_in_df "each installed agent's binary dir goes on zsh's PATH" 'export PATH="/home/agent1/.opencode-v2/bin:/home/agent1/.local/bin:$PATH"'
+do_capture --toolchain dotnet --agent claude --dockerfile-dir "$script_dir" --runtime docker
+assert_in_df "a single agent's binary dir goes on zsh's PATH" 'export PATH="/home/agent1/.local/bin:$PATH"'
 
 echo "10f. code-it-build agents"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" 2>&1)
@@ -706,6 +711,8 @@ grep -qF "$(grep -m1 'opencode.ai/v2/install' "$script_dir/agents/opencode/insta
 assert "base default agent region matches the opencode fragment" "$?"
 grep -qF "'opencode=/home/agent1/.opencode-v2/bin/opencode'" "$script_dir/Dockerfile"
 assert "base default agent region writes the opencode map" "$?"
+grep -qF "RUN echo 'export PATH=\"/home/agent1/.opencode-v2/bin:\$PATH\"' >> ~/.zshrc" "$script_dir/Dockerfile"
+assert "base Dockerfile puts the default agent's binary dir on zsh's PATH" "$?"
 
 # ---------------------------------------------------------------------------
 echo "11. Custom options"
