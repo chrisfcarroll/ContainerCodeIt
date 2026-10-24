@@ -1,0 +1,2 @@
+TOOLCHAIN_INSTALL=install.dockerfile
+TOOLCHAIN_DETECT=gcc --version

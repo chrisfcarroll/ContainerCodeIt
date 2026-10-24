@@ -88,7 +88,7 @@ function Resolve-CodeItToolchain([string]$raw, [string]$dir) {
     $resolved = @($requested | ForEach-Object { Get-CodeItToolchainAlias $dir $_ } |
         Where-Object { $_ } | Select-Object -Unique)
     foreach ($t in $resolved) {
-        if ($t -notmatch '^[a-z][a-z0-9-]*$' -or -not (Test-Path -Path (Join-Path $dir (Join-Path $t 'config')) -PathType Leaf)) {
+        if ($t -notmatch '^[a-z][a-z0-9+-]*$' -or -not (Test-Path -Path (Join-Path $dir (Join-Path $t 'config')) -PathType Leaf)) {
             Write-Warning "Unknown toolchain '$t'. Known: $((Get-CodeItListToolchains $dir) -join ', ')."
             Write-Warning "A comma-separated list is expected, e.g. -toolchain 'node,bun'."
             return $null

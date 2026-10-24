@@ -416,6 +416,16 @@ assert_contains "rust derives the image name" "$out" "-t code-it-alpine-rust:lat
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain go 2>&1)
 assert_contains "go derives the image name" "$out" "-t code-it-alpine-go:latest"
 
+# The C and C++ toolchains (Spec 18): gcc, g++ and clang from Alpine's own packages
+do_capture --dockerfile-dir "$script_dir" --toolchain gcc --runtime docker
+assert_in_df "build assembles gcc" "apk add --no-cache gcc musl-dev"
+do_capture --dockerfile-dir "$script_dir" --toolchain g++ --runtime docker
+assert_in_df "build assembles g++" "apk add --no-cache g++"
+do_capture --dockerfile-dir "$script_dir" --toolchain clang --runtime docker
+assert_in_df "build assembles clang" "apk add --no-cache clang"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain llvm 2>&1)
+assert_contains "llvm aliases clang and derives its image name" "$out" "-t code-it-alpine-clang:latest"
+
 # --tech is the kept alias of --toolchain
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tech bun 2>&1)
 assert_contains "build --tech alias derives the image name" "$out" "-t code-it-alpine-bun:latest"

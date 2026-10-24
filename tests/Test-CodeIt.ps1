@@ -463,6 +463,15 @@ $r = Invoke-Scenario $codeItBuild @('-toolchain', 'rust', '-dryRun', '-dockerfil
 Assert-Contains "rust derives the image name" $r.out '-t code-it-alpine-rust:latest'
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'go', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
 Assert-Contains "go derives the image name" $r.out '-t code-it-alpine-go:latest'
+# The C and C++ toolchains (Spec 18): gcc, g++ and clang from Alpine's own packages
+Invoke-Capture $codeItBuild @('-toolchain', 'gcc', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
+Assert-InCapture "build assembles gcc" 'apk add --no-cache gcc musl-dev'
+Invoke-Capture $codeItBuild @('-toolchain', 'g++', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
+Assert-InCapture "build assembles g++" 'apk add --no-cache g++'
+Invoke-Capture $codeItBuild @('-toolchain', 'clang', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
+Assert-InCapture "build assembles clang" 'apk add --no-cache clang'
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'llvm') $stubPath
+Assert-Contains "llvm aliases clang and derives its image name" $r.out '-t code-it-alpine-clang:latest'
 
 # -tech is the kept alias of -toolchain
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath

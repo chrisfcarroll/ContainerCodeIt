@@ -17,7 +17,8 @@
 #                            interactive selection is used.
 #                            Known names and aliases come from toolchains/*/config
 #                            (today: dotnet, node/js-node/ts-node, bun/js-bun/ts-bun,
-#                            python/uv, powershell/pwsh, rust, go). --stack is an alias.
+#                            python/uv, powershell/pwsh, rust, go, gcc, g++, clang/
+#                            llvm). --stack is an alias.
 #   --package-caches LIST    Comma-separated package repos to support, independent of
 #                            --toolchain. Known: nuget, npm, bun.
 #                            Default: the repos implied by --toolchain
