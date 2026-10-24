@@ -24,7 +24,7 @@ RUN set -e; \
         tar xzf "/tmp/$file" -C /usr/share/dotnet; \
         rm -f "/tmp/$file" "/tmp/$file.sha512"; \
     done; \
-    ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet # last changed 2026-10-23
+    ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet # last changed 2026-10-24
 ENV DOTNET_ROOT=/usr/share/dotnet
 RUN apk add --no-cache mono
 RUN dotnet workload update

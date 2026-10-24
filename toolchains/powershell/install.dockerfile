@@ -47,4 +47,4 @@ RUN set -e; \
         apk del .pwsh-build && \
         printf '#!/bin/sh\nDOTNET_ROOT=${DOTNET_ROOT:-/usr/share/dotnet} LD_PRELOAD=/usr/lib/libpsl-chk-shim.so exec /opt/microsoft/powershell/pwsh "$@"\n' > /usr/bin/pwsh && \
         chmod +x /usr/bin/pwsh; \
-    fi # last changed 2026-10-23
+    fi # last changed 2026-10-24
