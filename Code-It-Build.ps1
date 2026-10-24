@@ -401,6 +401,8 @@ try {
         Write-Warning "$runtime build failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
     }
-} finally {
     Remove-Item -Recurse -Force $buildContext -EA Silent
+} finally 
+{
+    # don't clean up after failure.
 }

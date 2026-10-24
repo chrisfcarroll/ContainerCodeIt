@@ -2,11 +2,11 @@
 
 Sandbox your agentic AI properly: in a container, with access to a single working directory, where it can work free of permissions interruption.
 
-The agent gets work done by having a _single mounted directory_, typically one containing a git repo or repos, so it can work and commit.
+Your agents get work done by having a _single mounted directory_, typically one containing a git repo or repos, so they can work and commit.
 
 ## Prerequisites
 
-- Docker or Apple Containers.
+- Docker or Apple Containers
 - bash or PowerShell/pwsh.
 
 ## Quick start
@@ -18,7 +18,7 @@ The agent gets work done by having a _single mounted directory_, typically one c
 
 ### Exiting a container
 
-Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succession.
+Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succession. In OpenCode v2, press `Ctrl-C`.
 
 ## First run
 
@@ -32,7 +32,7 @@ See help with `--help` (bash) or `-help` (PowerShell).
 
 Initial agents are opencode and claude. Initial toolchains are dotnet, node, bun, uv/python.
 
-## Adding a new agent
+## Add new agents
 
 `code-it-add-agent NAME [--url URL]` will use code-it to attempt to add agent NAME 
 to your setup. The agent doing the install is prompted to first check, “is NAME a 
@@ -49,7 +49,7 @@ It will refuse to run on a dirty repository, and works on a new branch
 .\Code-It-Add-Agent.ps1 cursor -url https://docs.cursor.com/cli
 ```
 
-## Adding a toolchain
+## Add new toolchains and languages
 
 `code-it-add-tool-chain NAME [--url URL]` will use code-it to attempt to add a new
 supported toolchain to your repo and image.
@@ -68,13 +68,15 @@ README, tests, and a commit.
 .\Code-It-Add-Tool-Chain.ps1 java -url https://openjdk.org/install/
 ```
 
-## tmux
+## tmux, zsh, --no-agent, -noAgent
 
 The container includes tmux and starts a shell as well as your agent inside the container.
 Press `Ctrl-B S` then use the up/down arrow keys to switch between the agent session and the shell.
 Press `Ctrl-B S` again to switch back.
 
 The shell is zsh, with some common abbreviations for git (`gco`, `glog`, `gs`, …)
+
+Start a container without an agent with --no-agent / -noAgent
 
 ## Code-It options
 
