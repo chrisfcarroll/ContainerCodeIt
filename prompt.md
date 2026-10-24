@@ -1,1 +1,0 @@
-It is a problem when running on Windows that when swapping between the container and the host, I frequently see git re-indexing. Can you see a cause and cure?

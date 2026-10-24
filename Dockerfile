@@ -1,11 +1,8 @@
 FROM alpine:3.23
 # ===========================================================================
-# Extra CA certificates, e.g. for a corporate TLS-intercepting proxy
-# Any *.crt, *.cer or *.pem (PEM or DER) in ca-certificates/ is trusted before the
-# first apk fetch, by appending it to the stock bundle, and is kept in
-# /usr/local/share/ca-certificates so update-ca-certificates keeps it from then on.
-# code-it-build copies the folder into the build context. If the directory is
-# empty then is does nothing.
+# Allow for additional certificates needed by user for .e.g. corporate 
+# TLS-intercepting proxy. Any *.crt, *.cer or *.pem in ca-certificates/ is 
+# trusted before the first apk fetch.
 # ===========================================================================
 COPY ca-certificates/ /tmp/ca-certificates/
 RUN mkdir -p /usr/local/share/ca-certificates && found=0 && \
