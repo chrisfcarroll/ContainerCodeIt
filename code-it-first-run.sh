@@ -16,7 +16,9 @@
 #
 # Options:
 #   --save-dir, -s DIR       Where agent state is kept/copied. Default: ~/.config/code-it
-#   --work-dir, -w DIR       Host directory mounted as /work. Default: .
+#   --work-dir, -w DIR       Host directory to mount, at /work/<parent>/<name> (its
+#                            parent's and its own names, for agents' per-directory
+#                            memory). Default: .
 #   --toolchain, -t LIST     Select toolchains (skips that question).
 #   --agents, -a LIST        Select agents (skips that question).
 #   --image, -i NAME         Image name to build.

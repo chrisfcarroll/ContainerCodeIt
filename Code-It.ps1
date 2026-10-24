@@ -41,7 +41,10 @@
     container. Arguments in <saveDir>/run-args (see Notes) come first. Alias: -dockerArgs
 
 .PARAMETER WorkDirToMount
-    Host directory path to mount as /work in the container. Defaults to the current directory.
+    Host directory to mount in the container, at /work/<parent>/<name> (the names of
+    DIR's parent directory and of DIR itself, so directories keep their names for
+    agents' per-directory memory). DIR whose parent is / is mounted at /work/<name>;
+    /, at /work. Defaults to the current directory.
 
 .PARAMETER agent
     Run the agent defined in agents/<name>. Only that agent's state is mounted.
@@ -530,6 +533,11 @@ if (-not $WorkDirToMount -or -not (Test-Path -Path $WorkDirToMount -PathType Con
 }
 $WorkDirToMount = (Resolve-Path $WorkDirToMount).Path
 
+# The container path the work dir is mounted at, /work/<parent>/<name>: directory
+# names matter for agents' per-directory memory, so no fixed /work. go.sh cds to
+# it (CODE_IT_WORK_DIR), because the image's own WORKDIR /work is only a default.
+$containerWorkDir = Get-CodeItWorkMountPath $WorkDirToMount
+
 # Create the save dir structure so mounts always work, even on first run. State
 # paths come from the agent definition: directories are created; single files are
 # pre-created so the runtime does not make a directory in their place.
@@ -876,12 +884,13 @@ if ($agentCmdPrint) { $agentCmdPrint = " $agentCmdPrint" }
 
 @"
     $runtime run $ttyArgs --rm -p $portMapping $containerArgs$agentEnvPrint `
+                -e CODE_IT_WORK_DIR=`"$containerWorkDir`" `
                 -e LANG=`"$containerLocale`" `
                 -e GIT_AUTHOR_NAME=`"$gitAuthorName`" `
                 -e GIT_AUTHOR_EMAIL=`"$gitAuthorEmail`" `
                 -e GIT_COMMITTER_NAME=`"$gitAuthorName`" `
                 -e GIT_COMMITTER_EMAIL=`"$gitAuthorEmail`" `
-                -v `"$WorkDirToMount`:/work`"$agentMountPrint$cacheMountPrint$extraRunArgsPrint
+                -v `"$WorkDirToMount`:$containerWorkDir`"$agentMountPrint$cacheMountPrint$extraRunArgsPrint
             $image`:latest$agentCmdPrint
 "@
 
@@ -894,12 +903,13 @@ try {
     & $runtime run $ttyArgs --rm -p $portMapping `
                 $containerArgs `
                 $agentEnvArgs `
+                -e CODE_IT_WORK_DIR="$containerWorkDir" `
                 -e LANG="$containerLocale" `
                 -e GIT_AUTHOR_NAME="$gitAuthorName" `
                 -e GIT_AUTHOR_EMAIL="$gitAuthorEmail" `
                 -e GIT_COMMITTER_NAME="$gitAuthorName" `
                 -e GIT_COMMITTER_EMAIL="$gitAuthorEmail" `
-                -v "$WorkDirToMount`:/work" `
+                -v "$WorkDirToMount`:$containerWorkDir" `
                 $agentMountArgs `
                 $cacheMountArgs `
                 $runExtraArgs `

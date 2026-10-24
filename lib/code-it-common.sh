@@ -4,6 +4,8 @@
 # functions and constants only, and runs nothing on its own.
 #
 #   ci_comma_list_add LIST ITEM                       append ITEM to a space list
+#   ci_path_component NAME                            -> NAME as a mount path component
+#   ci_work_mount_path WORKDIR                        -> /work/<parent>/<name> mount path
 #   ci_list_definitions DIR                           one definition name per line
 #   ci_toolchain_alias DIR NAME                       canonical name for an alias
 #   ci_resolve_toolchain RAW DIR                      -> space-separated canonical list
@@ -75,6 +77,34 @@ ci_has() {
 # ci_join COMMA LIST: turn a space-separated list into a comma-separated one
 ci_join() {
     printf '%s' "$2" | tr ' ' "${1:- }"
+}
+
+# ci_path_component NAME: a host directory's NAME as one component of a container
+# mount path. Only ':' is replaced (by '-'), because docker's and the Apple container
+# CLI's -v syntax reads a ':' on either side as a separator.
+ci_path_component() {
+    printf '%s' "${1//:/-}"
+}
+
+# ci_work_mount_path WORKDIR: the container path the host work directory (absolute)
+# is mounted at, /work/<parent>/<name>, so directory names keep working for agents'
+# per-directory memory instead of every project living at a fixed /work. WORKDIR
+# whose parent is / has no parent name to keep, so it is mounted at /work/<name>;
+# /, which has no name either, is mounted at /work itself. Spec 18.
+ci_work_mount_path() {
+    local workdir="$1" parent name
+    workdir=${workdir%/}
+    if [[ -z "$workdir" || "$workdir" == "/" ]]; then
+        printf '%s' "/work"
+        return 0
+    fi
+    name=$(ci_path_component "$(basename "$workdir")")
+    parent=$(dirname "$workdir")
+    if [[ "$parent" == "/" ]]; then
+        printf '/work/%s' "$name"
+    else
+        printf '/work/%s/%s' "$(ci_path_component "$(basename "$parent")")" "$name"
+    fi
 }
 
 ci_resolve_toolchain() {

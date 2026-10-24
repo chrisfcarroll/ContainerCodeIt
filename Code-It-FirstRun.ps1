@@ -13,7 +13,8 @@
     Where agent state is kept and copied. Default: ~/.config/code-it
 
 .PARAMETER workDir
-    Host directory mounted as /work. Default: .
+    Host directory to mount, at /work/<parent>/<name> (its parent's and its own
+    names, for agents' per-directory memory). Default: .
 
 .PARAMETER toolchain
     Select toolchains (skips that question).

@@ -11,6 +11,8 @@ $ErrorActionPreference = 'Continue'
 $testsDir  = $PSScriptRoot
 $scriptDir = Split-Path $testsDir -Parent
 $codeIt    = Join-Path $scriptDir 'Code-It.ps1'
+# The helpers, for the unit assertions on Get-CodeItWorkMountPath below
+. (Join-Path $scriptDir 'lib/CodeItCommon.ps1')
 # Find a pwsh that actually runs (the first one on the PATH may be a build for the
 # wrong architecture, e.g. an x64 pwsh on an arm64 host).
 function Test-PwshWorks([string]$exe) {
@@ -268,7 +270,9 @@ Assert-Contains "uses docker runtime" $r.out 'Using container runtime: docker'
 Assert-Contains "defaults to opencode" $r.out 'CODE_AGENT="opencode"'
 Assert-Contains "docker run command" $r.out 'docker run -it'
 Assert-Contains "image name" $r.out 'code-it-alpine-dotnet-node:latest'
-Assert-Contains "work dir mount" $r.out "$scriptDir`:/work"
+$expectedWork = Get-CodeItWorkMountPath $scriptDir
+Assert-Contains "work dir mount" $r.out "$scriptDir`:$expectedWork"
+Assert-Contains "work dir env tells go.sh where to cd" $r.out "CODE_IT_WORK_DIR=`"$expectedWork`""
 Assert-Contains "opencode config mount" $r.out '/.config/opencode:/home/agent1/.config/opencode'
 Assert-Contains "opencode mount" $r.out '/.local/share/opencode:/home/agent1/.local/share/opencode'
 Assert "opencode run mounts no claude state" (-not $r.out.Contains('/home/agent1/.claude'))
@@ -1677,6 +1681,23 @@ Remove-Item -Recurse -Force "$excl/.code-it-instances"
 # (i) help documents it
 $r = Invoke-ScenarioCommand "Get-Help '$codeIt' -Full | Out-String -Width 200" $stubPath
 Assert-Contains "help documents exclusive state" $r.out 'AGENT_EXCLUSIVE_DIRS'
+
+# ---------------------------------------------------------------------------
+"23. Work dir mounts at /work/<parent>/<name> (Spec 18)"
+Assert "mount path of / is /work" ((Get-CodeItWorkMountPath '/') -eq '/work')
+Assert "a work dir with no parent to name mounts at /work/<name>" ((Get-CodeItWorkMountPath '/tmp') -eq '/work/tmp')
+Assert "mount path uses the parent directory's name" ((Get-CodeItWorkMountPath '/tmp/x') -eq '/work/tmp/x')
+Assert "mount path uses the nearest names only" ((Get-CodeItWorkMountPath '/a/b/c/d') -eq '/work/c/d')
+Assert "a ':' in a directory name cannot break -v syntax" ((Get-CodeItWorkMountPath '/a/b:c/d') -eq '/work/b-c/d')
+Assert "a trailing slash does not change the mount path" ((Get-CodeItWorkMountPath '/a/b/') -eq '/work/a/b')
+Assert "a backslash-separated work dir mounts at /work/<parent>/<name>" ((Get-CodeItWorkMountPath 'C:\Users\me\work-parent\work-dir') -eq '/work/work-parent/work-dir')
+$sep = [IO.Path]::DirectorySeparatorChar
+$nested = Join-Path $tmp "work-parent${sep}work-dir"
+$null = New-Item -ItemType Directory -Force -Path $nested
+$r = Invoke-Scenario $codeIt (@('-dryRun','-WorkDirToMount',$nested,'-saveDir',$save)) $stubPath
+Assert "dry-run with a nested work dir exit code 0" ($r.code -eq 0)
+Assert-Contains "nested work dir mounts at /work/<parent>/<name>" $r.out "work-parent${sep}work-dir:/work/work-parent/work-dir"
+Assert-Contains "nested work dir env tells go.sh where to cd" $r.out 'CODE_IT_WORK_DIR="/work/work-parent/work-dir"'
 
 # ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $tmp -EA Silent

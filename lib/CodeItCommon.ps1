@@ -3,6 +3,8 @@
     defines functions and constants only, and runs nothing on its own.
 
         Split-CodeItList LIST                  comma string -> trimmed array
+        Get-CodeItPathComponent NAME           -> NAME as a mount path component
+        Get-CodeItWorkMountPath WORKDIR         -> /work/<parent>/<name> mount path
         Get-CodeItDefinitions DIR              -> definition names under DIR
         Resolve-CodeItToolchain RAW DIR        -> canonical array, or $null on error
         Select-CodeItKnownToolchain LABEL DIR  -> canonical array of the known chains only
@@ -31,6 +33,32 @@ function Split-CodeItList([string]$list) {
     # The unary comma keeps an empty result as an array, not $null
     if (-not $list) { return ,@() }
     return ,@($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+# Get-CodeItPathComponent NAME: a host directory's NAME as one component of a
+# container mount path. Only ':' is replaced (by '-'), because docker's and the
+# Apple container CLI's -v syntax reads a ':' on either side as a separator.
+function Get-CodeItPathComponent([string]$name) {
+    return $name -replace ':', '-'
+}
+
+# Get-CodeItWorkMountPath WORKDIR: the container path the host work directory
+# (absolute) is mounted at, /work/<parent>/<name>, so directory names keep working
+# for agents' per-directory memory instead of every project living at a fixed /work.
+# WORKDIR whose parent is / has no parent name to keep, so it is mounted at
+# /work/<name>; /, which has no name either, is mounted at /work itself. Spec 18.
+# String arithmetic rather than Split-Path, which has no answer for the parent of /;
+# both separators, because a Windows host gives a \-separated path.
+function Get-CodeItWorkMountPath([string]$workDir) {
+    $workDir = $workDir.TrimEnd('/','\')
+    if (-not $workDir -or $workDir -eq '/' -or $workDir -eq '\') { return '/work' }
+    $slash = [Math]::Max($workDir.LastIndexOf('/'), $workDir.LastIndexOf('\'))
+    $name = Get-CodeItPathComponent $workDir.Substring($slash + 1)
+    if ($slash -le 0) { return "/work/$name" }
+    $parent = $workDir.Substring(0, $slash)
+    $parentSlash = [Math]::Max($parent.LastIndexOf('/'), $parent.LastIndexOf('\'))
+    $parentName = Get-CodeItPathComponent $parent.Substring($parentSlash + 1)
+    return "/work/$parentName/$name"
 }
 
 # Get-CodeItDefinitions DIR: the definition names under DIR (DIR/<name>/config).

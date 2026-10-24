@@ -135,11 +135,20 @@ RUN cat <<'EOF' >> ~/go.sh
 # coding agent, so the launcher scripts can hand it a prompt or its own flags.
 # With CODE_AGENT_HEADLESS=1 the agent runs in the foreground instead of in tmux:
 # it answers, exits, and the container exits with the agent's exit code.
-git config --global --add safe.directory /work
-for d in /work/*/ ; do git config --global --add safe.directory "$d" ; done
+# The launcher mounts the host's work dir at /work/<parent>/<name>
+# (CODE_IT_WORK_DIR), so directories keep their names for agents' per-directory
+# memory. The image's own WORKDIR /work is only the container's default: go.sh
+# must cd to the mounted path, or the agent starts in the wrong directory.
+work_dir=${CODE_IT_WORK_DIR:-/work}
+cd "$work_dir" 2>/dev/null || {
+    echo "CODE_IT_WORK_DIR '$work_dir' does not exist in the container. Mount the work dir there, or run without it to start in /work." >&2
+    exit 1
+}
+git config --global --add safe.directory "$work_dir"
+for d in "$work_dir"/*/ ; do git config --global --add safe.directory "$d" ; done
 # Index format is repository-local, so upgrade each mounted repository once at
 # startup. Skip nested directories that resolve to the same repository root.
-for repo in /work /work/*/ ; do
+for repo in "$work_dir" "$work_dir"/*/ ; do
     [ -d "$repo" ] || continue
     if [ -z "$(git -C "$repo" rev-parse --show-prefix 2>/dev/null)" ] &&
        git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
@@ -197,9 +206,12 @@ RUN chmod a+x ~/go.sh
 RUN mkdir -p ~/.config/opencode
 WORKDIR /work
 # --------------------------------
-# Repos to work on can be mounted at runtime under /work.
+# The host's work directory is mounted at runtime at /work/<parent>/<name> (the
+# names of its parent directory and of itself, so directories keep their names
+# for agents' per-directory memory); CODE_IT_WORK_DIR tells go.sh the path, and
+# go.sh cds to it, so the agent starts in the mounted directory.
 # Also mount the state directories for whichever agent(s) you use, for up to 7 mounts:
-# 1. Repos directory
+# 1. Work directory, at /work/<parent>/<name> (CODE_IT_WORK_DIR)
 # 2. ~/.claude directory (claude credentials, settings & memory)
 # 3. ~/.claude.json file (claude OAuth session data & MCP configs)
 # 4. ~/.config/opencode directory (opencode configuration)
@@ -212,11 +224,12 @@ WORKDIR /work
 # Example :
 #     docker run -it --rm \
 #                -e CODE_AGENT=claude \
+#                -e CODE_IT_WORK_DIR=/work/repos/my-repos \
 #                -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
 #                -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
 #                -e GIT_COMMITTER_NAME="Agent1 for $(git config --get user.name)" \
 #                -e GIT_COMMITTER_EMAIL="$(git config --get user.email)" \
-#                -v ~/repos:/work \
+#                -v ~/repos/my-repos:/work/repos/my-repos \
 #                -v ~/.config/code-it/.claude:/home/agent1/.claude \
 #                -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
 #                -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \

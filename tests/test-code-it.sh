@@ -12,6 +12,8 @@ set -uo pipefail
 tests_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 script_dir=$(dirname "$tests_dir")
 code_it="$script_dir/code-it.sh"
+# shellcheck source=../lib/code-it-common.sh
+. "$script_dir/lib/code-it-common.sh"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -162,7 +164,9 @@ assert_contains "uses docker runtime" "$out" "Using container runtime: docker"
 assert_contains "defaults to opencode" "$out" 'CODE_AGENT="opencode"'
 assert_contains "docker run command" "$out" "docker run -it"
 assert_contains "image name" "$out" "code-it-alpine-dotnet-node:latest"
-assert_contains "work dir mount" "$out" "$script_dir:/work"
+expected_work=$(ci_work_mount_path "$script_dir")
+assert_contains "work dir mount" "$out" "$script_dir:$expected_work"
+assert_contains "work dir env tells go.sh where to cd" "$out" "CODE_IT_WORK_DIR=\"$expected_work\""
 assert_contains "opencode config mount" "$out" "/.config/opencode:/home/agent1/.config/opencode"
 assert_contains "opencode data mount" "$out" "/.local/share/opencode:/home/agent1/.local/share/opencode"
 case "$out" in
@@ -1667,6 +1671,26 @@ rm -rf "$excl/.code-it-instances"
 # (i) help documents it
 out=$(PATH="$stub_docker:$PATH" "$code_it" --help)
 assert_contains "--help documents exclusive state" "$out" "AGENT_EXCLUSIVE_DIRS"
+
+# ---------------------------------------------------------------------------
+echo "23. Work dir mounts at /work/<parent>/<name> (Spec 18)"
+[[ "$(ci_work_mount_path "/")" == "/work" ]]
+assert "mount path of / is /work" "$?"
+[[ "$(ci_work_mount_path "/tmp")" == "/work/tmp" ]]
+assert "a work dir with no parent to name mounts at /work/<name>" "$?"
+[[ "$(ci_work_mount_path "/tmp/x")" == "/work/tmp/x" ]]
+assert "mount path uses the parent directory's name" "$?"
+[[ "$(ci_work_mount_path "/a/b/c/d")" == "/work/c/d" ]]
+assert "mount path uses the nearest names only" "$?"
+[[ "$(ci_work_mount_path "/a/b:c/d")" == "/work/b-c/d" ]]
+assert "a ':' in a directory name cannot break -v syntax" "$?"
+[[ "$(ci_work_mount_path "/a/b/")" == "/work/a/b" ]]
+assert "a trailing slash does not change the mount path" "$?"
+mkdir -p "$tmp/work-parent/work-dir"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --dry-run --work-dir "$tmp/work-parent/work-dir" --save-dir "$save")
+assert "dry-run with a nested work dir exit code" "$?"
+assert_contains "nested work dir mounts at /work/<parent>/<name>" "$out" "work-parent/work-dir:/work/work-parent/work-dir"
+assert_contains "nested work dir env tells go.sh where to cd" "$out" 'CODE_IT_WORK_DIR="/work/work-parent/work-dir"'
 
 # ---------------------------------------------------------------------------
 echo

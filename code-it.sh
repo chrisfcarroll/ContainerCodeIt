@@ -57,8 +57,12 @@
 #                            The runtime's own flags differ, so these are not portable
 #                            between docker and container. --docker-arg is an alias.
 #                            Arguments in SAVE-DIR/run-args (see Notes) come first.
-#   --work-dir, -w DIR       Host directory path to mount as /work in the container.
-#                            Defaults to "."
+#   --work-dir, -w DIR       Host directory to mount in the container, at
+#                            /work/<parent>/<name> (the names of DIR's parent
+#                            directory and of DIR itself, so directories keep
+#                            their names for agents' per-directory memory).
+#                            DIR whose parent is / is mounted at /work/<name>;
+#                            /, at /work. Defaults to "."
 #   --save-dir, -s DIR       Host directory for storing agent configuration and state volumes.
 #                            Created if missing. Defaults to ~/.config/code-it
 #   --image, -i NAME         Image name to run. Default: "code-it-alpine-<toolchains>", a
@@ -617,6 +621,10 @@ if [[ ! -d "$work_dir_to_mount" ]]; then
     exit 1
 fi
 work_dir_to_mount=$(abs_dir "$work_dir_to_mount")
+# The container path the work dir is mounted at, /work/<parent>/<name>: directory
+# names matter for agents' per-directory memory, so no fixed /work. go.sh cds to
+# it (CODE_IT_WORK_DIR), because the image's own WORKDIR /work is only a default.
+container_work_dir=$(ci_work_mount_path "$work_dir_to_mount")
 
 # Create the save dir structure so mounts always work, even on first run. State
 # paths come from the agent definition: directories are created; single files are
@@ -1024,12 +1032,13 @@ done
 cat <<EOF
     $runtime run ${tty_args[*]} --rm -p $port_mapping \\
                 $container_args \\$agent_env_print
+                -e CODE_IT_WORK_DIR="$container_work_dir" \\
                 -e LANG="$container_locale" \\
                 -e GIT_AUTHOR_NAME="$git_author_name" \\
                 -e GIT_AUTHOR_EMAIL="$git_author_email" \\
                 -e GIT_COMMITTER_NAME="$git_author_name" \\
                 -e GIT_COMMITTER_EMAIL="$git_author_email" \\
-                -v "$work_dir_to_mount:/work" \\$agent_mounts_print$cache_mounts_print$extra_run_args_print
+                -v "$work_dir_to_mount:$container_work_dir" \\$agent_mounts_print$cache_mounts_print$extra_run_args_print
                 ${image}:latest$agent_cmd_print
 EOF
 
@@ -1041,12 +1050,13 @@ run_rc=0
 "$runtime" run "${tty_args[@]}" --rm -p "$port_mapping" \
             $container_args \
             "${agent_env[@]}" \
+            -e CODE_IT_WORK_DIR="$container_work_dir" \
             -e LANG="$container_locale" \
             -e GIT_AUTHOR_NAME="$git_author_name" \
             -e GIT_AUTHOR_EMAIL="$git_author_email" \
             -e GIT_COMMITTER_NAME="$git_author_name" \
             -e GIT_COMMITTER_EMAIL="$git_author_email" \
-            -v "$work_dir_to_mount:/work" \
+            -v "$work_dir_to_mount:$container_work_dir" \
             "${agent_mounts[@]+"${agent_mounts[@]}"}" \
             "${cache_mounts[@]+"${cache_mounts[@]}"}" \
             ${run_extra_args[@]+"${run_extra_args[@]}"} \

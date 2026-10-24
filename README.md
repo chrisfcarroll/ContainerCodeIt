@@ -95,7 +95,7 @@ Start a container without an agent with --no-agent / -noAgent
 | `--env`, `-e NAME[=VALUE]` (repeatable) | `-environment`, `-env`, `-e` *array* | none | Environment variable for the container; a bare `NAME` passes the host's value. See [Passing arguments to the container runtime](#passing-arguments-to-the-container-runtime) |
 | `--env-file FILE` (repeatable) | `-envFile` *array* | none | File of `KEY=VALUE` environment variables for the container |
 | `--run-arg ARG`, `--docker-arg ARG` (repeatable) | `-runArgs`, `-dockerArgs` *array* | none, plus `<save dir>/run-args` | One argument passed verbatim to `docker run` / `container run` |
-| `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted at `/work` |
+| `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted in the container at `/work/<parent>/<name>` (the parent's and its own names, so directories keep their names for agents' per-directory memory). A DIR whose parent is `/` mounts at `/work/<name>`; `/`, at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image`, `-i` | `-image` | `code-it-alpine-<toolchains>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
@@ -486,12 +486,13 @@ Something like this:
 docker run -it --rm \
     -p 0:3000 \
     -e CODE_AGENT=opencode \
+    -e CODE_IT_WORK_DIR=/work/dev/my-repos \
     -e LANG=en_GB.UTF-8 \
     -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
     -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
     -e GIT_COMMITTER_NAME="Agent1 for $(git config --get user.name)" \
     -e GIT_COMMITTER_EMAIL="$(git config --get user.email)" \
-    -v ~/my-repos:/work \
+    -v ~/dev/my-repos:/work/dev/my-repos \
     -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \
     -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
     -v ~/.nuget/packages:/home/agent1/.nuget/packages-host:ro \
@@ -536,7 +537,7 @@ The launcher scripts keep the chosen agent's state under one save dir (default `
 
 | Mount point | Purpose |
 |---|---|
-| `/work` | Host directory containing git repos for the agent to work on |
+| `/work/<parent>/<name>` | Host directory containing git repos for the agent to work on, keeping the host directory's own (and its parent's) name so agents' per-directory memory does not collide between projects |
 | `/home/agent1/.claude` | Claude only: credentials, settings, permissions, memory |
 | `/home/agent1/.claude.json` | Claude only: OAuth session data, MCP configs, preferences |
 | `/home/agent1/.config/opencode` | OpenCode v1/v2: configuration, including `opencode.json` and `cli.json` (v2's from `<save dir>/opencode-v2/`) |
