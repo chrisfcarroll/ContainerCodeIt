@@ -2,6 +2,7 @@ Work through this list and commit after each bullet point.
 
 1. It is a problem that the working directory is always mapped with the name ‘work’. We want directory names to work well for agent's per-directory memory.
 Instead of mounting with the fixed path '/work', let's always mount with the path '/work/parent/workdir', using the parent of the workdir provided. Cope with the cases where there is no parentdir, and where workdir is /.
+This also means that although the dockerfile has WORKDIR /work, go.sh will have to cd to the /parent/workdir, otherwise we are in the wrong directory
 
 2. A change. Opencode v2 is now GA, so from now on take opencode to mean v2. Change opencode v1 into an agent option with the name opencode-v1
 
@@ -30,5 +31,4 @@ Let's stop handling ports and don't set any ports by default. (--run-args still 
 10. Add a subdirectory under news/ and move the opencode summary page into it. Then write a pwsh script in the news/ directory update-opencode-news.ps1 to update the page. The script should update the model list and the pricings in the html with the up-to-date values. The -help for the scripts should include a link to the source of the data. And, add a link to the page itself indicating its source
 
 Finally. Review all these changes and make sure that all documentation (help, readme,comments) are up to date.
-
 
