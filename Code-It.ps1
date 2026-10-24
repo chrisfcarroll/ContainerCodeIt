@@ -180,8 +180,8 @@
       configuration under the save dir; run Code-It-Defaults.ps1 to set it there.
     - The prompt and any pass-through arguments are translated into each agent's own
       command line, from the AGENT_CMD_* templates in agents/<name>/config: -prompt
-      becomes `claude PROMPT` or `opencode --prompt PROMPT`, and with -headless it
-      becomes `claude -p PROMPT` or `opencode run PROMPT`
+      becomes `claude PROMPT` or `opencode mini --prompt PROMPT`, and with -headless it
+      becomes `claude -p PROMPT` or `opencode run --standalone PROMPT`
     - <saveDir>/run-args (default ~/.config/code-it/run-args), if it exists, holds run
       arguments for every run, like devcontainer.json's runArgs: one argument per line,
       not quoted; blank lines and lines starting with # are ignored. e.g.
@@ -195,7 +195,8 @@
     - Volume mounts preserve the selected agent's state between container runs, so you
       can destroy the container and create a new one without logging in again. Only
       the paths in AGENT_STATE_DIRS and AGENT_STATE_FILES of agents/<name>/config are
-      mounted, under <saveDir> (or <saveDir>/AGENT_SAVE_SUBDIR, e.g. for opencode-v2)
+      mounted, under <saveDir> (or <saveDir>/AGENT_SAVE_SUBDIR, e.g. for opencode, v2,
+      whose state lives under opencode-v2/)
     - Only one container at a time may use an agent's AGENT_EXCLUSIVE_DIRS (opencode's
       session database, ~/.local/share/opencode, is corrupted if two share it). When
       another Code-It run is using them, Code-It warns and mounts a copy of its own,

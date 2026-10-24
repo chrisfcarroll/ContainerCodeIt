@@ -5,8 +5,8 @@
 #
 # Completes the launcher's own options, and, after `--`, the flags of whichever
 # coding agent the command line selects: claude-it.sh (or -c) completes Claude Code
-# flags, opencode-it.sh (or -o, the default) completes OpenCode v1 flags; select
-# opencode-v2 with --agent to complete v2 flags.
+# flags, opencode-it.sh (or -o, the default) completes OpenCode v2 flags; select
+# opencode-v1 with --agent to complete v1 flags.
 #     https://code.claude.com/docs/en/cli-reference
 #     https://opencode.ai/docs/cli/
 
@@ -23,11 +23,13 @@ _code_it_claude_opts='--print -p --continue -c --resume -r --fork-session --mode
 _code_it_claude_models='opus sonnet haiku claude-opus-5 claude-sonnet-5 claude-haiku-4-5'
 _code_it_claude_permission_modes='default acceptEdits plan auto dontAsk bypassPermissions manual'
 
-_code_it_opencode_opts='run --continue -c --session -s --fork --prompt --model -m
+# OpenCode v2 (`opencode` since v2's GA): the flags people reach for most
+_code_it_opencode_opts='run mini --standalone --server --model --agent --prompt
+    --continue -c --session --format --file --help'
+# OpenCode v1: the flags people reach for most
+_code_it_opencode_v1_opts='run --continue -c --session -s --fork --prompt --model -m
     --agent --auto --port --hostname --share --file -f --format --title --thinking
     --variant --dir'
-_code_it_opencode_v2_opts='run mini --standalone --server --model --agent --prompt
-    --continue -c --session --format --file --help'
 
 _code_it() {
     local cur prev agent seen_dashdash=0 i
@@ -64,19 +66,20 @@ _code_it() {
                     COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
             esac
             COMPREPLY=( $(compgen -W "$_code_it_claude_opts" -- "$cur") )
-        elif [[ "$agent" == opencode-v2 ]]; then
+        elif [[ "$agent" == opencode ]]; then
             case "$prev" in
                 --format) COMPREPLY=( $(compgen -W "text json" -- "$cur") ); return ;;
                 --file) COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
             esac
-            COMPREPLY=( $(compgen -W "$_code_it_opencode_v2_opts" -- "$cur") )
+            COMPREPLY=( $(compgen -W "$_code_it_opencode_opts" -- "$cur") )
         else
+            # opencode-v1
             case "$prev" in
                 --format)     COMPREPLY=( $(compgen -W "default json" -- "$cur") ); return ;;
                 --file|-f)    COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
                 --dir)        COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
             esac
-            COMPREPLY=( $(compgen -W "$_code_it_opencode_opts" -- "$cur") )
+            COMPREPLY=( $(compgen -W "$_code_it_opencode_v1_opts" -- "$cur") )
         fi
         return
     fi

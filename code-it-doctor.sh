@@ -183,8 +183,9 @@ if [[ -d "$save_dir" ]]; then
 else
     warning "$save_dir does not exist yet; code-it will run first-run"
 fi
-# opencode's session databases: the save dir's own, opencode-v2's, and the copies a
-# second container gets (Spec 12). A corrupt one gives "can't create session".
+# opencode's session databases: opencode-v1's at the save dir root, opencode (v2)'s
+# under opencode-v2/, and the copies a second container gets (Spec 12). A corrupt one
+# gives "can't create session".
 opencode_dbs=()
 if [[ -d "$save_dir" ]]; then
     while IFS= read -r db; do

@@ -74,7 +74,8 @@ USER agent1
 RUN mkdir -p ~/.local/bin ~/.local/share
 RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
 
-# The default agent: opencode. code-it-build replaces this whole marked region
+# The default agent: opencode (v2, GA — `opencode` means v2 since its GA; v1 is the
+# separate opencode-v1 agent). code-it-build replaces this whole marked region
 # with the selected agents' install fragments (agents/<name>/install.dockerfile)
 # plus the /etc/code-it-agents name=binary map go.sh reads, so an assembled image
 # contains exactly the agents it was asked for. Built directly, this region
@@ -84,11 +85,18 @@ RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
 USER root
 RUN apk add --no-cache libgcc libstdc++
 USER agent1
-RUN curl -fsSL https://opencode.ai/install -o /tmp/opencode-install.sh \
-    && bash /tmp/opencode-install.sh && rm -f /tmp/opencode-install.sh \
-    && test -x ~/.opencode/bin/opencode # last changed 2026-10-24
+# Its installer always writes ~/.opencode/bin/opencode, where opencode-v1 lives, so
+# install into a scratch HOME and move the binary to its own directory.
+# Download the installer before running it: with "curl | bash" a failed download
+# runs an empty script and the layer succeeds without the agent. The final test
+# fails the build if the binary still is not there.
+RUN curl -fsSL https://opencode.ai/v2/install -o /tmp/opencode-v2-install.sh \
+    && HOME=/tmp/opencode-v2 bash /tmp/opencode-v2-install.sh --version 2.0.6 --no-modify-path \
+    && mkdir -p ~/.opencode-v2/bin && mv /tmp/opencode-v2/.opencode/bin/opencode ~/.opencode-v2/bin/opencode \
+    && rm -rf /tmp/opencode-v2 /tmp/opencode-v2-install.sh \
+    && test -x ~/.opencode-v2/bin/opencode # last changed 2026-10-24
 USER root
-RUN printf '%s\n' 'opencode=/home/agent1/.opencode/bin/opencode' > /etc/code-it-agents
+RUN printf '%s\n' 'opencode=/home/agent1/.opencode-v2/bin/opencode' > /etc/code-it-agents
 USER agent1
 # @@CODE_IT_AGENTS_END@@
 

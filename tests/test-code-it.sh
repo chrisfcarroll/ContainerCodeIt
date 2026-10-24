@@ -177,23 +177,29 @@ assert_contains "docker default auto-assign port" "$out" "-p 0:3000"
 
 # ---------------------------------------------------------------------------
 echo "4. Save dir structure is created for first run"
-[[ -d "$save/.config/opencode" ]];        assert "save/.config/opencode created" "$?"
-[[ -d "$save/.local/share/opencode" ]];   assert "save/.local/share/opencode created" "$?"
-[[ "$(tr -d '[:space:]' < "$save/.config/opencode/config.json")" == '{"$schema":"https://opencode.ai/config.json","permission":"allow"}' ]]
-assert "OpenCode config permits all actions" "$?"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}")
-assert_contains "reports OpenCode v2 config creation" "$out" "Created OpenCode v2 configuration"
+# The default agent is opencode, which since v2's GA is v2: its state lives under
+# save/opencode-v2/ (AGENT_SAVE_SUBDIR), where it has always lived
+[[ -d "$save/opencode-v2/.config/opencode" ]];      assert "save/opencode-v2/.config/opencode created" "$?"
+[[ -d "$save/opencode-v2/.local/share/opencode" ]]; assert "save/opencode-v2/.local/share/opencode created" "$?"
 [[ -d "$save/opencode-v2/.local/state/opencode" ]]; assert "save/opencode-v2/.local/state/opencode created" "$?"
 [[ "$(tr -d '[:space:]' < "$save/opencode-v2/.config/opencode/opencode.json")" == '{"$schema":"https://opencode.ai/config.json","permissions":[{"action":"*","resource":"*","effect":"allow"}]}' ]]
 assert "OpenCode v2 config allows actions without prompts" "$?"
-# opencode (v1) reads the same paths and exits on V2's config, so v2 keeps its own
-[[ ! -e "$save/.config/opencode/opencode.json" ]]; assert "opencode-v2 config is not written where opencode reads it" "$?"
-assert_contains "opencode-v2 mounts config" "$out" "/opencode-v2/.config/opencode:/home/agent1/.config/opencode"
-assert_contains "opencode-v2 mounts data and auth" "$out" "/opencode-v2/.local/share/opencode:/home/agent1/.local/share/opencode"
-assert_contains "opencode-v2 mounts shared-service state" "$out" "/opencode-v2/.local/state/opencode:/home/agent1/.local/state/opencode"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 "${common_args[@]}")
+assert_contains "reports OpenCode v1 config creation" "$out" "Created OpenCode v1 configuration"
+[[ "$(tr -d '[:space:]' < "$save/.config/opencode/config.json")" == '{"$schema":"https://opencode.ai/config.json","permission":"allow"}' ]]
+assert "OpenCode v1 config permits all actions" "$?"
+# opencode-v1 reads the same paths as opencode (v2), so it keeps its state at the
+# save-dir root while v2's stays under save/opencode-v2/
+[[ ! -e "$save/opencode-v2/.config/opencode/config.json" ]]; assert "opencode-v1 config is not written where opencode (v2) reads it" "$?"
+assert_contains "opencode-v1 mounts config" "$out" "$save/.config/opencode:/home/agent1/.config/opencode"
+assert_contains "opencode-v1 mounts data and auth" "$out" "$save/.local/share/opencode:/home/agent1/.local/share/opencode"
 case "$out" in
-    *"/home/agent1/.claude"*) assert "opencode-v2 mounts no claude state" 1 ;;
-    *)                        assert "opencode-v2 mounts no claude state" 0 ;;
+    *"/home/agent1/.local/state/opencode"*) assert "opencode-v1 mounts no v2 shared-service state" 1 ;;
+    *)                                      assert "opencode-v1 mounts no v2 shared-service state" 0 ;;
+esac
+case "$out" in
+    *"/home/agent1/.claude"*) assert "opencode-v1 mounts no claude state" 1 ;;
+    *)                        assert "opencode-v1 mounts no claude state" 0 ;;
 esac
 [[ ! -e "$save/.claude" ]];               assert "opencode run creates no claude state" "$?"
 
@@ -221,13 +227,13 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" --agent claude "${common_args[@]}")
 assert_contains "--agent claude selects claude" "$out" 'CODE_AGENT="claude"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode "${common_args[@]}")
 assert_contains "--agent opencode selects opencode" "$out" 'CODE_AGENT="opencode"'
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}")
-assert_contains "--agent opencode-v2 selects v2" "$out" 'CODE_AGENT="opencode-v2"'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 "${common_args[@]}")
+assert_contains "--agent opencode-v1 selects v1" "$out" 'CODE_AGENT="opencode-v1"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --list-agents)
 assert "--list-agents exit code" "$?"
 assert_contains "--list-agents lists claude" "$out" "claude"
 assert_contains "--list-agents lists opencode" "$out" "opencode"
-assert_contains "--list-agents lists opencode-v2" "$out" "opencode-v2"
+assert_contains "--list-agents lists opencode-v1" "$out" "opencode-v1"
 assert_contains "--list-agents shows the short flag" "$out" "-o"
 PATH="$stub_docker:$PATH" "$code_it" --agent nosuchagent "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "unknown --agent fails" "$?"
@@ -488,18 +494,18 @@ case "$out" in
     *"agents opencode,claude"*) assert "--agent opencode excludes claude" 1 ;;
     *)                         assert "--agent opencode excludes claude" 0 ;;
 esac
-out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent opencode-v2 2>&1)
-assert_contains "--agent opencode-v2 selects the v2 installer" "$out" "agents opencode-v2"
-assert_contains "opencode-v2 image label records the agent" "$out" "--label code-it.agents=opencode-v2"
-assert_contains "opencode-v2 image label records its binary" "$out" "--label code-it.agent-binaries=opencode-v2=/home/agent1/.opencode-v2/bin/opencode"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent opencode-v1 2>&1)
+assert_contains "--agent opencode-v1 selects the v1 installer" "$out" "agents opencode-v1"
+assert_contains "opencode-v1 image label records the agent" "$out" "--label code-it.agents=opencode-v1"
+assert_contains "opencode-v1 image label records its binary" "$out" "--label code-it.agent-binaries=opencode-v1=/home/agent1/.opencode/bin/opencode"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
-assert_contains "agent-binaries label lists every agent" "$out" "--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode/bin/opencode"
-grep -q 'bash /tmp/opencode-v2-install.sh --version 2.0.6' "$script_dir/agents/opencode-v2/install.dockerfile"
-assert "opencode-v2 uses the official installer with a pinned version" "$?"
-[[ "$(grep '^AGENT_BINARY=' "$script_dir/agents/opencode/config")" != "$(grep '^AGENT_BINARY=' "$script_dir/agents/opencode-v2/config")" ]]
-assert "opencode and opencode-v2 binaries do not overwrite each other" "$?"
-grep -q 'mv .*/\.opencode/bin/opencode ~/\.opencode-v2/bin/opencode' "$script_dir/agents/opencode-v2/install.dockerfile"
-assert "opencode-v2 installs to its own AGENT_BINARY path" "$?"
+assert_contains "agent-binaries label lists every agent" "$out" "--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode-v2/bin/opencode"
+grep -q 'bash /tmp/opencode-v2-install.sh --version 2.0.6' "$script_dir/agents/opencode/install.dockerfile"
+assert "opencode (v2) uses the official installer with a pinned version" "$?"
+[[ "$(grep '^AGENT_BINARY=' "$script_dir/agents/opencode/config")" != "$(grep '^AGENT_BINARY=' "$script_dir/agents/opencode-v1/config")" ]]
+assert "opencode and opencode-v1 binaries do not overwrite each other" "$?"
+grep -q 'mv .*/\.opencode/bin/opencode ~/\.opencode-v2/bin/opencode' "$script_dir/agents/opencode/install.dockerfile"
+assert "opencode (v2) installs to its own AGENT_BINARY path" "$?"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
 assert_contains "--agent accepts a list" "$out" "agents claude,opencode"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --list-agents)
@@ -579,7 +585,7 @@ grep -q '^RUN git config --global core.fsmonitor true$' "$script_dir/Dockerfile"
 assert "Dockerfile enables Git filesystem monitoring globally" "$?"
 grep -q 'apk add --no-cache libgcc libstdc++ icu-libs libssl3 && ' "$script_dir/toolchains/powershell/install.dockerfile"
 assert "PowerShell tarball layer adds the libraries it needs" "$?"
-for a in opencode opencode-v2; do
+for a in opencode opencode-v1; do
     grep -q '^RUN apk add --no-cache libgcc libstdc++$' "$script_dir/agents/$a/install.dockerfile"
     assert "$a install fragment adds libgcc and libstdc++" "$?"
 done
@@ -649,9 +655,9 @@ esac
 stub_build="$tmp/stub-build.sh"
 printf '#!/bin/sh\necho "STUB-BUILD $*"\nexit ${STUB_BUILD_RC:-0}\n' > "$stub_build"; chmod +x "$stub_build"
 out=$(CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet:latest" \
-    "$code_it" --toolchain python --package-caches npm --locale en-GB --agent opencode-v2 "${super_args[@]}" 2>&1)
+    "$code_it" --toolchain python --package-caches npm --locale en-GB --agent opencode-v1 "${super_args[@]}" 2>&1)
 assert_contains "build gets the toolchains and package caches" "$out" "STUB-BUILD --toolchain python --package-caches npm"
-assert_contains "build gets the defaults plus the chosen agent" "$out" "--agent opencode,claude,opencode-v2"
+assert_contains "build gets the defaults plus the chosen agent" "$out" "--agent opencode,claude,opencode-v1"
 assert_contains "build gets the locale, runtime and image" "$out" "--locale en-GB --runtime docker --image code-it-alpine-python --yes --dry-run"
 out=$(CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet:latest" \
     "$code_it" --toolchain python --agent claude "${super_args[@]}" 2>&1)
@@ -689,12 +695,13 @@ assert "stripping preserves heredoc bodies" "$?"
 grep -q "apk add --no-cache git" "$stripped_df"
 assert "stripping keeps RUN lines" "$?"
 # The base file builds, with no args, into zsh/vim/tmux/git plus the default agent
-grep -q "opencode.ai/install" "$script_dir/Dockerfile"
+# (opencode, which since v2's GA is v2)
+grep -q "opencode.ai/v2/install" "$script_dir/Dockerfile"
 assert "base Dockerfile carries the default opencode agent" "$?"
 # Keep the default region in sync with the opencode definition (no drift)
-grep -qF "$(grep -m1 'opencode.ai/install' "$script_dir/agents/opencode/install.dockerfile")" "$script_dir/Dockerfile"
+grep -qF "$(grep -m1 'opencode.ai/v2/install' "$script_dir/agents/opencode/install.dockerfile")" "$script_dir/Dockerfile"
 assert "base default agent region matches the opencode fragment" "$?"
-grep -qF "'opencode=/home/agent1/.opencode/bin/opencode'" "$script_dir/Dockerfile"
+grep -qF "'opencode=/home/agent1/.opencode-v2/bin/opencode'" "$script_dir/Dockerfile"
 assert "base default agent region writes the opencode map" "$?"
 
 # ---------------------------------------------------------------------------
@@ -856,18 +863,18 @@ assert_contains "names the agents the image has" "$out" "does not contain agent 
 out=$(STUB_IMAGE_AGENTS=claude PATH="$stub_docker:$PATH" "$code_it" --agent claude "${common_args[@]}" 2>&1)
 assert "image with the chosen agent runs" "$?"
 # An image whose recorded agent binary differs from the agent's definition is out of
-# date (e.g. opencode-v2 built when it shared opencode's path): stop before docker run
-out=$(STUB_IMAGE_AGENTS=opencode,opencode-v2 STUB_IMAGE_AGENT_BINARIES=opencode=/home/agent1/.opencode/bin/opencode,opencode-v2=/home/agent1/.opencode/bin/opencode \
-    PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}" 2>&1)
+# date (e.g. opencode-v1 built when it shared opencode, v2's, path): stop before docker run
+out=$(STUB_IMAGE_AGENTS=opencode,opencode-v1 STUB_IMAGE_AGENT_BINARIES=opencode=/home/agent1/.opencode-v2/bin/opencode,opencode-v1=/home/agent1/.opencode-v2/bin/opencode \
+    PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 "${common_args[@]}" 2>&1)
 [[ "$?" != "0" ]]; assert "image with an out-of-date agent binary fails" "$?"
-assert_contains "names the recorded and expected binaries" "$out" "runs agent 'opencode-v2' from /home/agent1/.opencode/bin/opencode, but agents/opencode-v2/config now names /home/agent1/.opencode-v2/bin/opencode"
-assert_contains "out-of-date agent binary suggests the rebuild" "$out" "code-it-build.sh --toolchain dotnet,node --agent opencode,opencode-v2"
+assert_contains "names the recorded and expected binaries" "$out" "runs agent 'opencode-v1' from /home/agent1/.opencode-v2/bin/opencode, but agents/opencode-v1/config now names /home/agent1/.opencode/bin/opencode"
+assert_contains "out-of-date agent binary suggests the rebuild" "$out" "code-it-build.sh --toolchain dotnet,node --agent opencode,opencode-v1"
 [[ "$out" != *STUB-DOCKER-RUN* ]]; assert "image with an out-of-date agent binary is not run" "$?"
-out=$(STUB_IMAGE_AGENTS=opencode,opencode-v2 STUB_IMAGE_AGENT_BINARIES=opencode=/home/agent1/.opencode/bin/opencode,opencode-v2=/home/agent1/.opencode-v2/bin/opencode \
-    PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}" 2>&1)
+out=$(STUB_IMAGE_AGENTS=opencode,opencode-v1 STUB_IMAGE_AGENT_BINARIES=opencode=/home/agent1/.opencode-v2/bin/opencode,opencode-v1=/home/agent1/.opencode/bin/opencode \
+    PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 "${common_args[@]}" 2>&1)
 assert "image with the current agent binary runs" "$?"
 [[ "$out" != *"out of date"* && "$out" != *predates* ]]; assert "current agent binary gives no out-of-date warning" "$?"
-out=$(STUB_IMAGE_AGENTS=opencode,opencode-v2 PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}" 2>&1)
+out=$(STUB_IMAGE_AGENTS=opencode,opencode-v1 PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 "${common_args[@]}" 2>&1)
 assert "image without agent-binaries label still runs" "$?"
 assert_contains "image without agent-binaries label warns it may be out of date" "$out" "predates code-it recording its agents' binaries"
 # Without a label (older images), fall back to the name-based guess
@@ -906,13 +913,13 @@ assert_contains "claude: bare prompt appended to the image" "$out" 'code-it-alpi
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --prompt "explain this repo" "${common_args[@]}")
 assert_contains "claude: --prompt is the same as a bare prompt" "$out" 'code-it-alpine-dotnet-node:latest explain\ this\ repo'
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o "explain this repo" "${common_args[@]}")
-assert_contains "opencode: prompt becomes --prompt" "$out" 'code-it-alpine-dotnet-node:latest --prompt explain\ this\ repo'
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "explain this repo" "${common_args[@]}")
-assert_contains "opencode-v2: interactive prompt uses mini --prompt" "$out" 'code-it-alpine-dotnet-node:latest mini --prompt explain\ this\ repo'
+assert_contains "opencode (v2): prompt becomes mini --prompt" "$out" 'code-it-alpine-dotnet-node:latest mini --prompt explain\ this\ repo'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 "explain this repo" "${common_args[@]}")
+assert_contains "opencode-v1: interactive prompt uses --prompt" "$out" 'code-it-alpine-dotnet-node:latest --prompt explain\ this\ repo'
 # No prompt and no agent args: nothing is appended, and the run stays interactive
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 "${common_args[@]}")
-[[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "opencode-v2: no prompt appends nothing" "$?"
-assert_contains "opencode-v2: no-prompt run remains interactive" "$out" "docker run -it"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o "${common_args[@]}")
+[[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "opencode (v2): no prompt appends nothing" "$?"
+assert_contains "opencode (v2): no-prompt run remains interactive" "$out" "docker run -it"
 # No prompt and no agent args: nothing is appended, and the run stays interactive
 out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 [[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "no prompt appends nothing" "$?"
@@ -925,23 +932,23 @@ assert_contains "claude --headless uses -p" "$out" 'code-it-alpine-dotnet-node:l
 assert_contains "--headless passes CODE_AGENT_HEADLESS" "$out" "-e CODE_AGENT_HEADLESS=1"
 assert_contains "--headless allocates no TTY" "$out" "docker run -i --rm"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "fix the build" "${common_args[@]}")
-assert_contains "opencode --headless uses run" "$out" 'code-it-alpine-dotnet-node:latest run fix\ the\ build'
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --headless "fix the build" "${common_args[@]}")
-assert_contains "opencode-v2 --headless uses standalone run" "$out" 'code-it-alpine-dotnet-node:latest run --standalone fix\ the\ build'
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --headless "${common_args[@]}" -- --session abc)
-assert_contains "opencode-v2 headless no-prompt still runs headless" "$out" 'code-it-alpine-dotnet-node:latest run --standalone --session abc'
+assert_contains "opencode (v2) --headless uses standalone run" "$out" 'code-it-alpine-dotnet-node:latest run --standalone fix\ the\ build'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 --headless "fix the build" "${common_args[@]}")
+assert_contains "opencode-v1 --headless uses run" "$out" 'code-it-alpine-dotnet-node:latest run fix\ the\ build'
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "${common_args[@]}" -- --session abc)
+assert_contains "opencode (v2) headless no-prompt still runs headless" "$out" 'code-it-alpine-dotnet-node:latest run --standalone --session abc'
 
 # -- passes the rest to the agent verbatim
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c "${common_args[@]}" -- --continue --model opus)
 assert_contains "-- passes agent flags through" "$out" "code-it-alpine-dotnet-node:latest --continue --model opus"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless --prompt "tidy" "${common_args[@]}" -- --max-turns 5)
 assert_contains "agent flags precede the prompt for claude" "$out" "code-it-alpine-dotnet-node:latest -p --max-turns 5 tidy"
-out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless --prompt "tidy" "${common_args[@]}" -- --model opus)
-assert_contains "agent flags follow run for opencode" "$out" "code-it-alpine-dotnet-node:latest run --model opus tidy"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --headless --prompt "tidy" "${common_args[@]}" -- --model example/coder)
-assert_contains "opencode-v2 headless flags precede the prompt" "$out" "code-it-alpine-dotnet-node:latest run --standalone --model example/coder tidy"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 --headless --prompt "tidy" "${common_args[@]}" -- --model opus)
+assert_contains "agent flags follow run for opencode-v1" "$out" "code-it-alpine-dotnet-node:latest run --model opus tidy"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless --prompt "tidy" "${common_args[@]}" -- --model example/coder)
+assert_contains "opencode (v2) headless flags precede the prompt" "$out" "code-it-alpine-dotnet-node:latest run --standalone --model example/coder tidy"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "${common_args[@]}" -- --session abc)
-assert_contains "opencode headless with no prompt still uses run" "$out" "code-it-alpine-dotnet-node:latest run --session abc"
+assert_contains "opencode (v2) headless with no prompt still uses run" "$out" "code-it-alpine-dotnet-node:latest run --standalone --session abc"
 # --headless without a prompt leaves the agent command to the caller
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless "${common_args[@]}" -- -p "count the files")
 assert_contains "--headless with no prompt adds no -p of its own" "$out" 'code-it-alpine-dotnet-node:latest -p count\ the\ files'
@@ -998,9 +1005,9 @@ completions_out=$(
     echo "CLAUDEALIAS:$(comp ./claude-it.sh -- --mod | tr '\n' ' ')"
     echo "CLAUDEFLAG:$(comp ./code-it.sh -c -- --perm | tr '\n' ' ')"
     echo "CLAUDEMODE:$(comp ./code-it.sh -c -- --permission-mode '' | tr '\n' ' ')"
-    echo "OPENCODEDEF:$(comp ./code-it.sh -- --se | tr '\n' ' ')"
-    echo "OPENCODEALIAS:$(comp ./opencode-it.sh -- --th | tr '\n' ' ')"
-    echo "OPENCODEV2:$(comp ./code-it.sh --agent opencode-v2 -- --sta | tr '\n' ' ')"
+    echo "OPENCODEDEF:$(comp ./code-it.sh -- --sta | tr '\n' ' ')"
+    echo "OPENCODEALIAS:$(comp ./opencode-it.sh -- --se | tr '\n' ' ')"
+    echo "OPENCODEV1:$(comp ./code-it.sh --agent opencode-v1 -- --th | tr '\n' ' ')"
     echo "NOAGENT:$(comp ./code-it.sh --no- | tr '\n' ' ')"
 )
 assert_contains "completes launcher options" "$completions_out" "OPTS:--headless"
@@ -1015,9 +1022,9 @@ assert_contains "offers nothing for a free-text --run-arg" "$completions_out" "R
 assert_contains "claude-it.sh completes claude flags after --" "$completions_out" "CLAUDEALIAS:--model"
 assert_contains "-c completes claude flags after --" "$completions_out" "CLAUDEFLAG:--permission-mode"
 assert_contains "completes claude --permission-mode values" "$completions_out" "CLAUDEMODE:default acceptEdits"
-assert_contains "defaults to opencode flags after --" "$completions_out" "OPENCODEDEF:--session"
-assert_contains "opencode-it.sh completes opencode flags after --" "$completions_out" "OPENCODEALIAS:--thinking"
-assert_contains "opencode-v2 completes v2 flags after --" "$completions_out" "OPENCODEV2:--standalone"
+assert_contains "defaults to opencode (v2) flags after --" "$completions_out" "OPENCODEDEF:--standalone"
+assert_contains "opencode-it.sh completes opencode (v2) flags after --" "$completions_out" "OPENCODEALIAS:--server"
+assert_contains "opencode-v1 completes v1 flags after --" "$completions_out" "OPENCODEV1:--thinking"
 
 # ---------------------------------------------------------------------------
 echo "15. Container entrypoint (go.sh) passes its arguments to the agent"
@@ -1033,7 +1040,7 @@ if command -v zsh &>/dev/null; then
     chmod +x "$tmp/go.sh"
     [[ -s "$tmp/go.sh" ]]; assert "go.sh extracted from the Dockerfile" "$?"
 
-    for agent in claude opencode opencode-v2; do
+    for agent in claude opencode opencode-v1; do
         cat > "$gobin/$agent" <<EOF
 #!/bin/sh
 printf 'AGENT-$agent'
@@ -1043,7 +1050,7 @@ EOF
         chmod +x "$gobin/$agent"
     done
     # go.sh resolves the agent binary from the build-time name=binary map
-    printf 'opencode=%s/opencode\nclaude=%s/claude\nopencode-v2=%s/opencode-v2\n' "$gobin" "$gobin" "$gobin" > "$gobin/agents"
+    printf 'opencode=%s/opencode\nclaude=%s/claude\nopencode-v1=%s/opencode-v1\n' "$gobin" "$gobin" "$gobin" > "$gobin/agents"
     # tmux takes the command as one string: run it, so what the agent receives is visible
     cat > "$gobin/tmux" <<'EOF'
 #!/bin/sh
@@ -1066,8 +1073,10 @@ EOF
     assert_contains "go.sh runs the chosen agent in tmux" "$out" "AGENT-claude"
     out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "explain this repo" 2>&1)
     assert_contains "go.sh forwards arguments through tmux, unsplit" "$out" "AGENT-opencode[--prompt][explain this repo]"
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode-v2 CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" run --standalone "fix the build" 2>&1)
-    assert_contains "go.sh runs opencode-v2 with translated arguments" "$out" "AGENT-opencode-v2[run][--standalone][fix the build]"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" run --standalone "fix the build" 2>&1)
+    assert_contains "go.sh runs opencode (v2) with translated arguments" "$out" "AGENT-opencode[run][--standalone][fix the build]"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode-v1 zsh "$tmp/go.sh" --prompt "explain this repo" 2>&1)
+    assert_contains "go.sh runs opencode-v1 with its arguments" "$out" "AGENT-opencode-v1[--prompt][explain this repo]"
     out=$(PATH="$gobin:$PATH" CODE_AGENT=claude CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" -p "fix it; rm -rf /" 2>&1)
     assert_contains "headless go.sh runs the agent directly" "$out" "AGENT-claude[-p][fix it; rm -rf /]"
     [[ "$out" != *AGENT-claude*AGENT-claude* ]]; assert "headless go.sh does not also start tmux" "$?"
@@ -1237,19 +1246,20 @@ mkdir -p "$fh/.config/opencode" "$fs/.config/opencode"
 echo ORIGINAL > "$fh/.config/opencode/config.json"
 echo NEW > "$fh/.config/opencode/new.json"
 echo KEEP > "$fs/.config/opencode/config.json"
-out=$(HOME="$fh" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode \
+out=$(HOME="$fh" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode-v1 \
         --save-dir "$fs" --code-it-build "$stub_first_build" 2>&1)
 assert "first-run copy exit code" "$?"
 assert_contains "first-run invoked the build" "$out" "STUB-FIRST-BUILD"
 [[ "$(cat "$fs/.config/opencode/config.json")" == "KEEP" ]]; assert "first-run never overwrites existing state" "$?"
 [[ "$(cat "$fs/.config/opencode/new.json")" == "NEW" ]]; assert "first-run copies missing state" "$?"
 assert_contains "first-run warns that credentials are copied" "$out" "credentials"
-assert_contains "first-run prints the start command" "$out" "code-it.sh --agent opencode"
-# an agent with AGENT_SAVE_SUBDIR gets its copy in that subdirectory
-out=$(HOME="$fh" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode-v2 \
+assert_contains "first-run prints the start command" "$out" "code-it.sh --agent opencode-v1"
+# an agent with AGENT_SAVE_SUBDIR (opencode, v2, whose state lives under opencode-v2/)
+# gets its copy in that subdirectory
+out=$(HOME="$fh" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents opencode \
         --save-dir "$fs" --code-it-build "$stub_first_build" 2>&1)
 [[ "$(cat "$fs/opencode-v2/.config/opencode/config.json")" == "ORIGINAL" ]]
-assert "first-run copies opencode-v2 state into its save subdir" "$?"
+assert "first-run copies opencode (v2) state into its save subdir" "$?"
 
 # (e) --dry-run makes no changes and copies nothing
 rm -f "$tmp/first-build-ran"
@@ -1506,9 +1516,9 @@ out=$(BAR=host-bar PATH="$stub_docker:$PATH" "$code_it" "${ra_args[@]}" \
 assert_contains "extra run arguments keep their command-line order" "$out" \
     "-e FOO=1 -e BAR --env-file $ra_envfile --network=host --label=a b"
 assert_contains "extra run arguments follow the mounted agent state" "$out" \
-    "$ra_save/.config/opencode:/home/agent1/.config/opencode"
+    "$ra_save/opencode-v2/.config/opencode:/home/agent1/.config/opencode"
 assert_contains "extra run arguments precede the mounted agent data" "$out" \
-    "$ra_save/.local/share/opencode:/home/agent1/.local/share/opencode"
+    "$ra_save/opencode-v2/.local/share/opencode:/home/agent1/.local/share/opencode"
 case "$out" in
     *host-bar*) assert "docker reads a bare -e NAME itself, so its value is not passed" 1 ;;
     *)          assert "docker reads a bare -e NAME itself, so its value is not passed" 0 ;;
@@ -1567,23 +1577,24 @@ echo
 echo "22. Exclusive agent state: one container per opencode session database"
 excl="$tmp/save-excl"; mkdir -p "$excl"
 excl_args=(--work-dir "$script_dir" --save-dir "$excl")
-excl_locks="$excl/.code-it-instances/opencode"
+# opencode-v1 keeps its state at the save-dir root; its lock dir is named for it
+excl_locks="$excl/.code-it-instances/opencode-v1"
 slot1_mount="-v \"$excl/.local/share/opencode:/home/agent1/.local/share/opencode\""
 # A pid that is certainly not running: a child that has already exited
 sh -c 'exit 0' & dead_pid=$!; wait "$dead_pid"
 
 # (a) no lock: slot 1, no warning, and a dry run takes no lock
-out=$(PATH="$stub_docker:$PATH" "$code_it" -o --dry-run "${excl_args[@]}" 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 --dry-run "${excl_args[@]}" 2>&1)
 assert_contains "no lock: slot 1 is mounted" "$out" "$slot1_mount"
-[[ "$out" != *"Another opencode container"* ]]; assert "no lock: no warning" "$?"
+[[ "$out" != *"Another opencode-v1 container"* ]]; assert "no lock: no warning" "$?"
 [[ ! -e "$excl_locks/1.lock" ]]; assert "dry run takes no lock" "$?"
 
 # (b) slot 1 held by a live process (this test): warn and mount slot 2
 mkdir -p "$excl_locks" "$excl/.local/share/opencode"
 echo '{"anthropic":{"type":"api"}}' > "$excl/.local/share/opencode/auth.json"
 echo "$$" > "$excl_locks/1.lock"
-out=$(PATH="$stub_docker:$PATH" "$code_it" -o --dry-run "${excl_args[@]}" 2>&1)
-assert_contains "held lock: warns of the other container" "$out" "Warning: Another opencode container is using $excl/.local/share/opencode"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 --dry-run "${excl_args[@]}" 2>&1)
+assert_contains "held lock: warns of the other container" "$out" "Warning: Another opencode-v1 container is using $excl/.local/share/opencode"
 assert_contains "held lock: slot 2 is mounted" "$out" "-v \"$excl_locks/2/.local/share/opencode:/home/agent1/.local/share/opencode\""
 assert_contains "held lock: config is still shared" "$out" "-v \"$excl/.config/opencode:/home/agent1/.config/opencode\""
 [[ ! -e "$excl_locks/2" ]]; assert "dry run copies nothing" "$?"
@@ -1601,7 +1612,7 @@ case "$1" in
 esac
 EOF
 chmod +x "$stub_locks/docker"
-out=$(STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" -o "${excl_args[@]}" 2>&1)
+out=$(STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode-v1 "${excl_args[@]}" 2>&1)
 assert_contains "real run mounts slot 2" "$out" "-v $excl_locks/2/.local/share/opencode:/home/agent1/.local/share/opencode"
 assert_contains "real run holds slot 2's lock while running" "$out" "LOCKS-DURING-RUN: 1.lock 2.lock"
 [[ "$out" != *"no saved login"* ]]; assert "auth.json to carry: no login note" "$?"
@@ -1613,27 +1624,27 @@ assert "auth.json is carried into the copy" "$?"
 # (d) a newer auth.json in slot 1 refreshes the copy's; an older one does not
 echo '{"anthropic":{"type":"oauth"}}' > "$excl/.local/share/opencode/auth.json"
 touch -t 203001010000 "$excl/.local/share/opencode/auth.json"
-STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" -o "${excl_args[@]}" >/dev/null 2>&1
+STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode-v1 "${excl_args[@]}" >/dev/null 2>&1
 cmp -s "$excl/.local/share/opencode/auth.json" "$excl_locks/2/.local/share/opencode/auth.json"
 assert "a newer auth.json refreshes the copy" "$?"
 echo '{"in":"copy"}' > "$excl_locks/2/.local/share/opencode/auth.json"
 touch -t 203101010000 "$excl_locks/2/.local/share/opencode/auth.json"
-STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" -o "${excl_args[@]}" >/dev/null 2>&1
+STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode-v1 "${excl_args[@]}" >/dev/null 2>&1
 grep -q '"in":"copy"' "$excl_locks/2/.local/share/opencode/auth.json"
 assert "an older auth.json leaves the copy's alone" "$?"
 
 # (e) slots 1 and 2 held: slot 3
 echo "$$" > "$excl_locks/2.lock"
-out=$(PATH="$stub_docker:$PATH" "$code_it" -o --dry-run "${excl_args[@]}" 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 --dry-run "${excl_args[@]}" 2>&1)
 assert_contains "slots 1 and 2 held: slot 3 is mounted" "$out" "$excl_locks/3/.local/share/opencode:/home/agent1/.local/share/opencode"
 rm -f "$excl_locks/2.lock"
 
 # (f) a stale lock (its process has exited): slot 1, no warning; a real run replaces it
 echo "$dead_pid" > "$excl_locks/1.lock"
-out=$(PATH="$stub_docker:$PATH" "$code_it" -o --dry-run "${excl_args[@]}" 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v1 --dry-run "${excl_args[@]}" 2>&1)
 assert_contains "stale lock: slot 1 is mounted" "$out" "$slot1_mount"
-[[ "$out" != *"Another opencode container"* ]]; assert "stale lock: no warning" "$?"
-out=$(STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" -o "${excl_args[@]}" 2>&1)
+[[ "$out" != *"Another opencode-v1 container"* ]]; assert "stale lock: no warning" "$?"
+out=$(STUB_LOCK_DIR="$excl_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode-v1 "${excl_args[@]}" 2>&1)
 assert_contains "stale lock: a real run takes slot 1" "$out" "LOCKS-DURING-RUN: 1.lock"
 [[ ! -e "$excl_locks/1.lock" ]]; assert "stale lock: removed after the run" "$?"
 
@@ -1642,30 +1653,30 @@ rm -rf "$excl/.code-it-instances"
 PATH="$stub_docker:$PATH" "$code_it" -c "${excl_args[@]}" >/dev/null 2>&1
 [[ ! -e "$excl/.code-it-instances" ]]; assert "claude takes no lock" "$?"
 
-# (h) opencode-v2: both its data and its shared-service state are exclusive, locked
-# under its own save subdir, apart from opencode's
-v2_locks="$excl/opencode-v2/.code-it-instances/opencode-v2"
+# (h) opencode (v2, the default agent): both its data and its shared-service state are
+# exclusive, locked under its own save subdir, apart from opencode-v1's
+v2_locks="$excl/opencode-v2/.code-it-instances/opencode"
 mkdir -p "$v2_locks"; echo "$$" > "$v2_locks/1.lock"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --dry-run "${excl_args[@]}" 2>&1)
-assert_contains "v2 held lock: warns of the other container" "$out" "Warning: Another opencode-v2 container is using $excl/opencode-v2/.local/share/opencode"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode --dry-run "${excl_args[@]}" 2>&1)
+assert_contains "v2 held lock: warns of the other container" "$out" "Warning: Another opencode container is using $excl/opencode-v2/.local/share/opencode"
 assert_contains "v2 held lock: data from slot 2" "$out" "-v \"$v2_locks/2/.local/share/opencode:/home/agent1/.local/share/opencode\""
 assert_contains "v2 held lock: shared-service state from slot 2" "$out" "-v \"$v2_locks/2/.local/state/opencode:/home/agent1/.local/state/opencode\""
 assert_contains "v2 held lock: config is still shared" "$out" "-v \"$excl/opencode-v2/.config/opencode:/home/agent1/.config/opencode\""
 assert_contains "v2 new copy: says it has no saved login" "$out" "This copy has no saved login"
 mkdir -p "$excl/opencode-v2/.local/share/opencode"
 echo '{"v1":"style"}' > "$excl/opencode-v2/.local/share/opencode/auth.json"
-out=$(STUB_LOCK_DIR="$v2_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode-v2 "${excl_args[@]}" 2>&1)
+out=$(STUB_LOCK_DIR="$v2_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode "${excl_args[@]}" 2>&1)
 assert_contains "v2 real run holds slot 2's lock" "$out" "LOCKS-DURING-RUN: 1.lock 2.lock"
 [[ -d "$v2_locks/2/.local/state/opencode" ]]; assert "v2 copy has its own shared-service state" "$?"
 [[ ! -e "$v2_locks/2/.local/share/opencode/auth.json" ]]; assert "v2 carries no auth.json (its login is in its database)" "$?"
-out=$(STUB_LOCK_DIR="$v2_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode-v2 "${excl_args[@]}" 2>&1)
+out=$(STUB_LOCK_DIR="$v2_locks" PATH="$stub_locks:$PATH" "$code_it" --agent opencode "${excl_args[@]}" 2>&1)
 [[ "$out" != *"no saved login"* ]]; assert "v2 reused copy: no login note (it keeps its own)" "$?"
 rm -f "$v2_locks/1.lock"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --dry-run "${excl_args[@]}" 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode --dry-run "${excl_args[@]}" 2>&1)
 assert_contains "v2 free: slot 1 state is mounted" "$out" "-v \"$excl/opencode-v2/.local/state/opencode:/home/agent1/.local/state/opencode\""
 mkdir -p "$excl_locks"; echo "$$" > "$excl_locks/1.lock"
-out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode-v2 --dry-run "${excl_args[@]}" 2>&1)
-[[ "$out" != *"Another opencode-v2 container"* ]]; assert "an opencode (v1) lock does not affect opencode-v2" "$?"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode --dry-run "${excl_args[@]}" 2>&1)
+[[ "$out" != *"Another opencode container"* ]]; assert "an opencode-v1 lock does not affect opencode (v2)" "$?"
 rm -rf "$excl/.code-it-instances"
 
 # (i) help documents it

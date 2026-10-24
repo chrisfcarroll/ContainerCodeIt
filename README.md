@@ -192,8 +192,9 @@ saved toolchain — which in turn beats the remembered-image heuristic of
 [Specs 09/10](Specs/10-default-first-run-or-existing-image.md). When it launches the
 saved agent it says so (`Using saved default agent: …`), because the agent brings its
 own state with it: each agent's state, and its login, live in its own directory under
-the save dir, so switching the default agent switches those too — opencode-v2 keeps
-its login in its own state directory, and its first run there can ask you to log in
+the save dir, so switching the default agent switches those too — opencode, v2,
+keeps its login in the database under its own state directory, and its first run
+there can ask you to log in
 again. Models are data: the catalog offered by the interactive picker (from
 `lib/models.txt`, or `<save dir>/model-catalog.txt` after `--refresh-models`) is best
 effort and always incomplete, and any model string is accepted. Where opencode-go —
@@ -300,18 +301,19 @@ also installs the .NET 10 SDK if `dotnet` is not selected.
 ## Agents
 
 ```bash
-./code-it-build.sh -t node --agent opencode              # a leaner image, OpenCode only
+./code-it-build.sh -t node --agent opencode              # a leaner image, OpenCode (v2) only
 ./code-it.sh -t node --agent opencode                    # run it
-./code-it-build.sh -t node --agent opencode,opencode-v2  # v1 and v2 side by side
-./code-it.sh -t node --agent opencode-v2 --headless "summarise this repo"
+./code-it-build.sh -t node --agent opencode,opencode-v1  # v2 and v1 side by side
+./code-it.sh -t node --agent opencode-v1 --headless "summarise this repo"
 ./code-it.sh --list-agents                               # what is available
 ```
 
-OpenCode v1 and v2 can be built into the same image: v2's binary is moved to
-`~/.opencode-v2/bin` so it does not overwrite v1's. They read the same config and
-data paths, and v1 exits at once on v2's `opencode.json`, so v2 sets
-`AGENT_SAVE_SUBDIR=opencode-v2` in its config and keeps its state under
-`<save dir>/opencode-v2/` instead of the save dir itself.
+OpenCode v2 (the default `opencode` since v2's GA) and v1 can be built into the same
+image: v2's binary is moved to `~/.opencode-v2/bin` so it does not overwrite v1's
+`~/.opencode/bin`. They read the same config and data paths, and v1 exits at once on
+v2's `opencode.json`, so v2 sets `AGENT_SAVE_SUBDIR=opencode-v2` in its config and
+keeps its state under `<save dir>/opencode-v2/` while v1 keeps its at the save dir
+itself.
 
 ### Multiple containers
 
@@ -338,7 +340,7 @@ Each agent is a directory, `agents/<name>/`, so adding one needs no script chang
   | `AGENT_CONFIG_LABEL` | How messages name its config, e.g. `'Claude Code settings'` |
   | `AGENT_STATE_DIRS`, `AGENT_STATE_FILES` | `:`-separated paths, relative to home, kept under the save dir and mounted into the container |
   | `AGENT_SAVE_SUBDIR` | Optional subdirectory of the save dir for its state, when it would clash with another agent's |
-  | `AGENT_MODEL_FILE` | Optional `path:key`: the JSON file, under the agent's save dir, whose top-level `key` holds its default model; how `code-it-defaults` sets the model. Claude: `.claude/settings.json:model`; opencode: `.config/opencode/config.json:model`; opencode-v2: `.config/opencode/opencode.json:model` (v1 exits on v2's `opencode.json`, so each keeps its own file) |
+  | `AGENT_MODEL_FILE` | Optional `path:key`: the JSON file, under the agent's save dir, whose top-level `key` holds its default model; how `code-it-defaults` sets the model. Claude: `.claude/settings.json:model`; opencode (v2): `.config/opencode/opencode.json:model`; opencode-v1: `.config/opencode/config.json:model` (v1 exits on v2's `opencode.json`, so each keeps its own file) |
   | `AGENT_EXCLUSIVE_DIRS` | Optional `:`-separated directories, from `AGENT_STATE_DIRS`, that only one container at a time may use. See [Several containers at once](#several-containers-at-once) |
   | `AGENT_EXCLUSIVE_CARRY` | Optional `:`-separated files, relative to home, inside those directories (credentials), copied into a run's own copy |
   | `AGENT_CMD_INTERACTIVE_PROMPT`, `AGENT_CMD_INTERACTIVE_NO_PROMPT`, `AGENT_CMD_HEADLESS_PROMPT`, `AGENT_CMD_HEADLESS_NO_PROMPT` | Its command line in each mode, where `{args}` is the arguments after `--` and `{prompt}` the opening prompt |

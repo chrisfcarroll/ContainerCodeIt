@@ -39,14 +39,15 @@ $script:CodeItClaudeArgs = @(
 )
 
 $script:CodeItOpenCodeArgs = @(
+    # OpenCode v2, the default `opencode` since v2's GA
+    'run', 'mini', '--standalone', '--server', '--model', '--agent', '--prompt',
+    '--continue', '-c', '--session', '--format', '--file', '--help', 'text', 'json'
+)
+
+$script:CodeItOpenCodeV1Args = @(
     'run', '--continue', '-c', '--session', '-s', '--fork', '--prompt', '--model', '-m',
     '--agent', '--auto', '--port', '--hostname', '--share', '--file', '-f', '--format',
     '--title', '--thinking', '--variant', '--dir', 'default', 'json'
-)
-
-$script:CodeItOpenCodeV2Args = @(
-    'run', 'mini', '--standalone', '--server', '--model', '--agent', '--prompt',
-    '--continue', '-c', '--session', '--format', '--file', '--help', 'text', 'json'
 )
 
 $codeItCommands = @(
@@ -60,13 +61,12 @@ Register-ArgumentCompleter -CommandName $codeItCommands -ParameterName agentArgs
 
     # Which agent's flags to offer: the alias script chooses it, -claude/-opencode wins
     $agent = if ("$commandName" -like '*Claude-It*') { 'claude' } else { 'opencode' }
-    if ($fakeBoundParameters.ContainsKey('agent') -and $fakeBoundParameters['agent'] -eq 'opencode-v2') { $agent = 'opencode-v2' }
+    if ($fakeBoundParameters.ContainsKey('agent') -and $fakeBoundParameters['agent'] -eq 'opencode-v1') { $agent = 'opencode-v1' }
     if ($fakeBoundParameters.ContainsKey('claude'))   { $agent = 'claude' }
     if ($fakeBoundParameters.ContainsKey('opencode')) { $agent = 'opencode' }
 
-    $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'opencode-v2') { $script:CodeItOpenCodeV2Args } else { $script:CodeItOpenCodeArgs }
-$candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'opencode-v2') { $script:CodeItOpenCodeV2Args } else { $script:CodeItOpenCodeArgs }
-$candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+    $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'opencode-v1') { $script:CodeItOpenCodeV1Args } else { $script:CodeItOpenCodeArgs }
+    $candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "$agent $_")
 }
 }
