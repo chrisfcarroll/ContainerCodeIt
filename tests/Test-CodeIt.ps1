@@ -431,12 +431,12 @@ Assert "assembled Dockerfile is under Apple's 16KB limit" ((Get-CaptureText).Len
 Assert-InCapture "agent state dirs are pre-created for mounts" '~/.local/share/opencode'
 # Each installed agent's binary directory goes on zsh's PATH, so a --no-agent
 # shell can invoke any of them (Spec 18)
-Assert-InCapture "each installed agent's binary dir goes on zsh's PATH" 'export PATH="/home/agent1/.opencode-v2/bin:/home/agent1/.local/bin:$PATH"'
+Assert-InCapture "each installed agent's binary dir goes on zsh's PATH" 'RUN echo ''export PATH="/home/agent1/.opencode-v2/bin:/home/agent1/.local/bin:$PATH"'' >> ~/.zshrc'
 Invoke-Capture $codeItBuild @('-toolchain', 'dotnet', '-agent', 'claude', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
 Assert-InCapture "claude state dir is pre-created for mounts" '~/.claude'
 Assert-NotInCapture "claude state file is not created as a directory" '~/.claude.json'
 Assert-NotInCapture "an assembled image has only the selected agents" 'opencode.ai/install'
-Assert-InCapture "a single agent's binary dir goes on zsh's PATH" 'export PATH="/home/agent1/.local/bin:$PATH"'
+Assert-InCapture "a single agent's binary dir goes on zsh's PATH" 'RUN echo ''export PATH="/home/agent1/.local/bin:$PATH"'' >> ~/.zshrc'
 # The new native-musl toolchains (Spec 18): rust and go from Alpine's own packages
 Invoke-Capture $codeItBuild @('-toolchain', 'rust', '-dockerfileDir', $scriptDir, '-runtime', 'docker')
 Assert-InCapture "build assembles rust" 'apk add --no-cache rust cargo'

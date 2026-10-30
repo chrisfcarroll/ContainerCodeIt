@@ -309,11 +309,12 @@ $block += "USER agent1`n"
 $agentPath = @()
 foreach ($a in $enabledAgents) {
     $bin = Get-CodeItAgentConfig $agentsDir $a 'AGENT_BINARY'
-    $dir = Split-Path -Parent $bin
+    # A container path, so not Split-Path, which would turn / into \ on Windows
+    $dir = $bin -replace '/[^/]+$', ''
     if ($agentPath -notcontains $dir) { $agentPath += $dir }
 }
 if ($agentPath) {
-    $block += "RUN echo 'export PATH=`"$($agentPath -join ':'):`$PATH`" >> ~/.zshrc`n"
+    $block += "RUN echo 'export PATH=`"$($agentPath -join ':'):`$PATH`"' >> ~/.zshrc`n"
 }
 $agentBlock = $block
 
