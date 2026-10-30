@@ -79,13 +79,9 @@ if [[ "$runtime" != docker && "$runtime" != container ]]; then
     echo "Unknown runtime '$runtime': use docker or container" >&2; exit 1
 fi
 
-# The container's LANG: --locale, else the host's LC_ALL or LANG, else macOS's own
-# setting. en-GB, en_GB.UTF-8 and en_GB@rg=gbzzzz all become en_GB.UTF-8.
-lang=$locale
-if [[ -z "$lang" ]]; then
-    for lang in "$LC_ALL" "$LANG" ""; do [[ "$lang" == [a-z][a-z]* ]] && break; done
-    [[ -z "$lang" && "$(uname -s)" == Darwin ]] && lang=$(defaults read -g AppleLocale 2>/dev/null || true)
-fi
+# The container's LANG: --locale, else the host's LC_ALL or LANG.
+# en-GB, en_GB.UTF-8 and en_GB@euro all become en_GB.UTF-8.
+lang=${locale:-${LC_ALL:-$LANG}}
 lang=${lang%%[.@]*}
 lang=${lang//-/_}
 if [[ "$lang" =~ ^[a-z]{2,3}(_[A-Z]{2})?$ ]]; then

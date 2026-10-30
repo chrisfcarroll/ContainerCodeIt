@@ -63,8 +63,7 @@ EOF
 done
 mkdir -p "$tmp/stub-darwin"
 printf '#!/bin/sh\necho Darwin\n' > "$tmp/stub-darwin/uname"
-printf '#!/bin/sh\nexit 1\n' > "$tmp/stub-darwin/defaults"
-chmod +x "$tmp/stub-darwin/uname" "$tmp/stub-darwin/defaults"
+chmod +x "$tmp/stub-darwin/uname"
 
 home="$tmp/home"
 work="$tmp/projects/my-proj"
