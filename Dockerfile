@@ -154,11 +154,13 @@ cd "$work_dir" 2>/dev/null || {
     echo "CODE_IT_WORK_DIR '$work_dir' does not exist in the container. Mount the work dir there, or run without it to start in /work." >&2
     exit 1
 }
+# (N): a work dir with no subdirectories matches nothing, and zsh would otherwise
+# abort go.sh with "no matches found" before the agent starts.
 git config --global --add safe.directory "$work_dir"
-for d in "$work_dir"/*/ ; do git config --global --add safe.directory "$d" ; done
+for d in "$work_dir"/*/(N) ; do git config --global --add safe.directory "$d" ; done
 # Index format is repository-local, so upgrade each mounted repository once at
 # startup. Skip nested directories that resolve to the same repository root.
-for repo in "$work_dir" "$work_dir"/*/ ; do
+for repo in "$work_dir" "$work_dir"/*/(N) ; do
     [ -d "$repo" ] || continue
     if [ -z "$(git -C "$repo" rev-parse --show-prefix 2>/dev/null)" ] &&
        git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then

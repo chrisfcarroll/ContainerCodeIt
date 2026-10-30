@@ -504,9 +504,9 @@ assert "assembled Dockerfile writes /etc/code-it-agents as root" "$?"
 assert "assembled Dockerfile drops back to agent1 after the root write" "$?"
 # Each installed agent's binary directory goes on zsh's PATH, so a --no-agent
 # shell can invoke any of them (Spec 18)
-assert_in_df "each installed agent's binary dir goes on zsh's PATH" 'export PATH="/home/agent1/.opencode-v2/bin:/home/agent1/.local/bin:$PATH"'
+assert_in_df "each installed agent's binary dir goes on zsh's PATH" 'RUN echo '"'"'export PATH="/home/agent1/.opencode-v2/bin:/home/agent1/.local/bin:$PATH"'"'"' >> ~/.zshrc'
 do_capture --toolchain dotnet --agent claude --dockerfile-dir "$script_dir" --runtime docker
-assert_in_df "a single agent's binary dir goes on zsh's PATH" 'export PATH="/home/agent1/.local/bin:$PATH"'
+assert_in_df "a single agent's binary dir goes on zsh's PATH" 'RUN echo '"'"'export PATH="/home/agent1/.local/bin:$PATH"'"'"' >> ~/.zshrc'
 
 echo "10f. code-it-build agents"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" 2>&1)
@@ -1066,6 +1066,9 @@ echo "15. Container entrypoint (go.sh) passes its arguments to the agent"
 if command -v zsh &>/dev/null; then
     # Lift go.sh out of the Dockerfile and point it at stubs instead of the image's
     # own paths, so the entrypoint's argument handling can be tested on the host.
+    # Inside a code-it container the launcher has set CODE_IT_WORK_DIR, which would
+    # send the extracted go.sh to the real work dir instead of $gowork.
+    unset CODE_IT_WORK_DIR
     gowork="$tmp/gowork"; gobin="$tmp/gobin"
     mkdir -p "$gowork/repo" "$gobin"
     sed -n "/^RUN cat <<'EOF' >> ~\/go.sh$/,/^EOF$/p" "$script_dir/Dockerfile" \
@@ -1106,6 +1109,14 @@ EOF
     out=$(PATH="$gobin:$PATH" GIT_CALLS="$git_calls" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
     assert_contains "go.sh upgrades mounted repo indexes to version 4" "$(<"$git_calls")" "-C $gowork/repo/ update-index --index-version 4"
     assert_contains "go.sh runs the chosen agent in tmux" "$out" "AGENT-claude"
+    # The launcher mounts the work dir at /work/<parent>/<name>, so go.sh must trust
+    # that path, not just /work and its immediate children. A work dir with no
+    # subdirectories must not make zsh abort go.sh on an empty glob.
+    mkdir -p "$gowork/parent/leaf"
+    : > "$git_calls"
+    out=$(PATH="$gobin:$PATH" GIT_CALLS="$git_calls" CODE_IT_WORK_DIR="$gowork/parent/leaf" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
+    assert_contains "go.sh marks the nested mounted work dir as a git safe.directory" "$(<"$git_calls")" "config --global --add safe.directory $gowork/parent/leaf"
+    assert_contains "go.sh starts the agent in a work dir with no subdirectories" "$out" "AGENT-claude"
     out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "explain this repo" 2>&1)
     assert_contains "go.sh forwards arguments through tmux, unsplit" "$out" "AGENT-opencode[--prompt][explain this repo]"
     out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" run --standalone "fix the build" 2>&1)
