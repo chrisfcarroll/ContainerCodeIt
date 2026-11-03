@@ -1,16 +1,20 @@
 # ContainerCodeIt XS
 
-Extra small, extra secure. Sandbox your coding agent in a container that can see one
-directory, from a Dockerfile you maintain yourself and two short scripts you can read
-in a few minutes.
+Sandbox your agentic AI properly: in a container, with access to a single 
+working directory, where it can work free of permissions interruption.
 
-- `Dockerfile`: Alpine, zsh, git, tmux, Claude Code and OpenCode. No toolchains.
-- `snippets/`: lines to paste into the Dockerfile, for Python with uv
+Your agents get work done by having a _single mounted directory_, typically 
+containing a git repo or repos, so they can work and commit.
+
+This is the XS version, for devs who are appropriately paranoid and also comfortable with editing their own Dockerfile.
+
+- `Dockerfile`: Alpine, zsh, git, tmux, Claude Code and OpenCode. Add your own toolchains.
+- `snippets/`: Example lines to paste into the Dockerfile, for Python with uv
   (`python-uv.dockerfile`) and for the Codex agent (`codex.dockerfile`).
 - `code-it.sh` and `Code-It.ps1`: build the image if it is missing, then run an agent.
 
-For toolchain and agent selection, defaults, a doctor, and more, use the
-[full version](../README.md).
+For a full fat version with toolchain and agent selection, defaults, a doctor, and more, see
+the [full version README.md](../README.md).
 
 ## Prerequisites
 
