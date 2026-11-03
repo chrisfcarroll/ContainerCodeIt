@@ -80,9 +80,9 @@ RUN echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.zshrc
 # contains exactly the agents it was asked for. Built directly, this region
 # installs the default agent and the map for it.
 # @@CODE_IT_AGENTS_BEGIN@@
-# Its musl build links libgcc and libstdc++, which apk does not know about.
+# Its musl build links libstdc++ (which brings in libgcc), and apk does not know that.
 USER root
-RUN apk add --no-cache libgcc libstdc++
+RUN apk add --no-cache libstdc++
 USER agent1
 # Its installer writes ~/.opencode/bin/opencode, so install into a scratch HOME and
 # move the binary to ~/.opencode-v2/bin, the AGENT_BINARY existing images record.

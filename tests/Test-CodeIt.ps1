@@ -627,7 +627,7 @@ Assert "Dockerfile does not mix in the edge repository" (-not $dfText.Contains('
 Assert "Dockerfile base keeps musl-locales for international text" ($dfText -match 'apk add --no-cache .*musl-locales')
 Assert "PowerShell tarball layer adds the libraries it needs" ((Get-Content (Join-Path $scriptDir 'toolchains/powershell/install.dockerfile') -Raw).Contains('apk add --no-cache libgcc libstdc++ icu-libs libssl3 && '))
 $fragment = Get-Content (Join-Path $scriptDir "agents/opencode/install.dockerfile") -Raw
-Assert "opencode install fragment adds libgcc and libstdc++" ($fragment -match '(?m)^RUN apk add --no-cache libgcc libstdc\+\+\r?$')
+Assert "opencode install fragment adds libstdc++" ($fragment -match '(?m)^RUN apk add --no-cache libstdc\+\+\r?$')
 
 "9g. Choosing an existing image that contains the requested toolchains"
 $superDocker = Join-Path $tmp 'super-docker'

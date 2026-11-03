@@ -3,10 +3,12 @@
 <#
 .SYNOPSIS
     Sets the defaults Code-It uses when you give it no options: which agent to run,
-    which model each agent uses, and which toolchain image to prefer.
+    which model each agent uses, which toolchain image to prefer, and whether agents
+    trust the work dir.
 
 .DESCRIPTION
-    With no parameters it asks. With any of -agent/-model/-toolchain it sets exactly
+    With no parameters it asks. With any of -agent/-model/-toolchain/-trustWorkDir it
+    sets exactly
     those and asks nothing. Everything is saved in <saveDir>/defaults (default
     ~/.config/code-it/defaults), which Code-It reads; models are also written into
     each agent's own configuration under the save dir (from AGENT_MODEL_FILE in
@@ -33,6 +35,12 @@
     Set the default toolchain list, as Code-It -toolchain would take it. Overrides
     Code-It's remembered-image heuristic; an explicit -toolchain still wins.
 
+.PARAMETER trustWorkDir
+    yes or no: whether Code-It tells the agent to trust the work dir, as Code-It
+    -trustWorkDir does, so it does not ask "do you trust this folder?". Only for
+    code you trust: the folder's own hooks and settings then run unasked.
+    Code-It -trustWorkDir:$false still wins. Default: no.
+
 .PARAMETER show
     Print the current defaults and exit.
 
@@ -48,8 +56,8 @@
 
 .EXAMPLE
     .\Code-It-Defaults.ps1
-    Interactive: asks for the default agent, each agent's default model, and the
-    default toolchain.
+    Interactive: asks for the default agent, each agent's default model, the
+    default toolchain, and whether to trust the work dir.
 
 .EXAMPLE
     .\Code-It-Defaults.ps1 -agent claude -toolchain node,bun
@@ -81,6 +89,8 @@ param (
     [string[]]$model        = @(),
     [Alias('t')]
     [string]$toolchain      = "",
+    [ValidateSet('yes', 'no')]
+    [string]$trustWorkDir   = "",
     [switch]$show           = $false,
     [switch]$refreshModels  = $false,
     [string]$saveDir        = "$HOME/.config/code-it",
@@ -294,6 +304,8 @@ function Show-Defaults {
     if ($savedAgent) { Write-Host ("  {0,-22} {1}" -f 'default agent:', $savedAgent) }
     $savedToolchain = Get-Default 'default-toolchain'
     if ($savedToolchain) { Write-Host ("  {0,-22} {1}" -f 'default toolchain:', $savedToolchain) }
+    $savedTrust = Get-Default 'trust-work-dir'
+    if ($savedTrust) { Write-Host ("  {0,-22} {1}" -f 'trust work dir:', $savedTrust) }
     foreach ($a in (Get-CodeItListAgents $agentsDir)) {
         $m = Get-Default "model.$a"
         $mFile = ""
@@ -313,6 +325,17 @@ function Show-Defaults {
 
 # Read-Choice LABEL DEFAULT DETECTED CURRENT ITEMS: print a numbered list and read a
 # choice from the console, echoing the answer ('none' clears, blank keeps DEFAULT)
+# Set-Trust ANSWER: save whether Code-It tells agents to trust the work dir. yes is
+# saved; no, the default, removes the line. Returns $false for anything else.
+function Set-Trust([string]$answer) {
+    switch -Regex ($answer) {
+        '^(y|yes)$' { Set-DefaultLine 'trust-work-dir' 'yes'; Write-Host "    Trust the work dir: yes"; return $true }
+        '^(n|no)$'  { Set-DefaultLine 'trust-work-dir' "";    Write-Host "    Trust the work dir: no";  return $true }
+    }
+    Write-Warning "-trustWorkDir needs yes or no, not '$answer'."
+    return $false
+}
+
 function Read-Choice([string]$label, [string]$default, [string]$detected, [string]$current, [string[]]$items) {
     Write-Host "$label (detected marked *):"
     for ($i = 0; $i -lt $items.Count; $i++) {
@@ -449,6 +472,15 @@ function Invoke-Interactive {
             Write-Host "    Default toolchain: $joined"
         }
     }
+
+    # 4. Whether agents trust the work dir
+    Write-Host ""
+    $savedTrust = Get-Default 'trust-work-dir'
+    Write-Host "Trust the work dir, so agents do not ask `"do you trust this folder?`" Only for"
+    Write-Host "code you trust: the folder's own hooks and settings then run unasked."
+    $answer = Read-Host "Trust the work dir, yes or no [$(if ($savedTrust) { $savedTrust } else { 'no' })]"
+    if ($answer) { Set-Trust $answer | Out-Null }
+
     Write-Host ""
     Show-Defaults
 }
@@ -462,7 +494,7 @@ if ($show) {
     exit 0
 }
 
-if (-not $agent -and -not $toolchain -and $model.Count -eq 0) {
+if (-not $agent -and -not $toolchain -and -not $trustWorkDir -and $model.Count -eq 0) {
     Invoke-Interactive
     exit 0
 }
@@ -499,5 +531,8 @@ if ($toolchain) {
         Set-DefaultLine 'default-toolchain' $joined
         Write-Host "    Default toolchain: $joined"
     }
+}
+if ($trustWorkDir) {
+    if (-not (Set-Trust $trustWorkDir)) { $rc = 1 }
 }
 exit $rc

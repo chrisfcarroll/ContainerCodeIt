@@ -303,6 +303,43 @@ $r = Invoke-Scenario "& '$codeIt' -dryRun -WorkDirToMount '$scriptDir' -saveDir 
 Assert "no default agent: no agent note" (-not $r.out.Contains('saved default agent'))
 
 # ---------------------------------------------------------------------------
+"11. -trustWorkDir saves yes or no; Code-It passes the agent's AGENT_TRUST_ENV"
+$trustD = Join-Path $tmp 'trust-d'
+$r = Invoke-Scenario "& '$defaults' -saveDir '$trustD' -trustWorkDir yes" $stubPath
+Assert "-trustWorkDir yes exits 0" ($r.code -eq 0)
+Assert "defaults file records trust-work-dir=yes" ((Get-Content "$trustD/defaults") -contains 'trust-work-dir=yes')
+$r = Invoke-Scenario "& '$defaults' -saveDir '$trustD' -show" $stubPath
+Assert "-show shows trust work dir" ($r.out -match 'trust work dir:\s+yes')
+$r = Invoke-Scenario "& '$defaults' -saveDir '$trustD' -trustWorkDir maybe" $stubPath
+Assert "-trustWorkDir maybe fails" ($r.code -ne 0)
+Assert "a bad answer keeps what is saved" ((Get-Content "$trustD/defaults") -contains 'trust-work-dir=yes')
+
+$r = Invoke-Scenario "& '$codeIt' -c -dryRun -WorkDirToMount '$scriptDir' -saveDir '$trustD'" $stubPath
+Assert-Contains "the saved default says so" $r.out 'Using saved default: trust the work dir'
+Assert-Contains "the saved default sets claude's trust variable" $r.out '-e CLAUDE_CODE_SANDBOXED=1'
+$r = Invoke-Scenario "& '$codeIt' -c -trustWorkDir:`$false -dryRun -WorkDirToMount '$scriptDir' -saveDir '$trustD'" $stubPath
+Assert "-trustWorkDir:`$false beats the saved default" (-not $r.out.Contains('CLAUDE_CODE_SANDBOXED'))
+$r = Invoke-Scenario "& '$codeIt' -o -dryRun -WorkDirToMount '$scriptDir' -saveDir '$trustD'" $stubPath
+Assert "an agent with no AGENT_TRUST_ENV gets nothing" (-not $r.out.Contains('CLAUDE_CODE_SANDBOXED'))
+$r = Invoke-Scenario "& '$codeIt' -noAgent -dryRun -WorkDirToMount '$scriptDir' -saveDir '$trustD'" $stubPath
+Assert "-noAgent gets nothing" (-not $r.out.Contains('CLAUDE_CODE_SANDBOXED'))
+
+$r = Invoke-Scenario "& '$defaults' -saveDir '$trustD' -trustWorkDir no" $stubPath
+Assert "-trustWorkDir no exits 0" ($r.code -eq 0)
+Assert "no removes the saved default" (-not ((Get-Content "$trustD/defaults") -match '^trust-work-dir='))
+$r = Invoke-Scenario "& '$codeIt' -c -dryRun -WorkDirToMount '$scriptDir' -saveDir '$trustD'" $stubPath
+Assert "by default claude is not told to trust" (-not $r.out.Contains('CLAUDE_CODE_SANDBOXED'))
+$r = Invoke-Scenario "& '$codeIt' -c -trustWorkDir -dryRun -WorkDirToMount '$scriptDir' -saveDir '$trustD'" $stubPath
+Assert-Contains "-trustWorkDir sets claude's trust variable" $r.out '-e CLAUDE_CODE_SANDBOXED=1'
+
+# Interactive: the last question; blank keeps, yes saves. Answers: agent, claude's
+# model, opencode's model, toolchain, trust
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$trustD'" $stubPath @('', '', '', '', 'yes')
+Assert "interactive yes saves trust-work-dir" ((Get-Content "$trustD/defaults") -contains 'trust-work-dir=yes')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$trustD'" $stubPath @('', '', '', '', '')
+Assert "interactive blank keeps trust-work-dir" ((Get-Content "$trustD/defaults") -contains 'trust-work-dir=yes')
+
+# ---------------------------------------------------------------------------
 ""
 "Results: $script:pass passed, $script:fail failed"
 if ($script:fail -gt 0) { exit 1 }

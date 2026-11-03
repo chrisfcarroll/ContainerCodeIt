@@ -202,6 +202,14 @@ Assert-Contains "the author is the agent on the user's behalf" $out "[GIT_AUTHOR
 Assert-Contains "the committer is too" $out "[GIT_COMMITTER_NAME=Agent1 for Ada L]"
 Assert-Contains "the user's email is used" $out "[GIT_COMMITTER_EMAIL=ada@example.com]"
 
+# ---------------------------------------------------------------------------
+"Dockerfile"
+$dockerfile = Get-Content (Join-Path (Split-Path $codeIt -Parent) 'Dockerfile') -Raw
+Assert "the trust-prompt suppression is offered, commented out" ($dockerfile -match '(?m)^# Suppress Claude''s "do you trust this folder\?" prompt\r?\n#ENV CLAUDE_CODE_SANDBOXED=1\r?$')
+Assert "OpenCode's libstdc++ is installed" ($dockerfile -match 'musl-locales libstdc\+\+\r?\n')
+Assert "libgcc is left to apk" (-not $dockerfile.Contains('libgcc libstdc++'))
+Assert "the home is handed to agent1 after the toolchain snippets" ($dockerfile -match '(?m)here ---\r?\n\r?\n#[^\n]*\r?\n#[^\n]*\r?\nRUN chown -R agent1:wheel /home/agent1\r?\n\r?\nUSER agent1\r?$')
+
 Remove-Item -Recurse -Force $tmp
 ""
 "Passed: $script:pass, Failed: $script:fail"

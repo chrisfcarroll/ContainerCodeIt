@@ -81,6 +81,13 @@
 #                            Passed to the container when it runs, so it need not be
 #                            the image's. Default: like-host, the host's own locale
 #                            (see code-it-build.sh --help); C.UTF-8 if it cannot be told.
+#   --trust-work-dir         Tell the agent to trust the work dir, so it does not ask
+#                            "do you trust this folder?" (for Claude Code, sets
+#                            CLAUDE_CODE_SANDBOXED=1; from AGENT_TRUST_ENV in
+#                            agents/NAME/config). Only for code you trust: the
+#                            folder's own hooks and settings then run unasked.
+#                            Default: no, or the default saved by code-it-defaults.
+#   --no-trust-work-dir      Ask as usual, whatever code-it-defaults saved.
 #   --agent-name NAME        Name of the agent running in the container. Used for Git author
 #                            attribution and home directory naming. Must match the USER set in
 #                            the Dockerfile. Default: "Agent1"
@@ -143,7 +150,7 @@
 #   - Defaults saved by code-it-defaults fill in whatever the command line does not
 #     say: the agent (its options win over the default) and the toolchain (the
 #     default beats the remembered-image heuristic; --toolchain and --image win over
-#     it). Each agent's model comes from its own configuration under the save dir;
+#     it) and --trust-work-dir. Each agent's model comes from its own configuration under the save dir;
 #     run code-it-defaults to set it there.
 #   - The prompt and any pass-through arguments are translated into each agent's own
 #     command line, from the AGENT_CMD_* templates in agents/NAME/config: --prompt
@@ -245,6 +252,9 @@ image_explicit=false
 runtime=""
 locale="$CI_LOCALE_LIKE_HOST"
 agent_name="Agent1"
+# yes or no once set by --trust-work-dir / --no-trust-work-dir; empty means the
+# saved default
+trust_work_dir=""
 dry_run=false
 container_args=""
 prompt=""
@@ -320,6 +330,14 @@ while [[ $# -gt 0 ]]; do
         --agent-name)
             agent_name="$2"
             shift 2
+            ;;
+        --trust-work-dir)
+            trust_work_dir=yes
+            shift
+            ;;
+        --no-trust-work-dir)
+            trust_work_dir=no
+            shift
             ;;
         --toolchain|--tech|--stack|-t)
             toolchain="$2"
@@ -439,6 +457,10 @@ if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then
         echo "    Using saved default toolchain: $saved_toolchain"
     fi
 fi
+if [[ -z "$trust_work_dir" ]]; then
+    trust_work_dir=$(ci_config_value "$save_dir/defaults" "trust-work-dir") || trust_work_dir=""
+    [[ "$trust_work_dir" == yes ]] && echo "    Using saved default: trust the work dir"
+fi
 
 # Load the chosen agent's definition. The agent name is data: shortcut flags are
 # resolved here, but every other detail comes from agents/<name>/config. --no-agent
@@ -446,6 +468,7 @@ fi
 AGENT_SAVE_SUBDIR=""
 AGENT_EXCLUSIVE_DIRS=""
 AGENT_EXCLUSIVE_CARRY=""
+AGENT_TRUST_ENV=""
 if [[ "$no_agent" == false ]]; then
     if ! ci_agent_exists "$agents_dir" "$code_agent"; then
         echo "Warning: Unknown agent '$code_agent'. The available agents are:" >&2
@@ -852,6 +875,12 @@ else
     agent_env=(-e "CODE_AGENT=$code_agent" ${headless_env[@]+"${headless_env[@]}"})
     agent_env_print="
                 -e CODE_AGENT=\"$code_agent\"\\$headless_env_print"
+fi
+# --trust-work-dir: the agent's own way to skip its "do you trust this folder?" prompt
+if [[ "$trust_work_dir" == yes && -n "$AGENT_TRUST_ENV" ]]; then
+    agent_env+=(-e "$AGENT_TRUST_ENV")
+    agent_env_print+="
+                -e $AGENT_TRUST_ENV \\"
 fi
 
 # Extra run arguments: SAVE-DIR/run-args, then --env, --env-file and --run-arg. They

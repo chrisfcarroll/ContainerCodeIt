@@ -344,5 +344,48 @@ out=$(launched --save-dir "$agent_d" 2>&1)
 
 # ---------------------------------------------------------------------------
 echo
+echo "13. --trust-work-dir saves yes or no; code-it passes the agent's AGENT_TRUST_ENV"
+trust_d="$tmp/trust-d"
+out=$(PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" --trust-work-dir yes 2>&1)
+assert "--trust-work-dir yes exits 0" "$?"
+grep -q '^trust-work-dir=yes$' "$trust_d/defaults"; assert "defaults file records trust-work-dir=yes" "$?"
+out=$(PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" --show)
+printf '%s\n' "$out" | grep -q 'trust work dir:.*yes'; assert "--show shows trust work dir" "$?"
+PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" --trust-work-dir maybe >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "--trust-work-dir maybe fails" "$?"
+grep -q '^trust-work-dir=yes$' "$trust_d/defaults"; assert "a bad answer keeps what is saved" "$?"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --help)
+assert_contains "code-it --help documents --trust-work-dir" "$out" "--trust-work-dir"
+out=$(PATH="$cleanbin:$PATH" "$defaults" --help)
+assert_contains "--help documents --trust-work-dir" "$out" "--trust-work-dir yes|no"
+
+out=$(launched --save-dir "$trust_d" -c 2>&1)
+assert_contains "the saved default says so" "$out" "Using saved default: trust the work dir"
+assert_contains "the saved default sets claude's trust variable" "$out" "-e CLAUDE_CODE_SANDBOXED=1"
+out=$(launched --save-dir "$trust_d" -c --no-trust-work-dir 2>&1)
+[[ "$out" != *CLAUDE_CODE_SANDBOXED* ]]; assert "--no-trust-work-dir beats the saved default" "$?"
+out=$(launched --save-dir "$trust_d" -o 2>&1)
+[[ "$out" != *CLAUDE_CODE_SANDBOXED* ]]; assert "an agent with no AGENT_TRUST_ENV gets nothing" "$?"
+out=$(launched --save-dir "$trust_d" --no-agent 2>&1)
+[[ "$out" != *CLAUDE_CODE_SANDBOXED* ]]; assert "--no-agent gets nothing" "$?"
+
+out=$(PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" --trust-work-dir no 2>&1)
+assert "--trust-work-dir no exits 0" "$?"
+grep -q '^trust-work-dir=' "$trust_d/defaults"
+[[ "$?" != "0" ]]; assert "no removes the saved default" "$?"
+out=$(launched --save-dir "$trust_d" -c 2>&1)
+[[ "$out" != *CLAUDE_CODE_SANDBOXED* ]]; assert "by default claude is not told to trust" "$?"
+out=$(launched --save-dir "$trust_d" -c --trust-work-dir 2>&1)
+assert_contains "--trust-work-dir sets claude's trust variable" "$out" "-e CLAUDE_CODE_SANDBOXED=1"
+
+# Interactive: the last question; blank keeps, yes saves. Answers: agent, claude's
+# model, opencode's model, toolchain, trust
+printf '\n\n\n\nyes\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" >/dev/null 2>&1
+grep -q '^trust-work-dir=yes$' "$trust_d/defaults"; assert "interactive yes saves trust-work-dir" "$?"
+printf '\n\n\n\n\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" >/dev/null 2>&1
+grep -q '^trust-work-dir=yes$' "$trust_d/defaults"; assert "interactive blank keeps trust-work-dir" "$?"
+
+# ---------------------------------------------------------------------------
+echo
 echo "Results: $pass passed, $fail failed"
 [[ "$fail" == "0" ]] || exit 1

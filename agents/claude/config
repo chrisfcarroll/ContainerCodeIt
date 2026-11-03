@@ -9,6 +9,9 @@ AGENT_CONFIG_LABEL='Claude Code settings'
 # How code-it-defaults sets the agent's default model: a JSON file under its save
 # dir, and the top-level key to set there
 AGENT_MODEL_FILE='.claude/settings.json:model'
+# NAME=VALUE that code-it --trust-work-dir sets in the container, so the agent
+# skips its "do you trust this folder?" prompt
+AGENT_TRUST_ENV='CLAUDE_CODE_SANDBOXED=1'
 # State created under --save-dir and mounted into the container home
 AGENT_STATE_DIRS='.claude'
 AGENT_STATE_FILES='.claude.json'

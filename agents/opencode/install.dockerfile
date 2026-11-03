@@ -1,9 +1,9 @@
 # OpenCode v2 CLI, installed into the agent's
 # home. Keep the "# last changed" line: code-it-build --rebuild bumps it to force this
 # layer to rerun.
-# Its musl build links libgcc and libstdc++, which apk does not know about.
+# Its musl build links libstdc++ (which brings in libgcc), and apk does not know that.
 USER root
-RUN apk add --no-cache libgcc libstdc++
+RUN apk add --no-cache libstdc++
 USER agent1
 # Its installer writes ~/.opencode/bin/opencode, so install into a scratch HOME and
 # move the binary to ~/.opencode-v2/bin, the AGENT_BINARY existing images record.

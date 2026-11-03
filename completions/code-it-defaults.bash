@@ -3,7 +3,7 @@
 # Install by sourcing it, e.g. from ~/.bashrc:
 #     source /path/to/ContainerCodeIt/completions/code-it-defaults.bash
 
-_code_it_defaults_opts='--agent -a --model --toolchain -t --show --refresh-models
+_code_it_defaults_opts='--agent -a --model --toolchain -t --trust-work-dir --show --refresh-models
     --save-dir -s --dry-run -d --help -h'
 
 _code_it_defaults() {
@@ -20,6 +20,8 @@ _code_it_defaults() {
             COMPREPLY=( $(compgen -W "$(ls "${BASH_SOURCE[0]%/*}/../agents" 2>/dev/null | sed 's/$/=/')" -- "$cur") ); return ;;
         --toolchain|-t)
             COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh" -- "$cur") ); return ;;
+        --trust-work-dir)
+            COMPREPLY=( $(compgen -W "yes no" -- "$cur") ); return ;;
     esac
 
     COMPREPLY=( $(compgen -W "$_code_it_defaults_opts" -- "$cur") )

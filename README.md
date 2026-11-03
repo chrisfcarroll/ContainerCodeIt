@@ -106,6 +106,7 @@ Start a container without an agent with --no-agent / -noAgent
 | `--image`, `-i` | `-image` | `code-it-alpine-<toolchains>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
 | `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
+| `--trust-work-dir`, `--no-trust-work-dir` | `-trustWorkDir`, `-trustWorkDir:$false` | off, or the saved default (`code-it-defaults`) | Tell the agent to trust the work dir, so it does not ask "do you trust this folder?". For Claude Code this sets `CLAUDE_CODE_SANDBOXED=1` (the agent's `AGENT_TRUST_ENV`). Only for code you trust: the folder's own hooks and settings then run unasked |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
 | `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none: those of `--image`, else of the saved default toolchain (`code-it-defaults`), else of the remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell`, `rust`, `go`, `gcc`, `g++`, `clang` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`, `llvm` for `clang`; see `code-it-build --list-toolchains`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
@@ -168,8 +169,9 @@ of your host machine.
 model in the agent's own configuration under the save dir, where every run picks it up:
 
 ```bash
-./code-it-defaults.sh                 # interactive: agent, models, toolchain
+./code-it-defaults.sh                 # interactive: agent, models, toolchain, trust
 ./code-it-defaults.sh --agent claude --toolchain node,bun
+./code-it-defaults.sh --trust-work-dir yes   # no "do you trust this folder?" prompt
 ./code-it-defaults.sh --model 'opencode=opencode-go/glm-5.3' --model 'claude=opus'
 ./code-it-defaults.sh --show          # print the saved defaults
 ./code-it-defaults.sh --refresh-models   # update the model list from https://models.dev
@@ -178,23 +180,25 @@ model in the agent's own configuration under the save dir, where every run picks
 ```powershell
 .\Code-It-Defaults.ps1                # interactive
 .\Code-It-Defaults.ps1 -agent claude -toolchain node,bun
+.\Code-It-Defaults.ps1 -trustWorkDir yes
 .\Code-It-Defaults.ps1 -model 'claude=opus'
 .\Code-It-Defaults.ps1 -show
 .\Code-It-Defaults.ps1 -refreshModels
 ```
 
 They accept `--agent/-agent`, `--model/-model AGENT=MODEL` (an empty MODEL clears it),
-`--toolchain/-toolchain`, `--show/-show`, `--refresh-models/-refreshModels`,
+`--toolchain/-toolchain`, `--trust-work-dir/-trustWorkDir yes|no`, `--show/-show`, `--refresh-models/-refreshModels`,
 `--save-dir/-saveDir` and `--dry-run/-dryRun`; see `--help`.
 
 With no parameters code-it-defaults asks, reading answers from stdin (so they can be
 scripted); a blank answer keeps the current value. With any of `--agent`, `--model`,
-`--toolchain`, it asks nothing and sets exactly those.
+`--toolchain`, `--trust-work-dir`, it asks nothing and sets exactly those.
 
 `code-it` uses the saved defaults only when its own options do not say:
 `--agent`/`-c`/`-o` beats the saved agent, and `--toolchain` and `--image` beat the
 saved toolchain — which in turn beats the remembered-image heuristic of
-[Specs 09/10](Specs/10-default-first-run-or-existing-image.md). When it launches the
+[Specs 09/10](Specs/10-default-first-run-or-existing-image.md) — and
+`--no-trust-work-dir` / `-trustWorkDir:$false` beats a saved `trust-work-dir=yes`. When it launches the
 saved agent it says so (`Using saved default agent: …`), because the agent brings its
 own state with it: each agent's state, and its login, live in its own directory under
 the save dir, so switching the default agent switches those too — opencode

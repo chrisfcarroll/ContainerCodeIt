@@ -104,6 +104,13 @@
     container when it runs, so it need not be the image's. Default: like-host, the
     host's own locale (see Code-It-Build.ps1 -help); C.UTF-8 if it cannot be told.
 
+.PARAMETER trustWorkDir
+    Tell the agent to trust the work dir, so it does not ask "do you trust this
+    folder?" (for Claude Code, sets CLAUDE_CODE_SANDBOXED=1; from AGENT_TRUST_ENV in
+    agents/<name>/config). Only for code you trust: the folder's own hooks and
+    settings then run unasked. Default: no, or the default saved by
+    Code-It-Defaults.ps1. -trustWorkDir:$false asks as usual, whatever was saved.
+
 .PARAMETER agentName
     Name of the agent running in the container. Used for Git author attribution and home
     directory naming. This must match the USER set in the Dockerfile for your image.
@@ -172,7 +179,7 @@
     - Defaults saved by Code-It-Defaults.ps1 fill in whatever the command line does
       not say: the agent (-agent/-claude/-opencode win over the default) and the
       toolchain (-toolchain and -image win over it; the default beats the
-      remembered-image heuristic). Each agent's model comes from its own
+      remembered-image heuristic) and -trustWorkDir. Each agent's model comes from its own
       configuration under the save dir; run Code-It-Defaults.ps1 to set it there.
     - The prompt and any pass-through arguments are translated into each agent's own
       command line, from the AGENT_CMD_* templates in agents/<name>/config: -prompt
@@ -246,6 +253,7 @@ param (
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('like-host', 'C.UTF-8') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$locale         = 'like-host',
     [string]$agentName      = "Agent1",
+    [switch]$trustWorkDir   = $false,
     [Alias('tech', 'stack')]
     [string]$toolchain     = "",
     [string]$packageCaches  = "",
@@ -324,6 +332,7 @@ $agentCmdInteractivePrompt = ""
 $agentCmdInteractiveNoPrompt = ""
 $agentCmdHeadlessPrompt = ""
 $agentCmdHeadlessNoPrompt = ""
+$agentTrustEnv = ""
 if (-not $noAgent) {
     if (-not (Test-CodeItAgentExists $agentsDir $codeAgent)) {
         Write-Warning "Unknown agent '$codeAgent'. The available agents are:"
@@ -342,6 +351,7 @@ if (-not $noAgent) {
     $agentCmdInteractiveNoPrompt = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_INTERACTIVE_NO_PROMPT'
     $agentCmdHeadlessPrompt      = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_HEADLESS_PROMPT'
     $agentCmdHeadlessNoPrompt    = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_CMD_HEADLESS_NO_PROMPT'
+    $agentTrustEnv               = Get-CodeItAgentConfig $agentsDir $codeAgent 'AGENT_TRUST_ENV'
 }
 
 # A leading bare argument is the agent's opening prompt, as in `.\Code-It.ps1 -c "do it"`;
@@ -400,6 +410,10 @@ if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameter
         $toolchainFromDefaults = $true
         "    Using saved default toolchain: $savedToolchain"
     }
+}
+if (-not $PSBoundParameters.ContainsKey('trustWorkDir')) {
+    $trustWorkDir = (Get-CodeItDefault (Join-Path $saveDir 'defaults') 'trust-work-dir') -eq 'yes'
+    if ($trustWorkDir) { "    Using saved default: trust the work dir" }
 }
 $enabledToolchain = Resolve-CodeItToolchain $toolchain $toolchainsDir
 if ($null -eq $enabledToolchain) { exit 1 }
@@ -816,6 +830,11 @@ if ($noAgent) {
 } else {
     $agentEnvArgs = @('-e', "CODE_AGENT=$codeAgent") + $headlessEnv
     $agentEnvPrint = "`n                -e CODE_AGENT=`"$codeAgent`"$headlessEnvPrint"
+}
+# -trustWorkDir: the agent's own way to skip its "do you trust this folder?" prompt
+if ($trustWorkDir -and $agentTrustEnv) {
+    $agentEnvArgs += @('-e', $agentTrustEnv)
+    $agentEnvPrint += "`n                -e $agentTrustEnv"
 }
 
 # Extra run arguments: <saveDir>/run-args, then -environment, -envFile and -runArgs.

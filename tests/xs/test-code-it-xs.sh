@@ -206,6 +206,14 @@ assert_contains "the author is the agent on the user's behalf" "$out" "[GIT_AUTH
 assert_contains "the committer is too" "$out" "[GIT_COMMITTER_NAME=Agent1 for Ada L]"
 assert_contains "the user's email is used" "$out" "[GIT_AUTHOR_EMAIL=ada@example.com] [-e] [GIT_COMMITTER_NAME=Agent1 for Ada L] [-e] [GIT_COMMITTER_EMAIL=ada@example.com]"
 
+# ---------------------------------------------------------------------------
+echo "Dockerfile"
+dockerfile=$(cat "$(dirname "$code_it")/Dockerfile")
+assert_contains "the trust-prompt suppression is offered, commented out" "$dockerfile" $'# Suppress Claude\'s "do you trust this folder?" prompt\n#ENV CLAUDE_CODE_SANDBOXED=1'
+assert_contains "OpenCode's libstdc++ is installed" "$dockerfile" "musl-locales libstdc++"
+assert_not_contains "libgcc is left to apk" "$dockerfile" "libgcc libstdc++"
+assert_contains "the home is handed to agent1 after the toolchain snippets" "$dockerfile" $'here ---\n\n# Toolchain snippets run as root and may create directories under the agent\'s\n# home, so hand the whole home to agent1 before switching to it.\nRUN chown -R agent1:wheel /home/agent1\n\nUSER agent1'
+
 echo
 echo "Passed: $pass, Failed: $fail"
 [[ $fail -eq 0 ]]

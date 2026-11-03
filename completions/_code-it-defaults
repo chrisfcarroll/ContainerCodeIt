@@ -12,9 +12,10 @@ _code_it_defaults() {
         (--agent|-a) compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null) none; return ;;
         (--model) compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null | sed 's/$/=/'); return ;;
         (--toolchain|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
+        (--trust-work-dir) compadd -- yes no; return ;;
     esac
 
-    compadd -- --agent -a --model --toolchain -t --show --refresh-models \
+    compadd -- --agent -a --model --toolchain -t --trust-work-dir --show --refresh-models \
         --save-dir -s --dry-run -d --help -h
 }
 

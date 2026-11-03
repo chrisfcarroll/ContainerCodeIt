@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
 # Sets the defaults code-it uses when you give it no options: which agent to run,
-# which model each agent uses, and which toolchain image to prefer.
+# which model each agent uses, which toolchain image to prefer, and whether agents
+# trust the work dir.
 #
-# With no parameters it asks. With any of --agent/--model/--toolchain it sets exactly
+# With no parameters it asks. With any of --agent/--model/--toolchain/--trust-work-dir
+# it sets exactly
 # those and asks nothing. Everything is saved in SAVE-DIR/defaults (default
 # ~/.config/code-it/defaults), which code-it reads; models are also written into each
 # agent's own configuration under the save dir (from AGENT_MODEL_FILE in
@@ -26,6 +28,11 @@
 #   --toolchain, -t LIST    Set the default toolchain list, as code-it --toolchain
 #                           would take it. Overrides code-it's remembered-image
 #                           heuristic; an explicit --toolchain still wins.
+#   --trust-work-dir yes|no Whether code-it tells the agent to trust the work dir,
+#                           as code-it --trust-work-dir does, so it does not ask "do
+#                           you trust this folder?". Only for code you trust: the
+#                           folder's own hooks and settings then run unasked.
+#                           code-it --no-trust-work-dir still wins. Default: no.
 #   --show                  Print the current defaults and exit.
 #   --refresh-models        Refresh SAVE-DIR/model-catalog.txt, the model list offered
 #                           by the interactive picker, from https://models.dev/api.json
@@ -57,6 +64,7 @@ save_dir="$HOME/.config/code-it"
 agent_arg=""
 toolchain_arg=""
 toolchain_set=false
+trust_arg=""
 model_args=()
 show=false
 refresh=false
@@ -69,6 +77,7 @@ while [[ $# -gt 0 ]]; do
         --agent|-a)       agent_arg="$2"; shift 2 ;;
         --model)          model_args+=("$2"); shift 2 ;;
         --toolchain|-t)   toolchain_arg="$2"; toolchain_set=true; shift 2 ;;
+        --trust-work-dir) trust_arg="$2"; shift 2 ;;
         --show)           show=true; shift ;;
         --refresh-models) refresh=true; shift ;;
         --save-dir|-s)    save_dir="$2"; shift 2 ;;
@@ -391,6 +400,8 @@ do_show() {
     if [[ -n "$a" ]]; then printf '  %-22s %s\n' "default agent:" "$a"; fi
     t=$(current default-toolchain)
     if [[ -n "$t" ]]; then printf '  %-22s %s\n' "default toolchain:" "$t"; fi
+    t=$(current trust-work-dir)
+    if [[ -n "$t" ]]; then printf '  %-22s %s\n' "trust work dir:" "$t"; fi
     while IFS= read -r a; do
         m=$(current "model.$a")
         m_file=""
@@ -407,6 +418,16 @@ do_show() {
         fi
     done < <(ci_list_agents "$agents_dir")
     return 0
+}
+
+# set_trust ANSWER: save whether code-it tells agents to trust the work dir. yes is
+# saved; no, the default, removes the line. Returns 1 for anything else.
+set_trust() {
+    case "$1" in
+        y|yes) defaults_set trust-work-dir yes; echo "    Trust the work dir: yes" ;;
+        n|no)  defaults_set trust-work-dir ""; echo "    Trust the work dir: no" ;;
+        *)     echo "Warning: --trust-work-dir needs yes or no, not '$1'." >&2; return 1 ;;
+    esac
 }
 
 # pick_one ANSWER items...: the item ANSWER names, by number or name, else nothing
@@ -599,6 +620,18 @@ interactive() {
         fi
     fi
 
+    # 4. Whether agents trust the work dir
+    echo
+    local saved_trust
+    saved_trust=$(current trust-work-dir)
+    echo "Trust the work dir, so agents do not ask \"do you trust this folder?\" Only for"
+    echo "code you trust: the folder's own hooks and settings then run unasked."
+    printf 'Trust the work dir, yes or no [%s]: ' "${saved_trust:-no}"
+    read -r answer || answer=""
+    if [[ -n "$answer" ]]; then
+        set_trust "$answer" || true
+    fi
+
     echo
     do_show
 }
@@ -615,7 +648,7 @@ if [[ "$show" == true ]]; then
     exit 0
 fi
 
-if [[ -z "$agent_arg" && "$toolchain_set" == false && ${#model_args[@]} -eq 0 ]]; then
+if [[ -z "$agent_arg" && "$toolchain_set" == false && -z "$trust_arg" && ${#model_args[@]} -eq 0 ]]; then
     interactive
     exit 0
 fi
@@ -650,5 +683,8 @@ if [[ "$toolchain_set" == true ]]; then
         defaults_set default-toolchain "$(ci_join , "$resolved")"
         echo "    Default toolchain: $(ci_join , "$resolved")"
     fi
+fi
+if [[ -n "$trust_arg" ]]; then
+    set_trust "$trust_arg" || rc=1
 fi
 exit "$rc"

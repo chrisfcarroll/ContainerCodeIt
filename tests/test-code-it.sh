@@ -613,8 +613,8 @@ grep -q '^RUN git config --global core.fsmonitor true$' "$script_dir/Dockerfile"
 assert "Dockerfile enables Git filesystem monitoring globally" "$?"
 grep -q 'apk add --no-cache libgcc libstdc++ icu-libs libssl3 && ' "$script_dir/toolchains/powershell/install.dockerfile"
 assert "PowerShell tarball layer adds the libraries it needs" "$?"
-grep -q '^RUN apk add --no-cache libgcc libstdc++$' "$script_dir/agents/opencode/install.dockerfile"
-assert "opencode install fragment adds libgcc and libstdc++" "$?"
+grep -q '^RUN apk add --no-cache libstdc++$' "$script_dir/agents/opencode/install.dockerfile"
+assert "opencode install fragment adds libstdc++" "$?"
 
 # ---------------------------------------------------------------------------
 echo "10g. Choosing an existing image that contains the requested toolchains"
