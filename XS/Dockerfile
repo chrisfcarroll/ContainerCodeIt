@@ -4,9 +4,9 @@ FROM alpine:3.23
 # or when given --build / -build.
 
 # Tools for the agent and for you: shells, git, an editor, tmux.
-# libgcc and libstdc++ are needed by the Claude Code and OpenCode binaries.
+# libstdc++ is needed by the OpenCode binary (apk brings in libgcc with it).
 RUN apk add --no-cache ca-certificates zsh bash curl doas git openssh-client ripgrep \
-    vim less tmux oh-my-zsh ncurses-terminfo tzdata musl-locales libgcc libstdc++
+    vim less tmux oh-my-zsh ncurses-terminfo tzdata musl-locales libstdc++
 
 # The agent's user. Passwordless doas for apk only, so the agent can install tools.
 RUN adduser -S -s /bin/zsh agent1 -G wheel \
@@ -15,8 +15,14 @@ RUN adduser -S -s /bin/zsh agent1 -G wheel \
 
 # --- Toolchains: paste toolchain snippets (e.g. snippets/python-uv.dockerfile) here ---
 
+# Toolchain snippets run as root and may create directories under the agent's
+# home, so hand the whole home to agent1 before switching to it.
+RUN chown -R agent1:wheel /home/agent1
+
 USER agent1
 ENV PATH=/home/agent1/.local/bin:/home/agent1/.opencode/bin:$PATH
+# Suppress Claude's "do you trust this folder?" prompt
+#ENV CLAUDE_CODE_SANDBOXED=1
 
 # Coding agents. Each installer is downloaded before it runs, so a failed download
 # fails the build instead of running an empty script. Change the "last changed"
