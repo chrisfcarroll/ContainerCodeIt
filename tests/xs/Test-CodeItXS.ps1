@@ -145,6 +145,15 @@ Assert-Contains "--D:ARG goes to the runtime" $out "[-p] [8080:3000] [code-it-xs
 Assert-Contains "other remaining arguments go to the agent" $out "[code-it-xs] [--model] [m]"
 
 # ---------------------------------------------------------------------------
+"Prompt"
+$out = Run-XS '& $x ''fix the tests'' --model m'
+Assert-Contains "a prompt opens opencode with --prompt" $out "[code-it-xs] [mini] [--prompt] [fix the tests] [--model] [m]"
+$out = Run-XS '& $x -c ''fix the tests'' --model m'
+Assert-Contains "a prompt goes first to claude as is" $out "[code-it-xs] [fix the tests] [--model] [m]"
+$out = Run-XS '& $x --model m'
+Assert-NotContains "a leading option is not a prompt" $out "--prompt"
+
+# ---------------------------------------------------------------------------
 "Work dir"
 $out = Run-XS '& $x'
 Assert-Contains "the work dir mounts at /work/<parent>/<name>" $out ":/work/projects/my-proj]"

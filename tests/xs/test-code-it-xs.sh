@@ -147,6 +147,20 @@ assert_contains "options after -- are the agent's" "$out" "[CODE_AGENT=opencode]
 assert_contains "options after -- are passed on" "$out" "[code-it-xs] [-c]"
 
 # ---------------------------------------------------------------------------
+echo "Prompt"
+out=$(run_xs "fix the tests" -- --model m)
+assert_contains "a prompt opens opencode with --prompt" "$out" "[code-it-xs] [mini] [--prompt] [fix the tests] [--model] [m]"
+out=$(run_xs -c "fix the tests" -- --model m)
+assert_contains "a prompt goes first to claude as is" "$out" "[code-it-xs] [fix the tests] [--model] [m]"
+out=$(run_xs "fix the tests" -c)
+assert_contains "options may follow the prompt" "$out" "[CODE_AGENT=claude]"
+out=$(run_xs fix the tests); rc=$?
+assert "an unquoted prompt fails" "$([[ $rc -ne 0 ]]; echo $?)"
+assert_contains "an unquoted prompt says to quote it" "$out" "quote it"
+out=$(run_xs -- some-dir)
+assert_contains "an argument after -- is not a prompt" "$out" "[code-it-xs] [some-dir]"
+
+# ---------------------------------------------------------------------------
 echo "Work dir"
 out=$(run_xs)
 assert_contains "the work dir mounts at /work/<parent>/<name>" "$out" "[$work:/work/projects/my-proj]"

@@ -27,6 +27,7 @@ the [full version README.md](../README.md).
 ./code-it.sh        # OpenCode, in the current directory
 ./code-it.sh -c     # Claude Code
 .\Code-It.ps1 -c    # PowerShell
+./code-it.sh 'add a README'   # OpenCode, with an opening prompt
 ```
 
 The first run builds the image `code-it-xs` from the Dockerfile. After you edit the
@@ -63,6 +64,7 @@ Each agent sees only its own state.
 | `-D:ARG`, `--D:ARG` (repeatable) | `-D ARG,ARG…`, or `--D:ARG` | none | Pass ARG to `docker run` / `container run`, e.g. `-D:-p -D:8080:3000` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the commands without running them |
 | `--help`, `-h` | `-help`, `-h` | | Show help |
+| `PROMPT` | `PROMPT` | none | Open the agent with PROMPT as its first prompt. OpenCode gets `mini --prompt PROMPT` |
 | `-- ARGS…` | `ARGS…` or `-- ARGS…` | none | Pass ARGS to the agent |
 
 No ports are mapped: add them with `-D:-p -D:HOST:CONTAINER`. Agents ask for

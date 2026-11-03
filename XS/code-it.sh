@@ -2,7 +2,7 @@
 #
 # code-it XS: run a coding agent in a container that can see only one directory.
 #
-# Usage: ./code-it.sh [OPTIONS] [-- AGENT-ARGS...]
+# Usage: ./code-it.sh [OPTIONS] [PROMPT] [-- AGENT-ARGS...]
 #
 #   -o, --opencode        Run OpenCode (the default)
 #   -c, --claude          Run Claude Code
@@ -19,6 +19,7 @@
 #   -D:ARG, --D:ARG       Pass ARG to `docker run` / `container run`, e.g. -D:-p -D:8080:3000
 #   -d, --dry-run         Print the commands without running them
 #   -h, --help            Show this help
+#   PROMPT                Open the agent with this as its first prompt
 #   -- AGENT-ARGS...      Pass everything after -- to the agent
 #
 # First run (no save dir yet) offers to copy your existing Claude and OpenCode config
@@ -37,6 +38,7 @@ locale=""
 dry_run=false
 run_args=()
 agent_args=()
+prompt=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -54,7 +56,9 @@ while [[ $# -gt 0 ]]; do
         -d|--dry-run)  dry_run=true ;;
         -h|--help)     sed -n '3,/^$/{ s/^# \{0,1\}//; p; }' "$0"; exit 0 ;;
         --)            shift; agent_args=("$@"); break ;;
-        *)             echo "Unknown option: $1 (see --help)" >&2; exit 1 ;;
+        -*)            echo "Unknown option: $1 (see --help)" >&2; exit 1 ;;
+        *)             [[ -z "$prompt" ]] || { echo "Only one prompt, please: quote it" >&2; exit 1; }
+                       prompt=$1 ;;
     esac
     shift
 done
@@ -67,6 +71,14 @@ case "$agent" in
     zsh)      state=() ;;
     *)        echo "Unknown agent '$agent': add its state paths to $0" >&2; exit 1 ;;
 esac
+
+# The prompt goes first to the agent. OpenCode reads a bare argument as a project
+# directory, so it needs --prompt.
+if [[ -n "$prompt" ]]; then
+    if [[ "$agent" == opencode ]]; then agent_args=(mini --prompt "$prompt" "${agent_args[@]}")
+    else agent_args=("$prompt" "${agent_args[@]}")
+    fi
+fi
 
 if [[ -z "$runtime" ]]; then
     if [[ "$(uname -s)" == Darwin ]] && command -v container >/dev/null; then runtime=container

@@ -37,8 +37,11 @@
 .PARAMETER dryRun
     Print the commands without running them.
 .PARAMETER agentArgs
-    Any remaining arguments, or those after --, are passed to the agent.
+    Any remaining arguments, or those after --, are passed to the agent. A leading
+    one not starting with - is the agent's opening prompt.
 
+.EXAMPLE
+    .\Code-It.ps1 'add a README'
 .EXAMPLE
     .\Code-It.ps1 -c -workDir ~/my-repo -- --model opus
 #>
@@ -74,6 +77,12 @@ $state = switch ($agent) {
     'codex'    { '.codex' }
     'zsh'      { @() }
     default    { Write-Warning "Unknown agent '$agent': add its state paths to $PSCommandPath"; exit 1 }
+}
+
+# A leading bare argument is the opening prompt. OpenCode reads a bare argument as a
+# project directory, so it needs --prompt.
+if ($agent -eq 'opencode' -and $agentArgs.Count -and -not $agentArgs[0].StartsWith('-')) {
+    $agentArgs = @('mini', '--prompt') + $agentArgs
 }
 
 if (-not $runtime) {
