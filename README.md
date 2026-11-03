@@ -20,11 +20,12 @@ Your agents get work done by having a _single mounted directory_, typically one 
 
 Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succession. In OpenCode, press `Ctrl-C`.
 
-### Quick Start XS Version
+### The XS Version
 
-If you are both paranoid and comfortable with editing your own Dockerfile, you may
-prefer [the XS version](XS/README.md), which is a much smaller, human-verifiable
-codebase that also containerises your agents but without the user-friendly functions.
+If you are appropriately paranoid and also comfortable with editing your own 
+Dockerfile, you will prefer [the XS version](XS/README.md), which is a much smaller, 
+human-verifiable codebase that also containerises your agents. It leaves you to 
+manage the Dockerfile yourself if you need more things in it.
 
 ## First run
 
