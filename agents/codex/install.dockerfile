@@ -15,4 +15,4 @@ RUN case "$(uname -m)" in \
     tar xzf /tmp/codex.tar.gz -C /tmp && \
     mv "/tmp/codex-${arch}-unknown-linux-musl" ~/.local/bin/codex && \
     rm -f /tmp/codex.tar.gz && \
-    test -x ~/.local/bin/codex # last changed 2026-10-24
+    test -x ~/.local/bin/codex # last changed 2026-11-04
