@@ -35,6 +35,7 @@ Dockerfile, rebuild with `--build` (`-build`).
 
 The agent runs in tmux, next to a zsh session: `Ctrl-B S` switches between them.
 To exit, quit the agent (`Ctrl-D` twice in Claude Code, `Ctrl-C` in OpenCode) and the shell.
+If the agent fails, its error stays on screen until you press Enter.
 
 ## First run
 

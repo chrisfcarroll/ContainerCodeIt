@@ -236,6 +236,16 @@ if command -v zsh >/dev/null 2>&1; then
     assert_contains "go.sh gives opencode run --auto" "$(go_cmd opencode run hi)" "[opencode run --auto hi]"
     assert_contains "go.sh gives mini no --auto, which it rejects" "$(go_cmd opencode mini --prompt hi)" "[opencode mini --prompt hi]"
     assert_contains "go.sh still skips Claude's permissions" "$(go_cmd claude hi)" "[claude --dangerously-skip-permissions hi]"
+    # Run the command go.sh gives tmux, with an agent that fails and one that succeeds
+    agent_lines+=$'\n'$(grep -E '^agent_cmd=' "$(dirname "$code_it")/Dockerfile")
+    tmux_cmd() { CODE_AGENT="$1" zsh -c "$agent_lines"$'\nprint -r -- "$agent_cmd"' go "${@:2}"; }
+    failed=$(sh -c "$(tmux_cmd sh -c 'echo agent error; exit 3')" </dev/null 2>&1)
+    assert_contains "a failing agent's error stays on screen" "$failed" "agent error"
+    assert_contains "a failing agent's exit status is shown, waiting for Enter" "$failed" "sh exited with status 3. Press Enter to close."
+    succeeded=$(sh -c "$(tmux_cmd sh -c 'echo agent done')" </dev/null 2>&1)
+    assert_contains "a succeeding agent runs" "$succeeded" "agent done"
+    assert_not_contains "a succeeding agent closes without waiting" "$succeeded" "Press Enter"
+    assert_contains "go.sh gives tmux the agent command" "$(tmux_cmd opencode)" "opencode --auto || {"
 fi
 assert_contains "OpenCode's libstdc++ is installed" "$dockerfile" "musl-locales libstdc++"
 assert_not_contains "libgcc is left to apk" "$dockerfile" "libgcc libstdc++"

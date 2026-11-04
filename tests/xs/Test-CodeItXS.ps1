@@ -218,6 +218,8 @@ Assert "the trust-prompt suppression is offered, commented out" ($dockerfile -ma
 Assert "Claude always skips permissions" $dockerfile.Contains('[[ $1 == claude ]] && set -- claude --dangerously-skip-permissions "${@:2}"')
 Assert "OpenCode's TUI auto-approves permissions" $dockerfile.Contains('[[ $1 == opencode && ( -z $2 || $2 == -* ) ]] && set -- opencode --auto "${@:2}"')
 Assert "opencode run auto-approves permissions" $dockerfile.Contains('[[ $1 == opencode && $2 == run ]] && set -- opencode run --auto "${@:3}"')
+Assert "a failing agent's error stays on screen until Enter" $dockerfile.Contains('agent_cmd="${(j: :)${(q)@}} || { printf ''\n%s exited with status %s. Press Enter to close. '' ${(q)1} \$?; read -r _; }"')
+Assert "tmux runs the agent command" $dockerfile.Contains('exec tmux -u new-session "$agent_cmd"')
 Assert "OpenCode's libstdc++ is installed" ($dockerfile -match 'musl-locales libstdc\+\+\r?\n')
 Assert "libgcc is left to apk" (-not $dockerfile.Contains('libgcc libstdc++'))
 Assert "the home is handed to agent1 after the toolchain snippets" ($dockerfile -match '(?m)here ---\r?\n\r?\n#[^\n]*\r?\n#[^\n]*\r?\nRUN chown -R agent1:wheel /home/agent1\r?\n\r?\nUSER agent1\r?$')

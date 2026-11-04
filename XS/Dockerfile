@@ -48,6 +48,8 @@ RUN git config --global core.autocrlf input \
 # The launcher mounts the work dir at $CODE_IT_WORK_DIR and tells git to trust it.
 # The container is the sandbox, so Claude runs with no permission checks, and
 # OpenCode auto-approves them; only its TUI and run take --auto, not mini.
+# When the agent's session ends the container stops, so if the agent fails, its
+# error is kept on screen until Enter.
 RUN cat <<'EOF' > ~/go.sh && chmod +x ~/go.sh
 #!/bin/zsh
 cd "${CODE_IT_WORK_DIR:-/work}" || exit 1
@@ -56,8 +58,9 @@ set -- "${CODE_AGENT:-opencode}" "$@"
 [[ $1 == claude ]] && set -- claude --dangerously-skip-permissions "${@:2}"
 [[ $1 == opencode && ( -z $2 || $2 == -* ) ]] && set -- opencode --auto "${@:2}"
 [[ $1 == opencode && $2 == run ]] && set -- opencode run --auto "${@:3}"
+agent_cmd="${(j: :)${(q)@}} || { printf '\n%s exited with status %s. Press Enter to close. ' ${(q)1} \$?; read -r _; }"
 tmux -u new-session -d
-exec tmux -u new-session "${(j: :)${(q)@}}"
+exec tmux -u new-session "$agent_cmd"
 EOF
 
 WORKDIR /work
