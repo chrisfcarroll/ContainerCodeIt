@@ -46,11 +46,13 @@ RUN git config --global core.autocrlf input \
 # go.sh starts a tmux session with a shell, and one with the agent ($CODE_AGENT,
 # or zsh) given the container's arguments. Ctrl-B S switches between them.
 # The launcher mounts the work dir at $CODE_IT_WORK_DIR and tells git to trust it.
+# The container is the sandbox, so Claude runs with no permission checks.
 RUN cat <<'EOF' > ~/go.sh && chmod +x ~/go.sh
 #!/bin/zsh
 cd "${CODE_IT_WORK_DIR:-/work}" || exit 1
 for d in "$PWD" "$PWD"/*/(N) ; do git config --global --add safe.directory "$d" ; done
 set -- "${CODE_AGENT:-opencode}" "$@"
+[[ $1 == claude ]] && set -- claude --dangerously-skip-permissions "${@:2}"
 tmux -u new-session -d
 exec tmux -u new-session "${(j: :)${(q)@}}"
 EOF
