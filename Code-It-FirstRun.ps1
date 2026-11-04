@@ -6,8 +6,9 @@
 
 .DESCRIPTION
     Delegates runtime and build selection to Code-It-Build.ps1, offers to copy host
-    agent state into the save dir without overwriting existing files, and prints the
-    Code-It.ps1 command to start.
+    agent state into the save dir without overwriting existing files, sets each
+    agent's config there to run without permission prompts (AGENT_PERMISSIONS), and
+    prints the Code-It.ps1 command to start.
 
 .PARAMETER saveDir
     Where agent state is kept and copied. Default: ~/.config/code-it
@@ -170,7 +171,22 @@ foreach ($a in $chosenAgents) {
     }
 }
 
-# 6. Print the code-it command to start.
+# 6. Whether or not host state was copied, fill in the agent's default configuration
+# and set it to work free of permissions interruption: the container is the sandbox.
+foreach ($a in $chosenAgents) {
+    if (-not (Get-CodeItAgentConfig $agentsDir $a 'AGENT_PERMISSIONS')) { continue }
+    $subdir = Get-CodeItAgentConfig $agentsDir $a 'AGENT_SAVE_SUBDIR'
+    $agentSaveDir = if ($subdir) { Join-Path $saveDir $subdir } else { $saveDir }
+    Write-Host ""
+    Write-Host "Setting agent '$a' to run without permission prompts in the container:"
+    $defaultConfigDir = Join-Path $agentsDir (Join-Path $a 'default-config')
+    if (-not $dryRun -and (Test-Path -Path $defaultConfigDir -PathType Container)) {
+        Copy-CodeItTreeNoClobber (Resolve-Path $defaultConfigDir).Path $agentSaveDir
+    }
+    $null = Set-CodeItAgentPermissions $agentsDir $a $agentSaveDir $dryRun
+}
+
+# 7. Print the code-it command to start.
 Write-Host ""
 Write-Host "Start an agent with:"
 foreach ($a in $chosenAgents) {

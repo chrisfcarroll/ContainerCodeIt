@@ -12,6 +12,10 @@ AGENT_MODEL_FILE='.config/opencode/opencode.json:model'
 # Its state lives under its own subdirectory of --save-dir. The name dates from when
 # v1 shared these paths: it is where the state has lived all along, so keep it.
 AGENT_SAVE_SUBDIR=opencode-v2
+# What code-it-first-run sets in its configuration under the save dir, copied or
+# not, so it works free of permissions interruption: the container is the sandbox.
+# Space-separated FILE:KEY.PATH=VALUE. The TUI's autoaccept is what --auto turns on.
+AGENT_PERMISSIONS='.config/opencode/tui.json:session.permissions=autoaccept'
 # V2 stores global config, session/auth data, and the shared-service record here.
 AGENT_STATE_DIRS='.config/opencode:.local/share/opencode:.local/state/opencode'
 AGENT_STATE_FILES=''

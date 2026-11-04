@@ -1,6 +1,6 @@
 {
   "permissions": {
-    "defaultMode": "auto"
+    "defaultMode": "bypassPermissions"
   },
   "skipDangerousModePermissionPrompt": true
 }

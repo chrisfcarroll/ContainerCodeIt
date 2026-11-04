@@ -149,7 +149,7 @@ $rtConfig = Get-Content $ocConfig -Raw | ConvertFrom-Json
 Assert "other opencode config keys survive" ($null -ne $rtConfig.'$schema' -and $null -ne $rtConfig.permissions)
 Assert "opencode model set in existing config" ($rtConfig.model -eq 'openai/gpt-5')
 $rtSettings = Get-Content "$save/.claude/settings.json" -Raw | ConvertFrom-Json
-Assert "other claude settings keys survive" ($rtSettings.permissions.defaultMode -eq 'auto')
+Assert "other claude settings keys survive" ($rtSettings.permissions.defaultMode -eq 'bypassPermissions')
 Assert "claude model set in existing settings" ($rtSettings.model -eq 'claude-opus-4-5')
 
 # The bundled catalog is parseable

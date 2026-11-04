@@ -4,7 +4,8 @@
 # their agent logins carried over.
 #
 # It delegates toolchain/agent selection and image building to code-it-build, then
-# optionally copies host agent state into the save dir and prints the run command.
+# optionally copies host agent state into the save dir, sets each agent's config there
+# to run without permission prompts (AGENT_PERMISSIONS), and prints the run command.
 #
 # There is no default toolchain. The toolchains detected on the host are
 # preselected, powershell among them when pwsh or powershell is found, and powershell
@@ -177,7 +178,21 @@ for a in ${chosen_agents//,/ }; do
     fi
 done
 
-# 6. Print the code-it command to start.
+# 6. Whether or not host state was copied, fill in the agent's default configuration
+# and set it to work free of permissions interruption: the container is the sandbox.
+for a in ${chosen_agents//,/ }; do
+    subdir=$(ci_agent_config "$agents_dir" "$a" AGENT_SAVE_SUBDIR) || subdir=""
+    agent_save_dir="$save_dir${subdir:+/$subdir}"
+    ci_agent_config "$agents_dir" "$a" AGENT_PERMISSIONS >/dev/null || continue
+    echo
+    echo "Setting agent '$a' to run without permission prompts in the container:"
+    if [[ "$dry_run" != true && -d "$agents_dir/$a/default-config" ]]; then
+        copy_tree_no_clobber "$agents_dir/$a/default-config" "$agent_save_dir"
+    fi
+    ci_agent_set_permissions "$agents_dir" "$a" "$agent_save_dir" "$dry_run" || true
+done
+
+# 7. Print the code-it command to start.
 echo
 echo "Start an agent with:"
 for a in ${chosen_agents//,/ }; do

@@ -302,7 +302,7 @@ Assert-Contains "claude dir mount" $r.out '/.claude:/home/agent1/.claude'
 Assert-Contains "claude.json mount" $r.out '/.claude.json:/home/agent1/.claude.json'
 Assert "claude run mounts no opencode state" (-not $r.out.Contains('/home/agent1/.config/opencode'))
 $claudeSettings = Get-Content "$save/.claude/settings.json" -Raw | ConvertFrom-Json
-Assert "Claude settings enable auto mode" ($claudeSettings.permissions.defaultMode -eq 'auto')
+Assert "Claude settings bypass permissions" ($claudeSettings.permissions.defaultMode -eq 'bypassPermissions')
 Assert "Claude settings skip dangerous-mode prompt" ($claudeSettings.skipDangerousModePermissionPrompt -eq $true)
 Assert "save/.claude.json pre-created as a file" (Test-Path "$save/.claude.json" -PathType Leaf)
 $r = Invoke-Scenario $codeIt (@('-c') + $commonArgs) $stubPath
@@ -1204,6 +1204,7 @@ Assert "first-run -dryRun exit code 0" ($r.code -eq 0)
 Assert "first-run -dryRun creates no save dir" (-not (Test-Path -Path (Join-Path $fd 'save')))
 Assert-Contains "first-run forwards -dryRun to build" $r.out 'dryRun=True'
 Assert-Contains "first-run -dryRun says what it would copy" $r.out 'would copy'
+Assert-Contains "first-run -dryRun says what permissions it would set" $r.out 'would set session.permissions to autoaccept'
 Assert "first-run -dryRun ran no build" (-not (Test-Path -Path (Join-Path $tmp 'first-build-ran')))
 
 # The real build script runs as a child PowerShell process so its successful dry-run
@@ -1236,6 +1237,54 @@ Assert "first-run copies missing state into the agent's save subdir" ((Get-Conte
 Assert "first-run copies nothing to the save dir root for opencode" (-not (Test-Path "$fs/.config/opencode/new.json"))
 Assert-Contains "first-run warns that credentials are copied" $r.out 'credentials'
 Assert-Contains "first-run prints the start command" $r.out 'Code-It.ps1 -agent opencode'
+
+# Copied state is edited to run without permission prompts, keeping the rest. Spec 19.
+$ph = Join-Path $tmp 'firstperm-home-ps'; $ps = Join-Path $tmp 'firstperm-save-ps'
+$null = New-Item -ItemType Directory -Force -Path "$ph/.claude", "$ph/.config/opencode"
+Set-Content -Path "$ph/.claude/settings.json" -Value '{ "model": "opus", "permissions": { "defaultMode": "default", "allow": ["Bash(ls)"] } }'
+Set-Content -Path "$ph/.config/opencode/tui.json" -Value '{ "theme": "dark" }'
+$env:HOME = $ph; $env:USERPROFILE = $ph
+try {
+    $r = Invoke-Scenario $firstRun @('-yes', '-toolchain', 'node', '-agents', 'claude,opencode',
+        '-saveDir', $ps, '-codeItBuild', $stubFirst) $stubPath
+} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
+Assert "first-run permissions exit code 0" ($r.code -eq 0)
+$settings = Get-Content "$ps/.claude/settings.json" -Raw | ConvertFrom-Json
+Assert "copied Claude settings are set to bypassPermissions" ($settings.permissions.defaultMode -eq 'bypassPermissions')
+Assert "copied Claude settings skip the dangerous-mode prompt" ($settings.skipDangerousModePermissionPrompt -eq $true)
+Assert "copied Claude settings keep their model" ($settings.model -eq 'opus')
+Assert "copied Claude settings keep their allow list" (@($settings.permissions.allow) -contains 'Bash(ls)')
+$tui = Get-Content "$ps/opencode-v2/.config/opencode/tui.json" -Raw | ConvertFrom-Json
+Assert "copied OpenCode TUI config auto-accepts permissions" ($tui.session.permissions -eq 'autoaccept')
+Assert "copied OpenCode TUI config keeps its theme" ($tui.theme -eq 'dark')
+Assert "first-run fills in OpenCode's default config" (Test-Path "$ps/opencode-v2/.config/opencode/opencode.json" -PathType Leaf)
+Assert-Contains "first-run says what permissions it set" $r.out 'set permissions.defaultMode to bypassPermissions'
+
+# With nothing copied, the settings are created
+$nh = Join-Path $tmp 'firstperm-nohome-ps'; $nsv = Join-Path $tmp 'firstperm-nosave-ps'
+$null = New-Item -ItemType Directory -Force -Path $nh
+$env:HOME = $nh; $env:USERPROFILE = $nh
+try {
+    $r = Invoke-Scenario $firstRun @('-yes', '-toolchain', 'node', '-agents', 'claude,opencode',
+        '-saveDir', $nsv, '-codeItBuild', $stubFirst) $stubPath
+} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
+Assert "first-run permissions without host state exit code 0" ($r.code -eq 0)
+$settings = Get-Content "$nsv/.claude/settings.json" -Raw | ConvertFrom-Json
+Assert "first-run creates Claude settings that bypass permissions" ($settings.permissions.defaultMode -eq 'bypassPermissions' -and $settings.skipDangerousModePermissionPrompt -eq $true)
+$tui = Get-Content "$nsv/opencode-v2/.config/opencode/tui.json" -Raw | ConvertFrom-Json
+Assert "first-run creates an OpenCode TUI config that auto-accepts" ($tui.session.permissions -eq 'autoaccept')
+
+# Set-CodeItJsonPath: nested keys in a new file, and a file that is not an object
+$jsp = Join-Path $tmp 'jsp-ps'
+$ok = (Set-CodeItJsonPath "$jsp/new.json" 'a.b.c' 'x') -and (Set-CodeItJsonPath "$jsp/new.json" 'a.d' 'true')
+Assert "Set-CodeItJsonPath creates and extends nested keys" $ok
+$obj = Get-Content "$jsp/new.json" -Raw | ConvertFrom-Json
+Assert "Set-CodeItJsonPath writes nested keys" ($obj.a.b.c -eq 'x')
+Assert "Set-CodeItJsonPath writes booleans" ($obj.a.d -eq $true)
+Set-Content -Path "$jsp/array.json" -Value '[1, 2]'
+$ok = Set-CodeItJsonPath "$jsp/array.json" 'a' 'x' 3>$null
+Assert "Set-CodeItJsonPath refuses a file that is not an object" (-not $ok)
+Assert "Set-CodeItJsonPath leaves that file alone" ((Get-Content "$jsp/array.json" -Raw).Trim() -eq '[1, 2]')
 
 # ---------------------------------------------------------------------------
 "12e. Image memory and default toolchains"

@@ -191,8 +191,8 @@ assert_contains "-o selects opencode" "$out" 'CODE_AGENT="opencode"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --claude "${common_args[@]}")
 assert_contains "--claude selects claude" "$out" 'CODE_AGENT="claude"'
 assert_contains "reports Claude settings creation" "$out" "Created Claude Code settings"
-[[ "$(tr -d '[:space:]' < "$save/.claude/settings.json")" == '{"permissions":{"defaultMode":"auto"},"skipDangerousModePermissionPrompt":true}' ]]
-assert "Claude settings enable auto mode and skip prompt" "$?"
+[[ "$(tr -d '[:space:]' < "$save/.claude/settings.json")" == '{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true}' ]]
+assert "Claude settings bypass permissions and skip prompt" "$?"
 [[ -f "$save/.claude.json" ]];            assert "save/.claude.json pre-created as a file" "$?"
 assert_contains "claude dir mount" "$out" "/.claude:/home/agent1/.claude"
 assert_contains "claude.json mount" "$out" "/.claude.json:/home/agent1/.claude.json"
@@ -1311,7 +1311,51 @@ out=$(HOME="$fh" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_dock
 [[ ! -e "$fd/save" ]]; assert "first-run --dry-run creates no save dir" "$?"
 assert_contains "first-run --dry-run says build was delegated" "$out" "--dry-run"
 assert_contains "first-run --dry-run says what it would copy" "$out" "would copy"
+assert_contains "first-run --dry-run says what permissions it would set" "$out" "would set session.permissions to autoaccept"
 [[ ! -e "$tmp/first-build-ran" ]]; assert "first-run --dry-run ran no build" "$?"
+
+# (f) copied state is edited to run without permission prompts, keeping the rest. Spec 19.
+ph="$tmp/firstperm-home"; ps="$tmp/firstperm-save"
+mkdir -p "$ph/.claude" "$ph/.config/opencode"
+printf '{\n  "model": "opus",\n  "permissions": {\n    "defaultMode": "default",\n    "allow": ["Bash(ls)"]\n  }\n}\n' > "$ph/.claude/settings.json"
+printf '{\n  "theme": "dark"\n}\n' > "$ph/.config/opencode/tui.json"
+out=$(HOME="$ph" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents claude,opencode \
+        --save-dir "$ps" --code-it-build "$stub_first_build" 2>&1)
+assert "first-run permissions exit code" "$?"
+settings=$(tr -d '[:space:]' < "$ps/.claude/settings.json")
+assert_contains "copied Claude settings are set to bypassPermissions" "$settings" '"defaultMode":"bypassPermissions"'
+assert_contains "copied Claude settings skip the dangerous-mode prompt" "$settings" '"skipDangerousModePermissionPrompt":true'
+assert_contains "copied Claude settings keep their model" "$settings" '"model":"opus"'
+assert_contains "copied Claude settings keep their allow list" "$settings" '"allow":["Bash(ls)"]'
+tui=$(tr -d '[:space:]' < "$ps/opencode-v2/.config/opencode/tui.json")
+assert_contains "copied OpenCode TUI config auto-accepts permissions" "$tui" '"session":{"permissions":"autoaccept"}'
+assert_contains "copied OpenCode TUI config keeps its theme" "$tui" '"theme":"dark"'
+[[ -f "$ps/opencode-v2/.config/opencode/opencode.json" ]]; assert "first-run fills in OpenCode's default config" "$?"
+assert_contains "first-run says what permissions it set" "$out" "set permissions.defaultMode to bypassPermissions"
+
+# (g) with nothing copied, the settings are created
+nh="$tmp/firstperm-nohome"; nsv="$tmp/firstperm-nosave"; mkdir -p "$nh"
+out=$(HOME="$nh" STUB_FIRST_BUILD_MARKER="$tmp/first-build-ran" PATH="$stub_docker:$PATH" bash "$first_run" --yes --toolchain node --agents claude,opencode \
+        --save-dir "$nsv" --code-it-build "$stub_first_build" 2>&1)
+assert "first-run permissions without host state exit code" "$?"
+[[ "$(tr -d '[:space:]' < "$nsv/.claude/settings.json")" == '{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true}' ]]
+assert "first-run creates Claude settings that bypass permissions" "$?"
+[[ "$(tr -d '[:space:]' < "$nsv/opencode-v2/.config/opencode/tui.json")" == '{"session":{"permissions":"autoaccept"}}' ]]
+assert "first-run creates an OpenCode TUI config that auto-accepts" "$?"
+
+# (h) ci_json_set_path: nested keys in a new file, and a file that is not an object
+(
+    . "$script_dir/lib/code-it-common.sh"
+    ci_json_set_path "$tmp/jsp/new.json" a.b.c x && ci_json_set_path "$tmp/jsp/new.json" a.d true
+) 2>/dev/null
+assert "ci_json_set_path creates and extends nested keys" "$?"
+assert_contains "ci_json_set_path writes nested keys" "$(tr -d '[:space:]' < "$tmp/jsp/new.json")" '"b":{"c":"x"}'
+assert_contains "ci_json_set_path writes booleans" "$(tr -d '[:space:]' < "$tmp/jsp/new.json")" '"d":true'
+echo '[1, 2]' > "$tmp/jsp/array.json"
+out=$(. "$script_dir/lib/code-it-common.sh"; ci_json_set_path "$tmp/jsp/array.json" a x 2>&1)
+[[ "$?" != 0 ]]; assert "ci_json_set_path refuses a file that is not an object" "$?"
+assert_contains "ci_json_set_path says to set it by hand" "$out" "by hand"
+[[ "$(cat "$tmp/jsp/array.json")" == '[1, 2]' ]]; assert "ci_json_set_path leaves that file alone" "$?"
 
 # ---------------------------------------------------------------------------
 echo "19. Image memory and default toolchains"

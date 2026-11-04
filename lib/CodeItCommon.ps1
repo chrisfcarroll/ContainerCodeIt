@@ -15,6 +15,8 @@
         Resolve-CodeItLocale RAW               -> e.g. en_GB.UTF-8, or $null on error
         Get-CodeItRunArgs FILE                 -> the file's run args, as an array
         Test-CodeItEnvSpec SPEC                -> $true if SPEC is NAME[=VALUE]
+        Set-CodeItJsonPath FILE KEY.PATH VALUE  set a nested key in a JSON file
+        Set-CodeItAgentPermissions DIR NAME SAVEDIR DRY -> set AGENT_PERMISSIONS under SAVEDIR
         Test-CodeItPidAlive PID                -> $true if process PID is running
         Get-CodeItSlot LOCKDIR PID TAKE        -> lowest free slot number, locked if TAKE
 
@@ -387,6 +389,58 @@ function Get-CodeItKeyValue([string]$file, [string]$key) {
 # config, or $null. Keys are uppercase and appear once per line.
 function Get-CodeItAgentConfig([string]$dir, [string]$name, [string]$key) {
     return (Get-CodeItKeyValue (Join-Path $dir (Join-Path $name 'config')) $key)
+}
+
+# Set-CodeItJsonPath FILE KEY.PATH VALUE: set the dotted KEY.PATH of the JSON object
+# in FILE to VALUE (true or false as a JSON boolean, otherwise a string), creating
+# FILE and any missing objects on the way, and keeping the rest. Returns $false, with
+# a warning, if FILE is not a JSON object.
+function Set-CodeItJsonPath([string]$file, [string]$path, [string]$value) {
+    $v = if ($value -eq 'true') { $true } elseif ($value -eq 'false') { $false } else { $value }
+    $obj = [pscustomobject]@{}
+    if ((Test-Path -Path $file -PathType Leaf) -and (Get-Item $file).Length -gt 0) {
+        try { $obj = Get-Content $file -Raw | ConvertFrom-Json } catch { $obj = $null }
+        if ($obj -isnot [pscustomobject]) {
+            Write-Warning "Cannot edit $file (not a JSON object this script can read). Set $path to $value in it by hand."
+            return $false
+        }
+    }
+    $keys = @($path -split '\.')
+    $node = $obj
+    for ($i = 0; $i -lt $keys.Count - 1; $i++) {
+        $prop = $node.PSObject.Properties[$keys[$i]]
+        if (-not $prop -or $prop.Value -isnot [pscustomobject]) {
+            $node | Add-Member -Force -NotePropertyName $keys[$i] -NotePropertyValue ([pscustomobject]@{})
+        }
+        $node = $node.($keys[$i])
+    }
+    $node | Add-Member -Force -NotePropertyName $keys[-1] -NotePropertyValue $v
+    $dir = Split-Path $file -Parent
+    if ($dir -and -not (Test-Path -Path $dir)) { $null = New-Item -ItemType Directory -Force -Path $dir }
+    [IO.File]::WriteAllText($file, "$($obj | ConvertTo-Json -Depth 20)`n", [System.Text.UTF8Encoding]::new($false))
+    return $true
+}
+
+# Set-CodeItAgentPermissions DIR NAME AGENT_SAVE_DIR DRY_RUN: apply the agent's
+# AGENT_PERMISSIONS to its configuration under AGENT_SAVE_DIR, so it works free of
+# permissions interruption in the container. With DRY_RUN, only say what it would
+# set. Returns $false if any setting could not be made.
+function Set-CodeItAgentPermissions([string]$dir, [string]$name, [string]$agentSaveDir, [bool]$dryRun) {
+    $ok = $true
+    $spec = Get-CodeItAgentConfig $dir $name 'AGENT_PERMISSIONS'
+    foreach ($entry in @($spec -split '\s+' | Where-Object { $_ })) {
+        $file = Join-Path $agentSaveDir ($entry -replace ':.*$', '')
+        $setting = $entry -replace '^[^:]*:', ''
+        $key, $value = $setting -split '=', 2
+        if ($dryRun) {
+            Write-Host "      would set $key to $value in $file"
+        } elseif (Set-CodeItJsonPath $file $key $value) {
+            Write-Host "      set $key to $value in $file"
+        } else {
+            $ok = $false
+        }
+    }
+    return $ok
 }
 
 # Get-CodeItDefault FILE KEY: the value of KEY in a code-it-defaults file, or $null.

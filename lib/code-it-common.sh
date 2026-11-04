@@ -20,6 +20,8 @@
 #   ci_resolve_locale RAW                             -> e.g. en_GB.UTF-8, or return 1
 #   ci_read_run_args FILE                             -> the file's run args, one per line
 #   ci_valid_env_spec SPEC                            return 0 if SPEC is NAME[=VALUE]
+#   ci_json_set_path FILE KEY.PATH VALUE              set a nested key in a JSON file
+#   ci_agent_set_permissions AGENTS_DIR NAME DIR [DRY] set AGENT_PERMISSIONS under DIR
 #   ci_self_pid                                       -> this shell's pid (Windows pid on Windows)
 #   ci_pid_alive PID                                  return 0 if process PID is running
 #   ci_claim_slot LOCK_DIR PID TAKE                   -> lowest free slot number, locked if TAKE=true
@@ -397,6 +399,71 @@ ci_config_value() {
 # ci_agent_config AGENTS_DIR NAME KEY: the (unquoted) value of KEY in an agent's
 # config, or return 1.
 ci_agent_config() { ci_config_value "$1/$2/config" "$3"; }
+
+# ci_json_set_path FILE KEY.PATH VALUE: set the dotted KEY.PATH of the JSON object in
+# FILE to VALUE (true or false as a JSON boolean, otherwise a string), creating FILE
+# and any missing objects on the way, and keeping the rest. Editing an existing FILE
+# needs jq or python3; without them, or if FILE is not a JSON object, it warns and
+# returns 1.
+ci_json_set_path() {
+    local file="$1" path="$2" value="$3" json tmp k open="" close=""
+    case "$value" in
+        true|false) json=$value ;;
+        *) value=${value//\\/\\\\}; json="\"${value//\"/\\\"}\"" ;;
+    esac
+    if [[ ! -s "$file" ]]; then
+        mkdir -p "$(dirname "$file")"
+        for k in ${path//./ }; do open+="{\"$k\": "; close+="}"; done
+        printf '%s%s%s\n' "$open" "$json" "$close" > "$file"
+        return 0
+    fi
+    tmp="$file.code-it-tmp"
+    if command -v jq >/dev/null 2>&1; then
+        if jq --arg p "$path" --argjson v "$json" 'setpath($p | split("."); $v)' "$file" > "$tmp" 2>/dev/null; then
+            mv "$tmp" "$file"; return 0
+        fi
+    elif command -v python3 >/dev/null 2>&1; then
+        if python3 - "$file" "$path" "$json" > "$tmp" 2>/dev/null <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    obj = json.load(f)
+keys, node = sys.argv[2].split("."), obj
+for k in keys[:-1]:
+    if not isinstance(node.get(k), dict):
+        node[k] = {}
+    node = node[k]
+node[keys[-1]] = json.loads(sys.argv[3])
+print(json.dumps(obj, indent=2))
+EOF
+        then
+            mv "$tmp" "$file"; return 0
+        fi
+    fi
+    rm -f "$tmp"
+    echo "Warning: Cannot edit $file (it needs jq or python3, and a JSON object)." >&2
+    echo "    Set $path to $json in it by hand." >&2
+    return 1
+}
+
+# ci_agent_set_permissions AGENTS_DIR NAME AGENT_SAVE_DIR [DRY_RUN]: apply the agent's
+# AGENT_PERMISSIONS to its configuration under AGENT_SAVE_DIR, so it works free of
+# permissions interruption in the container. With DRY_RUN=true, only say what it
+# would set. Returns 1 if any setting could not be made.
+ci_agent_set_permissions() {
+    local spec entry file setting rc=0
+    spec=$(ci_agent_config "$1" "$2" AGENT_PERMISSIONS) || return 0
+    for entry in $spec; do
+        file="$3/${entry%%:*}"; setting=${entry#*:}
+        if [[ "${4:-false}" == true ]]; then
+            echo "      would set ${setting%%=*} to ${setting#*=} in $file"
+        elif ci_json_set_path "$file" "${setting%%=*}" "${setting#*=}"; then
+            echo "      set ${setting%%=*} to ${setting#*=} in $file"
+        else
+            rc=1
+        fi
+    done
+    return $rc
+}
 
 # ci_read_run_args FILE: the extra container run arguments in FILE, one per line, as
 # devcontainer.json's runArgs: one argument per line, so nothing is word-split and

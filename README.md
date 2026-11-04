@@ -31,7 +31,9 @@ manage the Dockerfile yourself if you need more things in it.
 
 `code-it` first run checks for Git and a container runtime, asks you about toolchains 
 and agents, and then builds a Dockerfile image. Existing state and login can be copied 
-over for the contained agent to use.
+over for the contained agent to use. Copied or not, first run then sets Claude Code to
+`bypassPermissions` and OpenCode to auto-accept, in their configuration under the save
+dir: the container is the sandbox.
 
 Use `code-it-defaults` and `code-it-build` to change your setup. 
 
@@ -360,6 +362,7 @@ Each agent is a directory, `agents/<name>/`, so adding one needs no script chang
   | `AGENT_STATE_DIRS`, `AGENT_STATE_FILES` | `:`-separated paths, relative to home, kept under the save dir and mounted into the container |
   | `AGENT_SAVE_SUBDIR` | Optional subdirectory of the save dir for its state, when it would clash with another agent's |
   | `AGENT_MODEL_FILE` | Optional `path:key`: the JSON file, under the agent's save dir, whose top-level `key` holds its default model; how `code-it-defaults` sets the model. Claude: `.claude/settings.json:model`; opencode: `.config/opencode/opencode.json:model` |
+  | `AGENT_PERMISSIONS` | Optional space-separated `file:key.path=value` settings, files under the agent's save dir, that first-run makes whether or not it copied host state, so the agent runs without permission prompts. `true`/`false` are JSON booleans. Claude: `permissions.defaultMode=bypassPermissions` and `skipDangerousModePermissionPrompt=true` in `.claude/settings.json`; opencode: `session.permissions=autoaccept` in `.config/opencode/tui.json` |
   | `AGENT_EXCLUSIVE_DIRS` | Optional `:`-separated directories, from `AGENT_STATE_DIRS`, that only one container at a time may use. See [Several containers at once](#several-containers-at-once) |
   | `AGENT_EXCLUSIVE_CARRY` | Optional `:`-separated files, relative to home, inside those directories (credentials), copied into a run's own copy |
   | `AGENT_CMD_INTERACTIVE_PROMPT`, `AGENT_CMD_INTERACTIVE_NO_PROMPT`, `AGENT_CMD_HEADLESS_PROMPT`, `AGENT_CMD_HEADLESS_NO_PROMPT` | Its command line in each mode, where `{args}` is the arguments after `--` and `{prompt}` the opening prompt |

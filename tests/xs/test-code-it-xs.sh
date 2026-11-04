@@ -225,6 +225,18 @@ echo "Dockerfile"
 dockerfile=$(cat "$(dirname "$code_it")/Dockerfile")
 assert_contains "the trust-prompt suppression is offered, commented out" "$dockerfile" $'# Suppress Claude\'s "do you trust this folder?" prompt\n#ENV CLAUDE_CODE_SANDBOXED=1'
 assert_contains "Claude always skips permissions" "$dockerfile" '[[ $1 == claude ]] && set -- claude --dangerously-skip-permissions "${@:2}"'
+assert_contains "OpenCode's TUI auto-approves permissions" "$dockerfile" '[[ $1 == opencode && ( -z $2 || $2 == -* ) ]] && set -- opencode --auto "${@:2}"'
+assert_contains "opencode run auto-approves permissions" "$dockerfile" '[[ $1 == opencode && $2 == run ]] && set -- opencode run --auto "${@:3}"'
+# Run go.sh's agent lines in zsh, as the container does, and show the command they make
+if command -v zsh >/dev/null 2>&1; then
+    agent_lines=$(grep -E '^(set -- "\$\{CODE_AGENT|\[\[ \$1 == )' "$(dirname "$code_it")/Dockerfile")
+    go_cmd() { CODE_AGENT="$1" zsh -c "$agent_lines"$'\nprint -r -- "[$*]"' go "${@:2}"; }
+    assert_contains "go.sh gives bare OpenCode --auto" "$(go_cmd opencode)" "[opencode --auto]"
+    assert_contains "go.sh puts --auto before OpenCode's flags" "$(go_cmd opencode --continue)" "[opencode --auto --continue]"
+    assert_contains "go.sh gives opencode run --auto" "$(go_cmd opencode run hi)" "[opencode run --auto hi]"
+    assert_contains "go.sh gives mini no --auto, which it rejects" "$(go_cmd opencode mini --prompt hi)" "[opencode mini --prompt hi]"
+    assert_contains "go.sh still skips Claude's permissions" "$(go_cmd claude hi)" "[claude --dangerously-skip-permissions hi]"
+fi
 assert_contains "OpenCode's libstdc++ is installed" "$dockerfile" "musl-locales libstdc++"
 assert_not_contains "libgcc is left to apk" "$dockerfile" "libgcc libstdc++"
 assert_contains "the home is handed to agent1 after the toolchain snippets" "$dockerfile" $'here ---\n\n# Toolchain snippets run as root and may create directories under the agent\'s\n# home, so hand the whole home to agent1 before switching to it.\nRUN chown -R agent1:wheel /home/agent1\n\nUSER agent1'

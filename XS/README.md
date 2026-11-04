@@ -68,8 +68,10 @@ Each agent sees only its own state.
 | `-- ARGS…` | `ARGS…` or `-- ARGS…` | none | Pass ARGS to the agent |
 
 No ports are mapped: add them with `-D:-p -D:HOST:CONTAINER`. The container is
-the sandbox, so Claude Code always runs with `--dangerously-skip-permissions`.
-Other agents ask for permissions as usual; turn that off with their own flags.
+the sandbox, so Claude Code always runs with `--dangerously-skip-permissions`, and
+OpenCode with `--auto` (its TUI and `opencode run`; `mini`, which a `PROMPT` opens,
+does not take it). Other agents ask for permissions as usual; turn that off with their
+own flags.
 
 In PowerShell, the `--` and repeated `--D:` forms work when the script is run from a
 PowerShell prompt; `pwsh -File` reads them as its own parameters.

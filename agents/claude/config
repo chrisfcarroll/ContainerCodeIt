@@ -12,6 +12,10 @@ AGENT_MODEL_FILE='.claude/settings.json:model'
 # NAME=VALUE that code-it --trust-work-dir sets in the container, so the agent
 # skips its "do you trust this folder?" prompt
 AGENT_TRUST_ENV='CLAUDE_CODE_SANDBOXED=1'
+# What code-it-first-run sets in its configuration under the save dir, copied or
+# not, so it works free of permissions interruption: the container is the sandbox.
+# Space-separated FILE:KEY.PATH=VALUE; VALUE true or false is a JSON boolean.
+AGENT_PERMISSIONS='.claude/settings.json:permissions.defaultMode=bypassPermissions .claude/settings.json:skipDangerousModePermissionPrompt=true'
 # State created under --save-dir and mounted into the container home
 AGENT_STATE_DIRS='.claude'
 AGENT_STATE_FILES='.claude.json'
