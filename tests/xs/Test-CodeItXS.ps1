@@ -109,6 +109,10 @@ $out = Run-XS '& $x -dryRun'
 Assert "-dryRun makes no save dir" (-not (Test-Path $save))
 Assert-NotContains "-dryRun runs nothing" $out "STUB-docker"
 Assert-Contains "-dryRun prints the run command" $out "docker run -it --rm"
+$out = Run-XS '& $x'
+Assert-NotContains "a failing agent waits for Enter by default" $out "CODE_IT_NO_WAIT"
+$out = Run-XS '& $x -noWait'
+Assert-Contains "-noWait tells go.sh not to wait for Enter" $out "[-e] [CODE_IT_NO_WAIT=1]"
 
 # ---------------------------------------------------------------------------
 "Agents and their state"
@@ -218,7 +222,8 @@ Assert "the trust-prompt suppression is offered, commented out" ($dockerfile -ma
 Assert "Claude always skips permissions" $dockerfile.Contains('[[ $1 == claude ]] && set -- claude --dangerously-skip-permissions "${@:2}"')
 Assert "OpenCode's TUI auto-approves permissions" $dockerfile.Contains('[[ $1 == opencode && ( -z $2 || $2 == -* ) ]] && set -- opencode --auto "${@:2}"')
 Assert "opencode run auto-approves permissions" $dockerfile.Contains('[[ $1 == opencode && $2 == run ]] && set -- opencode run --auto "${@:3}"')
-Assert "a failing agent's error stays on screen until Enter" $dockerfile.Contains('agent_cmd="${(j: :)${(q)@}} || { printf ''\n%s exited with status %s. Press Enter to close. '' ${(q)1} \$?; read -r _; }"')
+Assert "go.sh quotes the agent command for tmux" $dockerfile.Contains('agent_cmd="${(j: :)${(q)@}}"')
+Assert "a failing agent's error stays on screen until Enter, unless CODE_IT_NO_WAIT or zsh" $dockerfile.Contains('[[ -n $CODE_IT_NO_WAIT || $1 == zsh ]] || agent_cmd+=" || { printf ''\n%s exited with status %s. Press Enter to close. '' ${(q)1} \$?; read -r _; }"')
 Assert "tmux runs the agent command" $dockerfile.Contains('exec tmux -u new-session "$agent_cmd"')
 Assert "OpenCode's libstdc++ is installed" ($dockerfile -match 'musl-locales libstdc\+\+\r?\n')
 Assert "libgcc is left to apk" (-not $dockerfile.Contains('libgcc libstdc++'))

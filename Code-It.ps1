@@ -89,6 +89,10 @@
     -prompt the agent answers, exits, and the container shuts down, exiting with the
     agent's exit code.
 
+.PARAMETER noWait
+    If the agent fails, closes the container at once, instead of keeping its error on
+    screen until Enter. Not for -headless or -noAgent, which never wait.
+
 .PARAMETER agentArgs
     Any arguments this script does not recognise are passed to the coding agent verbatim,
     e.g. `.\Code-It.ps1 -c --continue --model opus`. PowerShell has no usable `--`
@@ -259,6 +263,7 @@ param (
     [string]$packageCaches  = "",
     [string]$prompt         = "",
     [switch]$headless       = $false,
+    [switch]$noWait         = $false,
     # Not $env, which is PowerShell's environment drive
     [Alias('env', 'e')]
     [string[]]$environment  = @(),
@@ -368,6 +373,12 @@ $promptSet = [bool]$prompt
 # -noAgent runs an interactive zsh: a prompt or -headless would have no agent to run it
 if ($noAgent -and ($promptSet -or $headless)) {
     Write-Warning "-noAgent runs an interactive zsh shell; a prompt or -headless would have no agent to run it."
+    exit 1
+}
+
+# -noWait: only an interactive agent waits for Enter when it fails
+if ($noWait -and ($headless -or $noAgent)) {
+    Write-Warning "-noWait applies to an interactive agent; -headless and -noAgent never wait for Enter."
     exit 1
 }
 
@@ -835,6 +846,12 @@ if ($noAgent) {
 if ($trustWorkDir -and $agentTrustEnv) {
     $agentEnvArgs += @('-e', $agentTrustEnv)
     $agentEnvPrint += "`n                -e $agentTrustEnv"
+}
+
+# -noWait: go.sh closes at once if the agent fails, instead of waiting for Enter
+if ($noWait) {
+    $agentEnvArgs += @('-e', 'CODE_IT_NO_WAIT=1')
+    $agentEnvPrint += "`n                -e CODE_IT_NO_WAIT=1"
 }
 
 # Extra run arguments: <saveDir>/run-args, then -environment, -envFile and -runArgs.

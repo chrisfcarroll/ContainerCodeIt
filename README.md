@@ -20,6 +20,8 @@ Your agents get work done by having a _single mounted directory_, typically one 
 
 Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succession. In OpenCode, press `Ctrl-C`.
 
+If the agent fails, its error stays on screen until you press Enter, unless you pass `--no-wait` (`-noWait`).
+
 ### The XS Version
 
 If you are appropriately paranoid and also comfortable with editing your own 
@@ -100,6 +102,7 @@ Start a container without an agent with --no-agent / -noAgent
 | `--no-agent`, `--zsh` | `-noAgent`, `-zsh` | off | Run a plain interactive zsh in the container instead of a coding agent: no agent state is mounted and no login is needed. A prompt, `--headless`, or combining it with an agent selection is an error |
 | `--prompt`, `-p`, or a bare argument | `-prompt`, or a bare argument | none | Opening prompt for the agent |
 | `--headless` | `-headless` | off | Run the agent one-shot in the foreground instead of in tmux: no TTY, and the container exits with the agent's exit code |
+| `--no-wait` | `-noWait` | off | If an interactive agent fails, its error stays on screen until you press Enter; with this, the container closes at once. An error with `--headless` or `--no-agent`, which never wait |
 | `--` *agent-args* | *agent-args* (no separator) | none | Arguments passed to the coding agent verbatim |
 | `--env`, `-e NAME[=VALUE]` (repeatable) | `-environment`, `-env`, `-e` *array* | none | Environment variable for the container; a bare `NAME` passes the host's value. See [Passing arguments to the container runtime](#passing-arguments-to-the-container-runtime) |
 | `--env-file FILE` (repeatable) | `-envFile` *array* | none | File of `KEY=VALUE` environment variables for the container |

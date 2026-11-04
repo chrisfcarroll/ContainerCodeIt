@@ -34,6 +34,8 @@
 .PARAMETER runArgs
     Arguments passed to `docker run` / `container run`, e.g. -D '-p','8080:3000'.
     Alias: -D. A remaining argument of the form --D:ARG is also passed.
+.PARAMETER noWait
+    If the agent fails, close at once instead of waiting for Enter.
 .PARAMETER dryRun
     Print the commands without running them.
 .PARAMETER agentArgs
@@ -58,6 +60,7 @@ param (
     [Alias('r')][string]$runtime = '',
     [Alias('l')][string]$locale = '',
     [Alias('D')][string[]]$runArgs = @(),
+    [switch]$noWait,
     [switch]$dryRun,
     [Alias('h')][switch]$help,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$agentArgs = @()
@@ -153,6 +156,7 @@ $cmd += '-e', "CODE_AGENT=$agent", '-e', "CODE_IT_WORK_DIR=$mount", '-e', "LANG=
         '-e', "GIT_AUTHOR_NAME=Agent1 for $user", '-e', "GIT_AUTHOR_EMAIL=$email",
         '-e', "GIT_COMMITTER_NAME=Agent1 for $user", '-e', "GIT_COMMITTER_EMAIL=$email",
         '-v', "${workDir}:$mount"
+if ($noWait) { $cmd += '-e', 'CODE_IT_NO_WAIT=1' }
 foreach ($p in $state) { $cmd += '-v', "$saveDir/${p}:/home/agent1/$p" }
 $cmd += @($runArgs) + $image + @($agentArgs)
 Invoke-Run @cmd

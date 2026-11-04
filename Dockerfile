@@ -212,6 +212,12 @@ fi
 # tmux takes one shell-command string, so quote the agent and its arguments into one
 agent_cmd=${(q)agent_bin}
 for arg in "$@" ; do agent_cmd="$agent_cmd ${(q)arg}" ; done
+# The container stops when the agent's session ends, so if the agent fails, keep its
+# error on screen until Enter. CODE_IT_NO_WAIT=1 (code-it --no-wait) closes at once.
+# A plain zsh never waits: it exits with its last command's status, not a failure.
+if [ -z "${CODE_IT_NO_WAIT:-}" ] && [ "${CODE_AGENT_SHELL:-}" != "1" ] ; then
+    agent_cmd="$agent_cmd || { printf '\n%s exited with status %s. Press Enter to close. ' ${(q)agent_bin:t} \$?; read -r _; }"
+fi
 tmux -u new-session -d ; tmux -u new-session "$agent_cmd"
 EOF
 RUN chmod a+x ~/go.sh

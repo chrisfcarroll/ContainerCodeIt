@@ -998,6 +998,15 @@ $r = Invoke-Scenario $codeIt $commonArgs $stubPath
 Assert "no prompt appends nothing" ($r.out.TrimEnd().EndsWith('code-it-alpine-dotnet-node:latest'))
 Assert-Contains "interactive runs allocate a TTY" $r.out 'docker run -it'
 Assert "interactive runs are not headless" (-not $r.out.Contains('CODE_AGENT_HEADLESS'))
+Assert "a failing agent waits for Enter by default" (-not $r.out.Contains('CODE_IT_NO_WAIT'))
+
+# -noWait: go.sh closes at once if the agent fails
+$r = Invoke-Scenario $codeIt (@('-c','-noWait') + $commonArgs) $stubPath
+Assert-Contains "-noWait passes CODE_IT_NO_WAIT" $r.out '-e CODE_IT_NO_WAIT=1'
+$r = Invoke-Scenario $codeIt (@('-c','-noWait','-headless','fix it') + $commonArgs) $stubPath
+Assert "-noWait with -headless fails" ($r.code -ne 0)
+$r = Invoke-Scenario $codeIt (@('-noAgent','-noWait') + $commonArgs) $stubPath
+Assert "-noWait with -noAgent fails" ($r.code -ne 0)
 
 # -headless: one-shot, no TTY, and the agent's non-interactive form
 $r = Invoke-Scenario $codeIt (@('-c','-headless','fix the build') + $commonArgs) $stubPath

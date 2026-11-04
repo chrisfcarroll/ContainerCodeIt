@@ -17,6 +17,7 @@
 #                         installed, else docker
 #   -l, --locale LOCALE   The container's LANG, e.g. en_GB.UTF-8 or en-GB. Default: the host's
 #   -D:ARG, --D:ARG       Pass ARG to `docker run` / `container run`, e.g. -D:-p -D:8080:3000
+#   --no-wait             If the agent fails, close at once instead of waiting for Enter
 #   -d, --dry-run         Print the commands without running them
 #   -h, --help            Show this help
 #   PROMPT                Open the agent with this as its first prompt
@@ -36,6 +37,7 @@ build=false
 runtime=""
 locale=""
 dry_run=false
+no_wait=false
 run_args=()
 agent_args=()
 prompt=""
@@ -53,6 +55,7 @@ while [[ $# -gt 0 ]]; do
         -r|--runtime)  runtime=${2:?"$1 needs a value"}; shift ;;
         -l|--locale)   locale=${2:?"$1 needs a value"}; shift ;;
         -D:*|--D:*)    run_args+=("${1#*D:}") ;;
+        --no-wait)     no_wait=true ;;
         -d|--dry-run)  dry_run=true ;;
         -h|--help)     sed -n '3,/^$/{ s/^# \{0,1\}//; p; }' "$0"; exit 0 ;;
         --)            shift; agent_args=("$@"); break ;;
@@ -162,6 +165,7 @@ cmd+=(-e CODE_AGENT="$agent" -e CODE_IT_WORK_DIR="$mount" -e LANG="$lang"
       -e GIT_AUTHOR_NAME="Agent1 for $user" -e GIT_AUTHOR_EMAIL="$email"
       -e GIT_COMMITTER_NAME="Agent1 for $user" -e GIT_COMMITTER_EMAIL="$email"
       -v "$work_dir:$mount")
+[[ "$no_wait" == true ]] && cmd+=(-e CODE_IT_NO_WAIT=1)
 for p in "${state[@]}"; do cmd+=(-v "$save_dir/$p:/home/agent1/$p"); done
 cmd+=("${run_args[@]}" "$image" "${agent_args[@]}")
 run "${cmd[@]}"

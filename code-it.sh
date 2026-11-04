@@ -40,6 +40,9 @@
 #   --headless               Run the agent in the foreground rather than in tmux, with no
 #                            TTY allocated. With --prompt the agent answers, exits, and the
 #                            container shuts down, exiting with the agent's exit code.
+#   --no-wait                If the agent fails, close the container at once, instead of
+#                            keeping its error on screen until Enter. Not for --headless
+#                            or --no-agent, which never wait.
 #   -- AGENT-ARGS...         Everything after -- is passed to the coding agent verbatim,
 #                            e.g. -- --model opus --continue. See
 #                              https://code.claude.com/docs/en/cli-reference
@@ -260,6 +263,7 @@ container_args=""
 prompt=""
 prompt_set=false
 headless=false
+no_wait=false
 agent_args=()
 list_agents=false
 # --env, --env-file and --run-arg, in command-line order, as container run arguments
@@ -383,6 +387,10 @@ while [[ $# -gt 0 ]]; do
             headless=true
             shift
             ;;
+        --no-wait)
+            no_wait=true
+            shift
+            ;;
         --)
             shift
             agent_args=("$@")
@@ -424,6 +432,12 @@ if [[ "$no_agent" == true ]]; then
         echo "--no-agent runs an interactive zsh; --headless applies to agents." >&2
         exit 1
     fi
+fi
+
+# --no-wait: only an interactive agent waits for Enter when it fails
+if [[ "$no_wait" == true && ( "$headless" == true || "$no_agent" == true ) ]]; then
+    echo "--no-wait applies to an interactive agent; --headless and --no-agent never wait for Enter." >&2
+    exit 1
 fi
 
 # --list-agents lists the available agent definitions and exits.
@@ -881,6 +895,13 @@ if [[ "$trust_work_dir" == yes && -n "$AGENT_TRUST_ENV" ]]; then
     agent_env+=(-e "$AGENT_TRUST_ENV")
     agent_env_print+="
                 -e $AGENT_TRUST_ENV \\"
+fi
+
+# --no-wait: go.sh closes at once if the agent fails, instead of waiting for Enter
+if [[ "$no_wait" == true ]]; then
+    agent_env+=(-e CODE_IT_NO_WAIT=1)
+    agent_env_print+="
+                -e CODE_IT_NO_WAIT=1 \\"
 fi
 
 # Extra run arguments: SAVE-DIR/run-args, then --env, --env-file and --run-arg. They

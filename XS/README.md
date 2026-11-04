@@ -35,7 +35,7 @@ Dockerfile, rebuild with `--build` (`-build`).
 
 The agent runs in tmux, next to a zsh session: `Ctrl-B S` switches between them.
 To exit, quit the agent (`Ctrl-D` twice in Claude Code, `Ctrl-C` in OpenCode) and the shell.
-If the agent fails, its error stays on screen until you press Enter.
+If the agent fails, its error stays on screen until you press Enter, unless you pass `--no-wait` (`-noWait`).
 
 ## First run
 
@@ -63,6 +63,7 @@ Each agent sees only its own state.
 | `--runtime`, `-r NAME` | `-runtime`, `-r NAME` | `container` on macOS if installed, else `docker` | `docker` or `container` |
 | `--locale`, `-l LOCALE` | `-locale`, `-l LOCALE` | the host's | The container's `LANG`, e.g. `en_GB.UTF-8` or `en-GB` |
 | `-D:ARG`, `--D:ARG` (repeatable) | `-D ARG,ARG…`, or `--D:ARG` | none | Pass ARG to `docker run` / `container run`, e.g. `-D:-p -D:8080:3000` |
+| `--no-wait` | `-noWait` | off | If the agent fails, close at once instead of keeping its error on screen until Enter |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the commands without running them |
 | `--help`, `-h` | `-help`, `-h` | | Show help |
 | `PROMPT` | `PROMPT` | none | Open the agent with PROMPT as its first prompt. OpenCode gets `mini --prompt PROMPT` |

@@ -962,6 +962,16 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 [[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "no prompt appends nothing" "$?"
 assert_contains "interactive runs allocate a TTY" "$out" "docker run -it"
 [[ "$out" != *CODE_AGENT_HEADLESS* ]]; assert "interactive runs are not headless" "$?"
+[[ "$out" != *CODE_IT_NO_WAIT* ]]; assert "a failing agent waits for Enter by default" "$?"
+
+# --no-wait: go.sh closes at once if the agent fails
+out=$(PATH="$stub_docker:$PATH" "$code_it" -c --no-wait "${common_args[@]}")
+assert_contains "--no-wait passes CODE_IT_NO_WAIT" "$out" "-e CODE_IT_NO_WAIT=1"
+out=$(PATH="$stub_docker:$PATH" "$code_it" -c --no-wait --headless "fix it" "${common_args[@]}" 2>&1); rc=$?
+[[ $rc -ne 0 ]]; assert "--no-wait with --headless fails" "$?"
+assert_contains "--no-wait with --headless says why" "$out" "never wait for Enter"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --no-agent --no-wait "${common_args[@]}" 2>&1); rc=$?
+[[ $rc -ne 0 ]]; assert "--no-wait with --no-agent fails" "$?"
 
 # --headless: one-shot, no TTY, and the agent's non-interactive form
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --headless "fix the build" "${common_args[@]}")
@@ -1138,6 +1148,22 @@ EOF
     out=$(PATH="$shellstub:$gobin:$PATH" CODE_AGENT_SHELL=1 zsh "$tmp/go.sh" 2>&1)
     assert_contains "go.sh --no-agent runs zsh in tmux" "$out" "TMUX-CMD:zsh"
     [[ "$out" != *AGENT-* ]]; assert "go.sh --no-agent runs no agent" "$?"
+    [[ "$out" != *"Press Enter"* ]]; assert "go.sh --no-agent zsh never waits for Enter" "$?"
+    # A failing agent's error stays on screen until Enter, unless CODE_IT_NO_WAIT
+    cat > "$gobin/failing" <<'EOF'
+#!/bin/sh
+echo agent error; exit 3
+EOF
+    chmod +x "$gobin/failing"
+    printf 'claude=%s/claude\nfailing=%s/failing\n' "$gobin" "$gobin" > "$gobin/agents"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=failing zsh "$tmp/go.sh" </dev/null 2>&1)
+    assert_contains "go.sh keeps a failing agent's error on screen" "$out" "agent error"
+    assert_contains "go.sh shows a failing agent's status, waiting for Enter" "$out" "failing exited with status 3. Press Enter to close."
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude zsh "$tmp/go.sh" </dev/null 2>&1)
+    [[ "$out" != *"Press Enter"* ]]; assert "go.sh closes at once when the agent succeeds" "$?"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=failing CODE_IT_NO_WAIT=1 zsh "$tmp/go.sh" </dev/null 2>&1)
+    assert_contains "go.sh with CODE_IT_NO_WAIT still shows the agent's error" "$out" "agent error"
+    [[ "$out" != *"Press Enter"* ]]; assert "go.sh with CODE_IT_NO_WAIT closes at once" "$?"
     # an agent missing from the image is an error, never another agent given its arguments
     printf 'claude=%s/claude\n' "$gobin" > "$gobin/agents"
     out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "hi" 2>&1)

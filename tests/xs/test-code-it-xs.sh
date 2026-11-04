@@ -113,6 +113,10 @@ out=$(run_xs -d)
 assert "--dry-run makes no save dir" "$([[ ! -e "$save" ]]; echo $?)"
 assert_not_contains "--dry-run runs nothing" "$out" "STUB-docker"
 assert_contains "--dry-run prints the run command" "$out" "docker run -it --rm"
+out=$(run_xs)
+assert_not_contains "a failing agent waits for Enter by default" "$out" "CODE_IT_NO_WAIT"
+out=$(run_xs --no-wait)
+assert_contains "--no-wait tells go.sh not to wait for Enter" "$out" "[-e] [CODE_IT_NO_WAIT=1]"
 
 # ---------------------------------------------------------------------------
 echo "Agents and their state"
@@ -237,7 +241,7 @@ if command -v zsh >/dev/null 2>&1; then
     assert_contains "go.sh gives mini no --auto, which it rejects" "$(go_cmd opencode mini --prompt hi)" "[opencode mini --prompt hi]"
     assert_contains "go.sh still skips Claude's permissions" "$(go_cmd claude hi)" "[claude --dangerously-skip-permissions hi]"
     # Run the command go.sh gives tmux, with an agent that fails and one that succeeds
-    agent_lines+=$'\n'$(grep -E '^agent_cmd=' "$(dirname "$code_it")/Dockerfile")
+    agent_lines+=$'\n'$(grep -E '^(agent_cmd=|\[\[ -n \$CODE_IT_NO_WAIT)' "$(dirname "$code_it")/Dockerfile")
     tmux_cmd() { CODE_AGENT="$1" zsh -c "$agent_lines"$'\nprint -r -- "$agent_cmd"' go "${@:2}"; }
     failed=$(sh -c "$(tmux_cmd sh -c 'echo agent error; exit 3')" </dev/null 2>&1)
     assert_contains "a failing agent's error stays on screen" "$failed" "agent error"
@@ -246,6 +250,10 @@ if command -v zsh >/dev/null 2>&1; then
     assert_contains "a succeeding agent runs" "$succeeded" "agent done"
     assert_not_contains "a succeeding agent closes without waiting" "$succeeded" "Press Enter"
     assert_contains "go.sh gives tmux the agent command" "$(tmux_cmd opencode)" "opencode --auto || {"
+    no_wait=$(CODE_IT_NO_WAIT=1 sh -c "$(CODE_IT_NO_WAIT=1 tmux_cmd sh -c 'echo agent error; exit 3')" </dev/null 2>&1)
+    assert_contains "with CODE_IT_NO_WAIT, a failing agent's error is still shown" "$no_wait" "agent error"
+    assert_not_contains "with CODE_IT_NO_WAIT, a failing agent closes without waiting" "$no_wait" "Press Enter"
+    assert_not_contains "zsh never waits for Enter: it exits with its last command's status" "$(tmux_cmd zsh)" "Press Enter"
 fi
 assert_contains "OpenCode's libstdc++ is installed" "$dockerfile" "musl-locales libstdc++"
 assert_not_contains "libgcc is left to apk" "$dockerfile" "libgcc libstdc++"
