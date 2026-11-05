@@ -18,7 +18,7 @@ Your agents get work done by having a _single mounted directory_, typically one 
 
 ### Exiting a container
 
-Press `Ctrl-D` to exit a container. In Claude code, press `Ctrl-D` twice in succession. In OpenCode, press `Ctrl-C`.
+In Claude or OpenCode, press `Ctrl-C` twice in succession. Other agents may vary. Exit a shell with `Ctrl-D`.
 
 If the agent fails, its error stays on screen until you press Enter, unless you pass `--no-wait` (`-noWait`).
 
@@ -559,6 +559,8 @@ options and the link to the source of the data.
     git config --global core.fsmonitor true
     git config --global feature.manyFiles true
     ```
+- Coding agents are a moving target, especially permissions. We use
+  `--dangerously-skip-permissions` for Claude Code, `--auto` for OpenCode.
 
 ## Runtime detection
 

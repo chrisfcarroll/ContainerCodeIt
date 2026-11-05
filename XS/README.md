@@ -6,21 +6,6 @@ working directory, where it can work free of permissions interruption.
 Your agents get work done by having a _single mounted directory_, typically 
 containing a git repo or repos, so they can work and commit.
 
-This is the XS version, for devs who are appropriately paranoid and also comfortable with editing their own Dockerfile.
-
-- `Dockerfile`: Alpine, zsh, git, tmux, Claude Code and OpenCode. Add your own toolchains.
-- `snippets/`: Example lines to paste into the Dockerfile, for Python with uv
-  (`python-uv.dockerfile`) and for the Codex agent (`codex.dockerfile`).
-- `code-it.sh` and `Code-It.ps1`: build the image if it is missing, then run an agent.
-
-For a full fat version with toolchain and agent selection, defaults, a doctor, and more, see
-the [full version README.md](../README.md).
-
-## Prerequisites
-
-- Docker, or Apple's container on macOS
-- bash or PowerShell
-
 ## Quick start
 
 ```bash
@@ -34,8 +19,24 @@ The first run builds the image `code-it-xs` from the Dockerfile. After you edit 
 Dockerfile, rebuild with `--build` (`-build`).
 
 The agent runs in tmux, next to a zsh session: `Ctrl-B S` switches between them.
-To exit, quit the agent (`Ctrl-D` twice in Claude Code, `Ctrl-C` in OpenCode) and the shell.
-If the agent fails, its error stays on screen until you press Enter, unless you pass `--no-wait` (`-noWait`).
+
+To exit, `Ctrl-C` twice currently works in both Claude Code and OpenCode.
+
+## Maintenance and Change.
+
+This is the XS version, for devs who are comfortable maintaining their own Dockerfile.
+
+- `Dockerfile`: Alpine, zsh, git, tmux, Claude Code and OpenCode. Add your own toolchains or other agents.
+- `code-it.sh` and `Code-It.ps1`: build the image if it is missing, then run an agent
+- `snippets/`: Example lines to paste into a Dockerfile for other agents and toochains.
+
+For a full-fat version including UI for toolchain and agent selection see 
+the [full version README.md](../README.md).
+
+## Prerequisites
+
+- Docker, or Apple's container on macOS
+- bash or PowerShell
 
 ## First run
 
@@ -69,20 +70,21 @@ Each agent sees only its own state.
 | `PROMPT` | `PROMPT` | none | Open the agent with PROMPT as its first prompt. OpenCode gets `mini --prompt PROMPT` |
 | `-- ARGS…` | `ARGS…` or `-- ARGS…` | none | Pass ARGS to the agent |
 
-No ports are mapped: add them with `-D:-p -D:HOST:CONTAINER`. The container is
-the sandbox, so Claude Code always runs with `--dangerously-skip-permissions`, and
-OpenCode with `--auto` (its TUI and `opencode run`; `mini`, which a `PROMPT` opens,
-does not take it). Other agents ask for permissions as usual; turn that off with their
-own flags.
+The container is the sandbox, so Claude Code always runs with `--dangerously-skip-permissions`, 
+and OpenCode with `--auto`.
 
 In PowerShell, the `--` and repeated `--D:` forms work when the script is run from a
-PowerShell prompt; `pwsh -File` reads them as its own parameters.
+PowerShell prompt.
 
 ## Adding toolchains and agents
 
 Paste a snippet into the Dockerfile where it says `--- Toolchains` or `--- Agents`,
 then run with `--build`. A new agent also needs a line in the scripts saying which
 of its state directories to mount; `codex` already has one.
+
+## Rough Edges
+
+see [full version README.md](../README.md).
 
 ## Tests
 
