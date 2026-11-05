@@ -85,7 +85,7 @@ $state = switch ($agent) {
 # A leading bare argument is the opening prompt. OpenCode reads a bare argument as a
 # project directory, so it needs --prompt.
 if ($agent -eq 'opencode' -and $agentArgs.Count -and -not $agentArgs[0].StartsWith('-')) {
-    $agentArgs = @('mini', '--prompt') + $agentArgs
+    $agentArgs = @('--prompt') + $agentArgs
 }
 
 if (-not $runtime) {

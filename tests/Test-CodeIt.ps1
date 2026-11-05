@@ -986,7 +986,7 @@ Assert-Contains "claude: bare prompt appended to the image" $r.out 'code-it-alpi
 $r = Invoke-Scenario $codeIt (@('-c','-prompt','explain this repo') + $commonArgs) $stubPath
 Assert-Contains "claude: -prompt is the same as a bare prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-o','explain this repo') + $commonArgs) $stubPath
-Assert-Contains "opencode (v2): prompt becomes mini --prompt" $r.out 'code-it-alpine-dotnet-node:latest mini --prompt "explain this repo"'
+Assert-Contains "opencode (v2): prompt becomes --prompt" $r.out 'code-it-alpine-dotnet-node:latest --prompt "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-agent','codex','explain this repo') + $commonArgs) $stubPath
 Assert-Contains "codex bare argument is the prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-o') + $commonArgs) $stubPath

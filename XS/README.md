@@ -67,7 +67,7 @@ Each agent sees only its own state.
 | `--no-wait` | `-noWait` | off | If the agent fails, close at once instead of keeping its error on screen until Enter |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the commands without running them |
 | `--help`, `-h` | `-help`, `-h` | | Show help |
-| `PROMPT` | `PROMPT` | none | Open the agent with PROMPT as its first prompt. OpenCode gets `mini --prompt PROMPT` |
+| `PROMPT` | `PROMPT` | none | Open the agent with PROMPT as its first prompt. OpenCode gets `--prompt PROMPT` |
 | `-- ARGS…` | `ARGS…` or `-- ARGS…` | none | Pass ARGS to the agent |
 
 The container is the sandbox, so Claude Code always runs with `--dangerously-skip-permissions`, 

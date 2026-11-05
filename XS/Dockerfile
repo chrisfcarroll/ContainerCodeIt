@@ -47,7 +47,7 @@ RUN git config --global core.autocrlf input \
 # or zsh) given the container's arguments. Ctrl-B S switches between them.
 # The launcher mounts the work dir at $CODE_IT_WORK_DIR and tells git to trust it.
 # The container is the sandbox, so Claude runs with no permission checks, and
-# OpenCode auto-approves them; only its TUI and run take --auto, not mini.
+# OpenCode auto-approves them; its TUI and run take --auto, its other commands do not.
 # When the agent's session ends the container stops, so if the agent fails, its
 # error is kept on screen until Enter, unless $CODE_IT_NO_WAIT is set. A plain zsh
 # never waits: it exits with its last command's status, not a failure.

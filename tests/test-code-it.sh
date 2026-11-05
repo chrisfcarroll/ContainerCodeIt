@@ -950,7 +950,7 @@ assert_contains "claude: bare prompt appended to the image" "$out" 'code-it-alpi
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --prompt "explain this repo" "${common_args[@]}")
 assert_contains "claude: --prompt is the same as a bare prompt" "$out" 'code-it-alpine-dotnet-node:latest explain\ this\ repo'
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o "explain this repo" "${common_args[@]}")
-assert_contains "opencode (v2): prompt becomes mini --prompt" "$out" 'code-it-alpine-dotnet-node:latest mini --prompt explain\ this\ repo'
+assert_contains "opencode (v2): prompt becomes --prompt" "$out" 'code-it-alpine-dotnet-node:latest --prompt explain\ this\ repo'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent codex "explain this repo" "${common_args[@]}")
 assert_contains "codex: bare argument is the prompt" "$out" 'code-it-alpine-dotnet-node:latest explain\ this\ repo'
 # No prompt and no agent args: nothing is appended, and the run stays interactive

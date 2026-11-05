@@ -152,8 +152,8 @@ assert_contains "options after -- are passed on" "$out" "[code-it-xs] [-c]"
 
 # ---------------------------------------------------------------------------
 echo "Prompt"
-out=$(run_xs "fix the tests" -- --model m)
-assert_contains "a prompt opens opencode with --prompt" "$out" "[code-it-xs] [mini] [--prompt] [fix the tests] [--model] [m]"
+out=$(run_xs "fix the tests" -- --continue)
+assert_contains "a prompt opens opencode with --prompt" "$out" "[code-it-xs] [--prompt] [fix the tests] [--continue]"
 out=$(run_xs -c "fix the tests" -- --model m)
 assert_contains "a prompt goes first to claude as is" "$out" "[code-it-xs] [fix the tests] [--model] [m]"
 out=$(run_xs "fix the tests" -c)
@@ -238,7 +238,7 @@ if command -v zsh >/dev/null 2>&1; then
     assert_contains "go.sh gives bare OpenCode --auto" "$(go_cmd opencode)" "[opencode --auto]"
     assert_contains "go.sh puts --auto before OpenCode's flags" "$(go_cmd opencode --continue)" "[opencode --auto --continue]"
     assert_contains "go.sh gives opencode run --auto" "$(go_cmd opencode run hi)" "[opencode run --auto hi]"
-    assert_contains "go.sh gives mini no --auto, which it rejects" "$(go_cmd opencode mini --prompt hi)" "[opencode mini --prompt hi]"
+    assert_contains "go.sh gives a prompted OpenCode --auto" "$(go_cmd opencode --prompt hi)" "[opencode --auto --prompt hi]"
     assert_contains "go.sh still skips Claude's permissions" "$(go_cmd claude hi)" "[claude --dangerously-skip-permissions hi]"
     # Run the command go.sh gives tmux, with an agent that fails and one that succeeds
     agent_lines+=$'\n'$(grep -E '^(agent_cmd=|\[\[ -n \$CODE_IT_NO_WAIT)' "$(dirname "$code_it")/Dockerfile")

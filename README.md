@@ -464,7 +464,7 @@ The launcher translates the prompt into each agent's own command line
 | | interactive | `--headless` |
 |---|---|---|
 | Claude Code | `claude PROMPT` | `claude -p PROMPT` |
-| OpenCode | `opencode mini --prompt PROMPT` | `opencode run --standalone PROMPT` |
+| OpenCode | `opencode --prompt PROMPT` | `opencode run --standalone PROMPT` |
 
 Interactively the agent still runs inside tmux. With `--headless` it runs in the
 foreground with no TTY allocated (`docker run -i`), so output can be piped or redirected

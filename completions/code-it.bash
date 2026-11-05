@@ -23,7 +23,7 @@ _code_it_claude_models='opus sonnet haiku claude-opus-5 claude-sonnet-5 claude-h
 _code_it_claude_permission_modes='default acceptEdits plan auto dontAsk bypassPermissions manual'
 
 # OpenCode: the flags people reach for most
-_code_it_opencode_opts='run mini --standalone --server --model --agent --prompt
+_code_it_opencode_opts='run --standalone --server --model --agent --prompt
     --continue -c --session --format --file --help'
 
 # OpenAI Codex: the flags people reach for most

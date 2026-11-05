@@ -157,7 +157,7 @@
 #     run code-it-defaults to set it there.
 #   - The prompt and any pass-through arguments are translated into each agent's own
 #     command line, from the AGENT_CMD_* templates in agents/NAME/config: --prompt
-#     becomes `claude PROMPT` or `opencode mini --prompt PROMPT`, and with --headless it
+#     becomes `claude PROMPT` or `opencode --prompt PROMPT`, and with --headless it
 #     becomes `claude -p PROMPT` or `opencode run PROMPT`
 #   - SAVE-DIR/run-args (default ~/.config/code-it/run-args), if it exists, holds run
 #     arguments for every run, like devcontainer.json's runArgs: one argument per line,

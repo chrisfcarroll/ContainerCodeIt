@@ -150,8 +150,8 @@ Assert-Contains "other remaining arguments go to the agent" $out "[code-it-xs] [
 
 # ---------------------------------------------------------------------------
 "Prompt"
-$out = Run-XS '& $x ''fix the tests'' --model m'
-Assert-Contains "a prompt opens opencode with --prompt" $out "[code-it-xs] [mini] [--prompt] [fix the tests] [--model] [m]"
+$out = Run-XS '& $x ''fix the tests'' --continue'
+Assert-Contains "a prompt opens opencode with --prompt" $out "[code-it-xs] [--prompt] [fix the tests] [--continue]"
 $out = Run-XS '& $x -c ''fix the tests'' --model m'
 Assert-Contains "a prompt goes first to claude as is" $out "[code-it-xs] [fix the tests] [--model] [m]"
 $out = Run-XS '& $x --model m'

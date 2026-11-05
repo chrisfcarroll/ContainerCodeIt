@@ -39,7 +39,7 @@ $script:CodeItClaudeArgs = @(
 
 $script:CodeItOpenCodeArgs = @(
     # OpenCode, the default agent
-    'run', 'mini', '--standalone', '--server', '--model', '--agent', '--prompt',
+    'run', '--standalone', '--server', '--model', '--agent', '--prompt',
     '--continue', '-c', '--session', '--format', '--file', '--help', 'text', 'json'
 )
 

@@ -78,7 +78,7 @@ esac
 # The prompt goes first to the agent. OpenCode reads a bare argument as a project
 # directory, so it needs --prompt.
 if [[ -n "$prompt" ]]; then
-    if [[ "$agent" == opencode ]]; then agent_args=(mini --prompt "$prompt" "${agent_args[@]}")
+    if [[ "$agent" == opencode ]]; then agent_args=(--prompt "$prompt" "${agent_args[@]}")
     else agent_args=("$prompt" "${agent_args[@]}")
     fi
 fi
