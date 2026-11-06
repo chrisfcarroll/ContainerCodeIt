@@ -158,7 +158,7 @@
 #   - The prompt and any pass-through arguments are translated into each agent's own
 #     command line, from the AGENT_CMD_* templates in agents/NAME/config: --prompt
 #     becomes `claude PROMPT` or `opencode --prompt PROMPT`, and with --headless it
-#     becomes `claude -p PROMPT` or `opencode run PROMPT`
+#     becomes `claude -p PROMPT` or `opencode run --standalone PROMPT`
 #   - SAVE-DIR/run-args (default ~/.config/code-it/run-args), if it exists, holds run
 #     arguments for every run, like devcontainer.json's runArgs: one argument per line,
 #     not quoted; blank lines and lines starting with # are ignored. e.g.
