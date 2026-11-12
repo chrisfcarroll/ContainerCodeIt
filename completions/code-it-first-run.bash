@@ -15,7 +15,7 @@ _code_it_first_run() {
         --save-dir|-s|--work-dir|-w|--dockerfile-dir|--code-it-build)
             COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
         --runtime|-r)
-            COMPREPLY=( $(compgen -W "docker container" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "docker container wslc" -- "$cur") ); return ;;
         --toolchain|-t)
             COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh" -- "$cur") ); return ;;
         --agents|-a)

@@ -12,7 +12,7 @@ _code_it_doctor() {
 
     case "$prev" in
         --runtime|-r)
-            COMPREPLY=( $(compgen -W "docker container" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "docker container wslc" -- "$cur") ); return ;;
         --save-dir|-s|--repo|--code-it)
             COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
         --image|-i|--branch)

@@ -16,7 +16,7 @@ _code_it_build() {
         --dockerfile-dir)
             COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
         --runtime|-r)
-            COMPREPLY=( $(compgen -W "docker container" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "docker container wslc" -- "$cur") ); return ;;
         --image|-i)
             COMPREPLY=( $(compgen -W "$(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
         --toolchain|-t|--stack)

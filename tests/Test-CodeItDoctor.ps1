@@ -141,7 +141,7 @@ $clearVars = @('TMUX', 'TERM_PROGRAM', 'LC_TERMINAL', 'ITERM_SESSION_ID', 'GHOST
 
 # Invoke-Doctor ARGS VARS: run the doctor in a child pwsh with the stubs first on the
 # PATH, the terminal variables cleared, and VARS (a hashtable) set.
-function Invoke-Doctor([string[]]$doctorArgs, [hashtable]$vars = @{}) {
+function Invoke-Doctor([string[]]$doctorArgs, [hashtable]$vars = @{}, [string]$runtime = 'docker') {
     $saved = @{}
     $all = $clearVars + @('PATH', 'HOME', 'CODE_IT_DOCTOR_TTY', 'STUB_CLIPBOARD', 'STUB_LOG',
         'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL') + @($vars.Keys)
@@ -159,7 +159,7 @@ function Invoke-Doctor([string[]]$doctorArgs, [hashtable]$vars = @{}) {
         Set-Content -Path $tty -Value '' -NoNewline
         Set-Content -Path $log -Value '' -NoNewline
         Set-Content -Path $clipboard -Value 'precious' -NoNewline
-        $out = & $pwshExe -NoProfile -File $doctor -runtime docker -saveDir $saveDir @doctorArgs 2>&1 | Out-String
+        $out = & $pwshExe -NoProfile -File $doctor -runtime $runtime -saveDir $saveDir @doctorArgs 2>&1 | Out-String
         return @{ out = $out; code = $LASTEXITCODE }
     } finally {
         foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
@@ -287,6 +287,47 @@ Assert "-fix works on its own branch" ((git -C $repoA rev-parse --abbrev-ref HEA
 $repoB = Join-Path $tmp 'repo-b'; New-Repo $repoB
 $r = Invoke-Doctor @('-noLiveTest', '-repo', $repoB, '-codeIt', $stubCi, 'it broke') @{ TERM_PROGRAM = 'WezTerm'; STUB_CODE_IT_EXIT = '3' }
 Assert "-fix propagates code-it's exit code" ($r.code -eq 3)
+
+# ---------------------------------------------------------------------------
+"8. wslc, WSL's own container CLI: reachable if it can list its images"
+$wslcBin = Join-Path $tmp 'bin-wslc'
+$null = New-Item -ItemType Directory -Force -Path $wslcBin
+if ($onWindows) {
+    Set-Content -Path (Join-Path $wslcBin 'wslc.cmd') -Value @'
+@echo off
+if "%~1"=="--version" echo wslc 2.9.4.0-stub& goto :eof
+if "%~1"=="image" if "%~2"=="list" (
+    if defined STUB_WSLC_DOWN exit /b 1
+    echo {"Repository":"code-it-alpine-dotnet-node","Tag":"latest"}
+    goto :eof
+)
+if "%~1"=="image" if "%~2"=="inspect" echo [{"Config":{"Labels":{"code-it.toolchains":"dotnet,node"}}}]& goto :eof
+if "%~1"=="run" echo set -g set-clipboard on& goto :eof
+'@
+} else {
+    Set-Content -Path (Join-Path $wslcBin 'wslc') -Value @'
+#!/bin/sh
+case "$1" in
+    --version) echo "wslc 2.9.4.0-stub" ;;
+    image)
+        case "$2" in
+            list)    [ -z "${STUB_WSLC_DOWN:-}" ] || exit 1
+                     echo '{"Repository":"code-it-alpine-dotnet-node","Tag":"latest"}' ;;
+            inspect) echo '[{"Config":{"Labels":{"code-it.toolchains":"dotnet,node"}}}]' ;;
+        esac ;;
+    run) printf '%s\n' "set -g set-clipboard on" ;;
+esac
+'@
+    chmod +x (Join-Path $wslcBin 'wslc')
+}
+$wslcPath = "$wslcBin$sep$bin$sep$env:PATH"
+$r = Invoke-Doctor @('-noLiveTest') @{ PATH = $wslcPath; TERM_PROGRAM = 'WezTerm' } 'wslc'
+Assert-Contains "wslc: its version is shown" $r.out 'wslc: wslc 2.9.4.0-stub'
+Assert-Contains "wslc: reachable" $r.out 'wslc can reach its WSL container session'
+Assert-Contains "wslc: the image is found" $r.out 'image code-it-alpine-dotnet-node exists'
+$r = Invoke-Doctor @('-noLiveTest') @{ PATH = $wslcPath; TERM_PROGRAM = 'WezTerm'; STUB_WSLC_DOWN = '1' } 'wslc'
+Assert-Contains "wslc: unreachable is a problem" $r.out 'wslc cannot reach its WSL container session'
+Assert-Contains "wslc: says to update WSL" $r.out 'wsl --update'
 
 # ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $tmp -EA Silent

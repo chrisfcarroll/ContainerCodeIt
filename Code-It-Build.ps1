@@ -60,7 +60,7 @@
     own directory.
 
 .PARAMETER runtime
-    Container runtime to use: "docker" or "container". Default: auto-detected.
+    Container runtime to use: "docker", "container" or "wslc". Default: auto-detected.
 
 .PARAMETER dryRun
     Print the build command without executing it.

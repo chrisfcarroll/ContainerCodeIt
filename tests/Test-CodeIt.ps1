@@ -122,6 +122,76 @@ esac
     chmod +x (Join-Path $stubContainer 'container')
 }
 
+# Stub of WSL's container CLI. Like the real wslc, its image list --format json is one
+# compact object per line and its image inspect is a pretty-printed JSON array, with
+# no Go templates.
+$stubWslc = Join-Path $tmp 'stub-wslc'
+$null = New-Item -ItemType Directory -Force -Path $stubWslc
+if ($onWindows) {
+    Set-Content -Path (Join-Path $stubWslc 'wslc.cmd') -Value @'
+@echo off
+set "T=dotnet,node"
+if defined STUB_IMAGE_TOOLCHAINS set "T=%STUB_IMAGE_TOOLCHAINS%"
+if "%~1"=="image" if "%~2"=="list" (
+    if defined STUB_IMAGES_FAIL exit /b 1
+    echo {"Containers":0,"Id":"abc123","Repository":"code-it-alpine-dotnet-node","Size":"1.2GB","Tag":"latest"}
+    goto :eof
+)
+if "%~1"=="image" if "%~2"=="inspect" (
+    if defined STUB_WSLC_NO_IMAGE echo []& exit /b 1
+    echo [
+    echo     {
+    echo         "Config": {
+    echo             "Labels": {
+    echo                 "code-it.agent-binaries": "%STUB_IMAGE_AGENT_BINARIES%",
+    echo                 "code-it.agents": "%STUB_IMAGE_AGENTS%",
+    echo                 "code-it.locale": "en_GB.UTF-8",
+    echo                 "code-it.toolchains": "%T%"
+    echo             }
+    echo         },
+    echo         "Id": "sha256:abc123"
+    echo     }
+    echo ]
+    goto :eof
+)
+if "%~1"=="build" echo STUB-WSLC-BUILD %*& goto :eof
+if "%~1"=="run" echo STUB-WSLC-RUN %*& goto :eof
+echo stub wslc: %*
+'@
+} else {
+    Set-Content -Path (Join-Path $stubWslc 'wslc') -Value @'
+#!/bin/sh
+case "$1" in
+    image)  case "$2" in
+                list)    [ -n "$STUB_IMAGES_FAIL" ] && exit 1
+                         echo '{"Containers":0,"Id":"abc123","Repository":"code-it-alpine-dotnet-node","Size":"1.2GB","Tag":"latest"}' ;;
+                inspect) [ -n "$STUB_WSLC_NO_IMAGE" ] && { echo "[]"; exit 1; }
+                         cat <<JSON
+[
+    {
+        "Config": {
+            "Labels": {
+                "code-it.agent-binaries": "${STUB_IMAGE_AGENT_BINARIES-}",
+                "code-it.agents": "${STUB_IMAGE_AGENTS-}",
+                "code-it.locale": "en_GB.UTF-8",
+                "code-it.toolchains": "${STUB_IMAGE_TOOLCHAINS-dotnet,node}"
+            }
+        },
+        "Id": "sha256:abc123"
+    }
+]
+JSON
+                         ;;
+                *)       echo "stub wslc: $*" ;;
+            esac ;;
+    build)  echo "STUB-WSLC-BUILD $*" ;;
+    run)    echo "STUB-WSLC-RUN $*"; printf '[%s]' "$@"; echo ;;
+    *)      echo "stub wslc: $*" ;;
+esac
+'@
+    chmod +x (Join-Path $stubWslc 'wslc')
+}
+
 # A minimal PATH with git but no docker, to test the missing-docker branch
 # hermetically even on machines where docker is installed. On Windows, git's own
 # directory plus System32 serves; elsewhere, symlink the needed tools into a
@@ -1635,7 +1705,7 @@ Assert "completion script loads" ($r.code -eq 0 -or $null -eq $r.code)
 Assert-Contains "-agentArgs completes claude flags" $r.out 'CLAUDE:--model'
 Assert-Contains "-agentArgs completes opencode (v2) flags" $r.out 'OPENCODE:--standalone'
 Assert-Contains "-agent codex completes its flags" $r.out 'CODEX:--model'
-Assert-Contains "-runtime completes its values" $r.out 'RUNTIME:docker container'
+Assert-Contains "-runtime completes its values" $r.out 'RUNTIME:docker container wslc'
 Assert-Contains "-locale completes like-host" $r.out 'LOCALE:like-host C.UTF-8'
 
 # ---------------------------------------------------------------------------
@@ -1860,6 +1930,79 @@ if (Get-Module -ListAvailable PSScriptAnalyzer) {
 } else {
     "  skip: 5.1 compatibility analysis (Install-Module PSScriptAnalyzer to run it)"
 }
+
+# ---------------------------------------------------------------------------
+"25. wslc, WSL's own container CLI, as a runtime"
+# Section 24 reuses `$sep for the directory separator, so name the PATH's own here
+$wslcPath = "$stubWslc$([IO.Path]::PathSeparator)$stubPath"
+# A save dir of its own, untouched by the sections before
+$wslcSave = Join-Path $tmp 'save-wslc'
+$null = New-Item -ItemType Directory -Force -Path $wslcSave
+$wslcArgs = @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $wslcSave)
+$r = Invoke-Scenario $codeIt $wslcArgs $wslcPath
+Assert-Contains "docker is preferred over wslc" $r.out 'Using container runtime: docker'
+$r = Invoke-Scenario $codeIt (@('-runtime', 'wslc') + $wslcArgs) $wslcPath
+Assert "-runtime wslc exit code 0" ($r.code -eq 0)
+Assert-Contains "-runtime wslc forces wslc" $r.out 'Using container runtime: wslc'
+Assert-Contains "wslc run command" $r.out 'wslc run -it'
+Assert-Contains "wslc runs the image it listed" $r.out 'code-it-alpine-dotnet-node:latest'
+Assert "wslc gets no --memory (WSL's settings own it)" (-not $r.out.Contains('--memory'))
+$r = Invoke-Scenario $codeIt @('-runtime', 'wslc', '-WorkDirToMount', $scriptDir, '-saveDir', $wslcSave) $wslcPath
+Assert-Contains "wslc is run, not docker" $r.out 'STUB-WSLC-RUN'
+$env:STUB_IMAGES_FAIL = '1'
+try { $r = Invoke-Scenario $codeIt (@('-runtime', 'wslc') + $wslcArgs) $wslcPath } finally { $env:STUB_IMAGES_FAIL = $null }
+Assert "wslc: failure to list images fails" ($r.code -ne 0)
+Assert-Contains "wslc: failure to list images asks if it is running" $r.out 'Could not list wslc images'
+$env:STUB_IMAGE_AGENTS = 'claude'
+try { $r = Invoke-Scenario $codeIt (@('-runtime', 'wslc', '-agent', 'opencode') + $wslcArgs) $wslcPath }
+finally { $env:STUB_IMAGE_AGENTS = $null }
+Assert "wslc: image without the chosen agent fails" ($r.code -ne 0)
+Assert-Contains "wslc: agents label read from JSON" $r.out "does not contain agent 'opencode'; it has: claude"
+$env:STUB_IMAGE_TOOLCHAINS = 'dotnet'
+try { $r = Invoke-Scenario $codeIt (@('-runtime', 'wslc', '-toolchain', 'node,bun', '-image', 'code-it-alpine-dotnet-node') + $wslcArgs) $wslcPath }
+finally { $env:STUB_IMAGE_TOOLCHAINS = $null }
+Assert-Contains "wslc: toolchains label read from JSON" $r.out "looks built for toolchains 'dotnet'"
+$env:BAR = 'host-bar'
+try {
+    $r = Invoke-ScenarioCommand "& '$codeIt' -runtime wslc -WorkDirToMount '$scriptDir' -saveDir '$wslcSave' -e 'BAR','UNSET_NAME_FOR_TEST','FOO=1'" $wslcPath
+} finally { $env:BAR = $null }
+Assert-Contains "wslc: bare -e NAME gets the host's value" $r.out '-e BAR=host-bar -e FOO=1 code-it-alpine-dotnet-node:latest'
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $scriptDir, '-runtime', 'wslc') $wslcPath
+Assert-Contains "Code-It-Build -runtime wslc builds with wslc" $r.out 'STUB-WSLC-BUILD build --build-arg'
+Assert-Contains "wslc build is labelled" $r.out 'code-it.toolchains=dotnet'
+$r = Invoke-Scenario $codeIt (@('-runtime', 'bogus') + $wslcArgs) $stubPath
+Assert-Contains "unknown runtime lists wslc" $r.out "'docker', 'container' or 'wslc'"
+
+# The library helpers, in-process, with wslc as a function
+function wslc {
+    $global:LASTEXITCODE = 0
+    if ($args[0] -eq 'image' -and $args[1] -eq 'list') {
+        'some notice that is not JSON'
+        '{"Containers":0,"Repository":"code-it-alpine-go","Tag":"latest"}'
+        '{"Containers":0,"Repository":"other","Tag":"v1"}'
+        return
+    }
+    if ($script:wslcMissing) { $global:LASTEXITCODE = 1; return '[]' }
+    '['
+    '    {'
+    '        "Config": {'
+    '            "Labels": {'
+    '                "code-it.agents": "opencode,claude",'
+    '                "code-it.toolchains": "go,rust"'
+    '            }'
+    '        }'
+    '    }'
+    ']'
+}
+$script:wslcMissing = $false
+Assert "Get-CodeItImageList wslc reads repo:tag from JSON" ((@(Get-CodeItImageList 'wslc') -join '|') -eq 'code-it-alpine-go:latest|other:v1')
+Assert "Get-CodeItImageLabel wslc reads a label from JSON" ((Get-CodeItImageLabel 'wslc' 'img:latest' 'code-it.toolchains') -eq 'go,rust')
+Assert "Get-CodeItImageLabel wslc reads the label asked for" ((Get-CodeItImageLabel 'wslc' 'img:latest' 'code-it.agents') -eq 'opencode,claude')
+Assert "Get-CodeItImageLabel wslc gives nothing for a missing label" ((Get-CodeItImageLabel 'wslc' 'img:latest' 'code-it.nope') -eq '')
+Assert "Get-CodeItImageToolchain wslc reads the toolchains label" ((Get-CodeItImageToolchain 'wslc' 'img:latest') -eq 'go,rust')
+$script:wslcMissing = $true
+Assert "Get-CodeItImageLabel wslc: a missing image gives nothing" ((Get-CodeItImageLabel 'wslc' 'img:latest' 'code-it.toolchains') -eq '')
+Remove-Item Function:\wslc
 
 # ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $tmp -EA Silent

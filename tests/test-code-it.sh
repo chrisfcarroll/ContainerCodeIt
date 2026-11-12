@@ -75,6 +75,48 @@ esac
 EOF
 chmod +x "$stub_container/container"
 
+# Stub of WSL's container CLI. Like the real wslc, its image list --format json is one
+# compact object per line and its image inspect is a pretty-printed JSON array, with
+# no Go templates.
+stub_wslc="$tmp/stub-wslc"
+mkdir -p "$stub_wslc"
+cat > "$stub_wslc/wslc" <<'EOF'
+#!/bin/sh
+case "$1" in
+    image)  case "$2" in
+                list)    [ -n "${STUB_IMAGES_FAIL:-}" ] && exit 1
+                         [ "$3 $4" = "--format json" ] || { echo "REPOSITORY  TAG"; exit 0; }
+                         echo '{"Containers":0,"CreatedAt":"2026-11-01 10:00:00","CreatedSince":"2 weeks ago","Id":"abc123","Repository":"code-it-alpine-dotnet-node","Size":"1.2GB","Tag":"latest"}' ;;
+                inspect) [ -n "${STUB_WSLC_NO_IMAGE:-}" ] && { echo "Image not found: $3" >&2; echo "[]"; exit 1; }
+                         cat <<JSON
+[
+    {
+        "Architecture": "amd64",
+        "Config": {
+            "Cmd": null,
+            "Labels": {
+                "code-it.agent-binaries": "${STUB_IMAGE_AGENT_BINARIES-}",
+                "code-it.agents": "${STUB_IMAGE_AGENTS-}",
+                "code-it.locale": "en_GB.UTF-8",
+                "code-it.toolchains": "${STUB_IMAGE_TOOLCHAINS-dotnet,node}"
+            },
+            "WorkingDir": ""
+        },
+        "Id": "sha256:abc123",
+        "RepoTags": ["$3"]
+    }
+]
+JSON
+                         ;;
+                *)       echo "stub wslc: $*" ;;
+            esac ;;
+    build)  echo "STUB-WSLC-BUILD $*" ;;
+    run)    echo "STUB-WSLC-RUN $*"; printf '[%s]' "$@"; echo ;;
+    *)      echo "stub wslc: $*" ;;
+esac
+EOF
+chmod +x "$stub_wslc/wslc"
+
 stub_darwin="$tmp/stub-darwin"
 mkdir -p "$stub_darwin"
 cat > "$stub_darwin/uname" <<'EOF'
@@ -279,6 +321,8 @@ case "$(uname -s)" in
         assert_contains "suggests an install link" "$out" "docs.docker.com"
         out=$(PATH="$stub_darwin:$cleanbin" "$code_it" "${common_args[@]}" 2>&1)
         assert_contains "macOS suggestion mentions Apple container" "$out" "Apple container"
+        out=$(PATH="$stub_wslc:$cleanbin" "$code_it" "${common_args[@]}" 2>&1)
+        assert_contains "without docker, wslc is detected" "$out" "Using container runtime: wslc"
         ;;
 esac
 
@@ -1057,7 +1101,7 @@ completions_out=$(
 )
 assert_contains "completes launcher options" "$completions_out" "OPTS:--headless"
 assert_contains "completes --no-agent and --zsh" "$completions_out" "NOAGENT:--no-agent"
-assert_contains "completes --runtime values" "$completions_out" "RUNTIME:docker container"
+assert_contains "completes --runtime values" "$completions_out" "RUNTIME:docker container wslc"
 assert_contains "offers nothing for a free-text --prompt" "$completions_out" "FREETEXT:
 "
 assert_contains "completes --env and --env-file" "$completions_out" "RUNOPTS:--env --env-file"
@@ -1814,6 +1858,63 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" --dry-run --work-dir "$tmp/work-paren
 assert "dry-run with a nested work dir exit code" "$?"
 assert_contains "nested work dir mounts at /work/<parent>/<name>" "$out" "work-parent/work-dir:/work/work-parent/work-dir"
 assert_contains "nested work dir env tells go.sh where to cd" "$out" 'CODE_IT_WORK_DIR="/work/work-parent/work-dir"'
+
+# ---------------------------------------------------------------------------
+echo "24. wslc, WSL's own container CLI, as a runtime"
+# Detection prefers docker when both are present
+out=$(PATH="$stub_wslc:$stub_docker:$PATH" "$code_it" "${common_args[@]}")
+assert_contains "docker is preferred over wslc" "$out" "Using container runtime: docker"
+# Forced runtime: its images are listed from JSON, and the run command is wslc's
+out=$(PATH="$stub_wslc:$stub_docker:$PATH" "$code_it" --runtime wslc "${common_args[@]}" 2>&1)
+assert "--runtime wslc exit code 0" "$?"
+assert_contains "--runtime wslc forces wslc" "$out" "Using container runtime: wslc"
+assert_contains "wslc run command" "$out" "wslc run -it --rm"
+assert_contains "wslc runs the image it listed" "$out" "code-it-alpine-dotnet-node:latest"
+out=$(PATH="$stub_wslc:$stub_docker:$PATH" "$code_it" -r wslc --work-dir "$script_dir" --save-dir "$save" 2>&1)
+assert_contains "wslc is run, not docker" "$out" "STUB-WSLC-RUN"
+case "$out" in
+    *"[--memory]"*) assert "wslc gets no --memory (WSL's settings own it)" 1 ;;
+    *)              assert "wslc gets no --memory (WSL's settings own it)" 0 ;;
+esac
+# A failure to list images is reported
+out=$(STUB_IMAGES_FAIL=1 PATH="$stub_wslc:$PATH" "$code_it" -r wslc "${common_args[@]}" 2>&1)
+[[ "$?" != "0" ]]; assert "wslc: failure to list images fails" "$?"
+assert_contains "wslc: failure to list images asks if it is running" "$out" "Could not list wslc images"
+# Labels are read from wslc's inspect JSON
+out=$(STUB_IMAGE_AGENTS=claude PATH="$stub_wslc:$PATH" "$code_it" -r wslc --agent opencode "${common_args[@]}" 2>&1)
+[[ "$?" != "0" ]]; assert "wslc: image without the chosen agent fails" "$?"
+assert_contains "wslc: agents label read from JSON" "$out" "does not contain agent 'opencode'; it has: claude"
+out=$(STUB_IMAGE_TOOLCHAINS=dotnet PATH="$stub_wslc:$PATH" "$code_it" -r wslc --toolchain node,bun --image code-it-alpine-dotnet-node "${common_args[@]}" 2>&1)
+assert_contains "wslc: toolchains label read from JSON" "$out" "looks built for toolchains 'dotnet'"
+# The library helpers, directly
+[[ "$(PATH="$stub_wslc:$PATH" ci_image_list wslc)" == "code-it-alpine-dotnet-node:latest" ]]
+assert "ci_image_list wslc reads repo:tag from JSON" "$?"
+[[ "$(STUB_IMAGE_TOOLCHAINS=go,rust PATH="$stub_wslc:$PATH" ci_image_label wslc img:latest code-it.toolchains)" == "go,rust" ]]
+assert "ci_image_label wslc reads a label from JSON" "$?"
+[[ "$(PATH="$stub_wslc:$PATH" ci_image_label wslc img:latest code-it.locale)" == "en_GB.UTF-8" ]]
+assert "ci_image_label wslc reads the label asked for" "$?"
+[[ -z "$(PATH="$stub_wslc:$PATH" ci_image_label wslc img:latest code-it.nope)" ]]
+assert "ci_image_label wslc gives nothing for a missing label" "$?"
+[[ "$(STUB_IMAGE_AGENT_BINARIES=claude=/home/agent1/.local/bin/claude PATH="$stub_wslc:$PATH" ci_image_agent_binary wslc img:latest claude)" == "/home/agent1/.local/bin/claude" ]]
+assert "ci_image_agent_binary wslc reads the binaries label" "$?"
+PATH="$stub_wslc:$PATH" ci_image_exists wslc img:latest
+assert "ci_image_exists wslc: present" "$?"
+STUB_WSLC_NO_IMAGE=1 PATH="$stub_wslc:$PATH" ci_image_exists wslc img:latest
+[[ "$?" != "0" ]]; assert "ci_image_exists wslc: missing" "$?"
+[[ -z "$(STUB_WSLC_NO_IMAGE=1 PATH="$stub_wslc:$PATH" ci_image_toolchain wslc img:latest)" ]]
+assert "ci_image_toolchain wslc: a missing image gives nothing" "$?"
+# A bare -e NAME gets the host's value from code-it, as for Apple's container
+out=$(BAR=host-bar PATH="$stub_wslc:$PATH" "$code_it" -r wslc --work-dir "$script_dir" --save-dir "$save" \
+    -e BAR -e UNSET_NAME_FOR_TEST -e FOO=1 2>&1)
+assert_contains "wslc: bare -e NAME gets the host's value" "$out" "[-e][BAR=host-bar][-e][FOO=1]"
+assert_contains "wslc: printout shows the bare name" "$out" "-e BAR \\"
+# code-it-build builds with wslc
+out=$(PATH="$stub_wslc:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$script_dir" --runtime wslc 2>&1)
+assert_contains "code-it-build --runtime wslc builds with wslc" "$out" "STUB-WSLC-BUILD build --build-arg"
+assert_contains "wslc build is labelled" "$out" "--label code-it.toolchains=dotnet"
+# The unknown-runtime message names wslc
+out=$(PATH="$stub_docker:$PATH" "$code_it" --runtime bogus "${common_args[@]}" 2>&1)
+assert_contains "unknown runtime lists wslc" "$out" "'docker', 'container' or 'wslc'"
 
 # ---------------------------------------------------------------------------
 echo

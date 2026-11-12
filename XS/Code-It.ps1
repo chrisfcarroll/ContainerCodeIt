@@ -28,7 +28,8 @@
 .PARAMETER build
     Build the image even if it exists. Alias: -b
 .PARAMETER runtime
-    docker, or container (Apple's). Default: container on macOS if installed, else docker. Alias: -r
+    docker, container (Apple's) or wslc (WSL's). Default: container on macOS if installed,
+    else docker, else wslc on Windows. Alias: -r
 .PARAMETER locale
     The container's LANG, e.g. en_GB.UTF-8 or en-GB. Default: the host's. Alias: -l
 .PARAMETER runArgs
@@ -91,10 +92,11 @@ if ($agent -eq 'opencode' -and $agentArgs.Count -and -not $agentArgs[0].StartsWi
 if (-not $runtime) {
     $runtime = if ($IsMacOS -and (Get-Command container -EA Ignore)) { 'container' }
                elseif (Get-Command docker -EA Ignore) { 'docker' }
+               elseif (Get-Command wslc -EA Ignore) { 'wslc' }
                elseif (Get-Command container -EA Ignore) { 'container' }
-    if (-not $runtime) { Write-Warning "No container runtime found: install Docker, or on macOS Apple's container"; exit 1 }
+    if (-not $runtime) { Write-Warning "No container runtime found: install Docker, or on macOS Apple's container, or on Windows WSL's wslc"; exit 1 }
 }
-if ($runtime -notin 'docker', 'container') { Write-Warning "Unknown runtime '$runtime': use docker or container"; exit 1 }
+if ($runtime -notin 'docker', 'container', 'wslc') { Write-Warning "Unknown runtime '$runtime': use docker, container or wslc"; exit 1 }
 
 # The container's LANG: -locale, else the host's culture. en-GB, en_GB.UTF-8 and
 # en_GB@rg=gbzzzz all become en_GB.UTF-8.

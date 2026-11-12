@@ -305,6 +305,32 @@ echo y > "$repo_b/dirty"
 run_doctor TERM_PROGRAM=WezTerm -- --no-live-test --repo "$repo_b" --code-it "$stub_ci" --branch doctor/other "it broke" >/dev/null
 [[ "$?" != 0 ]]; assert "--fix refuses a dirty repo" "$?"
 
+# wslc, WSL's own container CLI: reachable if it can list its images
+wslc_bin="$tmp/bin-wslc"
+mkdir -p "$wslc_bin"
+cat > "$wslc_bin/wslc" <<'EOF'
+#!/bin/sh
+case "$1" in
+    --version) echo "wslc 2.9.4.0-stub" ;;
+    image)
+        case "$2" in
+            list)    [ -z "${STUB_WSLC_DOWN:-}" ] || exit 1
+                     echo '{"Repository":"code-it-alpine-dotnet-node","Tag":"latest"}' ;;
+            inspect) echo '[{"Config":{"Labels":{"code-it.toolchains":"dotnet,node"}}}]' ;;
+        esac ;;
+    run) printf '%s\n' "set -g set-clipboard on" ;;
+esac
+EOF
+chmod +x "$wslc_bin/wslc"
+wslc_path="PATH=$wslc_bin:$bin:/usr/bin:/bin:/usr/sbin:/sbin"
+out=$(run_doctor "$wslc_path" STUB_UNAME=Linux -- --runtime wslc --no-live-test)
+assert_contains "wslc: its version is shown" "$out" "wslc: wslc 2.9.4.0-stub"
+assert_contains "wslc: reachable" "$out" "ok:      wslc can reach its WSL container session"
+assert_contains "wslc: the image is found" "$out" "ok:      image code-it-alpine-dotnet-node exists"
+out=$(run_doctor "$wslc_path" STUB_UNAME=Linux STUB_WSLC_DOWN=1 -- --runtime wslc --no-live-test)
+assert_contains "wslc: unreachable is a problem" "$out" "PROBLEM: wslc cannot reach its WSL container session"
+assert_contains "wslc: says to update WSL" "$out" "wsl --update"
+
 out=$(run_doctor -- --bogus); rc=$?
 [[ "$rc" != 0 ]]; assert "an unknown option fails" "$?"
 

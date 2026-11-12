@@ -10,6 +10,7 @@
     Picks a container runtime automatically:
     - On macOS, uses the Apple container CLI (container) if installed
     - Otherwise uses Docker if installed
+    - Otherwise, on Windows, uses WSL's own container CLI (wslc) if installed
     - Otherwise suggests the best runtime to install for the current platform
     Use -runtime to force one.
 
@@ -77,7 +78,7 @@
     image (an error if it does not exist).
 
 .PARAMETER runtime
-    Container runtime to use: "docker" or "container".
+    Container runtime to use: "docker", "container" or "wslc".
     Default: auto-detected as described above.
 
 .PARAMETER prompt
@@ -252,7 +253,7 @@ param (
     [switch]$listAgents     = $false,
     [string]$saveDir        = "$HOME/.config/code-it",
     [string]$image          = "",
-    [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container') | Where-Object { $_ -like "$wordToComplete*" } })]
+    [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container', 'wslc') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$runtime        = "",
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('like-host', 'C.UTF-8') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$locale         = 'like-host',
@@ -455,6 +456,8 @@ if ($null -eq $runtime) { exit 1 }
 # selection below can use them, and a broken daemon is reported before first-run.
 if ($runtime -eq "docker") {
     $validImages = (docker images --format "{{.Repository}}:{{.Tag}}")
+} elseif ($runtime -eq "wslc") {
+    $validImages = Get-CodeItWslcImageList
 } else {
     $validImages = (container image ls)
 }
@@ -856,8 +859,8 @@ if ($noWait) {
 
 # Extra run arguments: <saveDir>/run-args, then -environment, -envFile and -runArgs.
 # They follow Code-It's own, so they can override them. Docker reads a bare `-e NAME`
-# from the host's environment itself; for the Apple container CLI, Code-It does, keeping
-# the printed command free of the value.
+# from the host's environment itself; for the Apple container CLI and wslc, Code-It
+# does, keeping the printed command free of the value.
 $extraRunArgs = Get-CodeItRunArgs $runArgsFile
 if ($extraRunArgs.Count -gt 0) { "    Using run arguments from $runArgsFile" }
 $extraRunArgs = @($extraRunArgs) + @($cliRunArgs)
@@ -871,7 +874,7 @@ $runExtraArgs = @()
 $envFlag = $null
 foreach ($a in $extraRunArgs) {
     if ($envFlag) {
-        if ($runtime -eq 'container' -and -not $a.Contains('=') -and (Test-CodeItEnvSpec $a)) {
+        if (($runtime -in 'container', 'wslc') -and -not $a.Contains('=') -and (Test-CodeItEnvSpec $a)) {
             $hostValue = [Environment]::GetEnvironmentVariable($a)
             if ($null -ne $hostValue) { $runExtraArgs += @($envFlag, "$a=$hostValue") }
         } else {

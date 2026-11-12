@@ -181,15 +181,28 @@ ci_toolchain_include() {
     return 0
 }
 
+# ci_image_label RUNTIME IMAGE LABEL: echo IMAGE's LABEL, or the runtime's own (error)
+# output, or nothing. wslc's image inspect has no Go templates, only JSON
+# ([{"Config":{"Labels":{...}}}]); code-it's label values never contain a '"', so the
+# value is read from the JSON with sed rather than needing jq.
+ci_image_label() {
+    local runtime="$1" image="$2" label="$3" key
+    case "$runtime" in
+        docker|container)
+            "$runtime" image inspect --format "{{ index .Config.Labels \"$label\" }}" "$image" 2>/dev/null || true ;;
+        wslc)
+            key="${label//./\\.}"
+            wslc image inspect "$image" 2>/dev/null \
+                | sed -nE "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\\1/p" | head -n 1 || true ;;
+    esac
+}
+
 # ci_image_toolchain RUNTIME IMAGE: echo the comma-separated toolchains recorded on
 # IMAGE (its code-it.toolchains label, or the code-it-alpine-<chains> name), or
 # nothing if it cannot be told.
 ci_image_toolchain() {
     local runtime="$1" image="$2" chains=""
-    case "$runtime" in
-        docker)    chains=$(docker image inspect --format '{{ index .Config.Labels "code-it.toolchains" }}' "$image" 2>/dev/null || true) ;;
-        container) chains=$(container image inspect --format '{{ index .Config.Labels "code-it.toolchains" }}' "$image" 2>/dev/null || true) ;;
-    esac
+    chains=$(ci_image_label "$runtime" "$image" code-it.toolchains)
     # A runtime that does not know the format prints its own error text to stdout; keep
     # only a plausible comma-separated toolchain list.
     case "$chains" in
@@ -208,10 +221,7 @@ ci_image_toolchain() {
 # known agents count, so an unlabelled image or a runtime's own error text gives nothing.
 ci_image_agents() {
     local runtime="$1" image="$2" agents_dir="$3" raw="" a agents=""
-    case "$runtime" in
-        docker)    raw=$(docker image inspect --format '{{ index .Config.Labels "code-it.agents" }}' "$image" 2>/dev/null || true) ;;
-        container) raw=$(container image inspect --format '{{ index .Config.Labels "code-it.agents" }}' "$image" 2>/dev/null || true) ;;
-    esac
+    raw=$(ci_image_label "$runtime" "$image" code-it.agents)
     case "$raw" in
         *[!a-z0-9,-]*|"") return 0 ;;
     esac
@@ -228,10 +238,7 @@ ci_image_agents() {
 # existed) or the runtime's own error text came back instead.
 ci_image_agent_binary() {
     local runtime="$1" image="$2" agent="$3" raw="" entry
-    case "$runtime" in
-        docker)    raw=$(docker image inspect --format '{{ index .Config.Labels "code-it.agent-binaries" }}' "$image" 2>/dev/null || true) ;;
-        container) raw=$(container image inspect --format '{{ index .Config.Labels "code-it.agent-binaries" }}' "$image" 2>/dev/null || true) ;;
-    esac
+    raw=$(ci_image_label "$runtime" "$image" code-it.agent-binaries)
     [[ "$raw" =~ ^[a-z0-9-]+=/[^,=[:space:]]+(,[a-z0-9-]+=/[^,=[:space:]]+)*$ ]] || return 1
     for entry in ${raw//,/ }; do
         if [[ "${entry%%=*}" == "$agent" ]]; then
@@ -246,11 +253,22 @@ ci_image_list() {
     local runtime="$1"
     if [[ "$runtime" == "docker" ]]; then
         docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true
+    elif [[ "$runtime" == "wslc" ]]; then
+        ci_wslc_image_list 2>/dev/null || true
     else
         # Apple container's ls is newest first; NAME and TAG are the first two columns.
         # Skip a header row if there is one.
         container image ls 2>/dev/null | awk 'NF >= 2 && tolower($1) != "name" { print $1":"$2 }' || true
     fi
+}
+
+# ci_wslc_image_list: wslc's images as "repo:tag" lines, failing if wslc does. Its
+# table can shrink columns to fit the console, so read its JSON lines instead, one
+# compact {"Repository":"...","Tag":"...",...} object per image.
+ci_wslc_image_list() {
+    local out
+    out=$(wslc image list --format json) || return 1
+    printf '%s\n' "$out" | sed -nE 's/.*"Repository"[[:space:]]*:[[:space:]]*"([^"]*)".*"Tag"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1:\2/p'
 }
 
 # ci_find_superset_image RUNTIME REQUESTED_SPACE: echo the repo name of the
@@ -277,6 +295,7 @@ ci_image_exists() {
     case "$runtime" in
         docker)    docker image inspect "$image" >/dev/null 2>&1 ;;
         container) container image inspect "$image" >/dev/null 2>&1 ;;
+        wslc)      wslc image inspect "$image" >/dev/null 2>&1 ;;
         *)         return 1 ;;
     esac
 }
@@ -802,6 +821,8 @@ ci_resolve_locale() {
 
 # ci_detect_runtime REQUESTED: echo the runtime to use, warning and returning 1 if
 # none is found. On macOS prefer the Apple container CLI, then docker, then container.
+# Elsewhere prefer docker, then WSL's own container CLI (wslc, Windows only), then
+# container.
 ci_detect_runtime() {
     local runtime="$1" platform
     platform=$(uname -s)
@@ -811,6 +832,8 @@ ci_detect_runtime() {
                 runtime="container"
             elif command -v docker &>/dev/null; then
                 runtime="docker"
+            elif command -v wslc &>/dev/null; then
+                runtime="wslc"
             elif command -v container &>/dev/null; then
                 runtime="container"
             else
@@ -830,8 +853,11 @@ ci_detect_runtime() {
                         echo "       Fedora:        sudo dnf install docker" >&2
                         ;;
                     MINGW*|MSYS*|CYGWIN*)
-                        echo "On Windows, the best option is Docker Desktop with WSL2:" >&2
+                        echo "On Windows, the best options are:" >&2
+                        echo "  - Docker Desktop with WSL2:" >&2
                         echo "      https://docs.docker.com/desktop/setup/install/windows-install/" >&2
+                        echo "  - WSL's own container CLI, wslc (WSL 2.9.3 or later: wsl --update):" >&2
+                        echo "      https://learn.microsoft.com/windows/wsl/tutorials/wsl-containers" >&2
                         ;;
                     *)
                         echo "On $platform, try Docker: https://docs.docker.com/engine/install/" >&2
@@ -840,14 +866,14 @@ ci_detect_runtime() {
                 return 1
             fi
             ;;
-        docker|container)
+        docker|container|wslc)
             if ! command -v "$runtime" &>/dev/null; then
                 echo "Warning: Requested runtime '$runtime' not found. Please install it and ensure it is in your PATH." >&2
                 return 1
             fi
             ;;
         *)
-            echo "Warning: Unknown runtime '$runtime'. Valid values are 'docker' or 'container'." >&2
+            echo "Warning: Unknown runtime '$runtime'. Valid values are 'docker', 'container' or 'wslc'." >&2
             return 1
             ;;
     esac

@@ -190,8 +190,21 @@ function ConvertTo-CodeItNativeArgs([string[]]$argList, [bool]$legacy = (Test-Co
 
 # Get-CodeItImageLabel RUNTIME IMAGE LABEL: IMAGE's LABEL, trimmed, or the runtime's
 # own (error) output. docker's template quotes LABEL with Go's backquotes, not ",
-# because legacy argument passing (Windows PowerShell 5.1) would strip a ".
+# because legacy argument passing (Windows PowerShell 5.1) would strip a ". wslc's
+# image inspect has no Go templates: it prints [{"Config":{"Labels":{...}}}] as JSON.
 function Get-CodeItImageLabel([string]$runtime, [string]$image, [string]$label) {
+    if ($runtime -eq 'wslc') {
+        try {
+            $json = (wslc image inspect $image 2>$null) -join "`n"
+            if ($LASTEXITCODE -ne 0 -or -not $json) { return "" }
+            # Assigned first: Windows PowerShell 5.1 emits a JSON array as one object
+            $parsed = ConvertFrom-Json $json
+            $labels = @($parsed)[0].Config.Labels
+            if ($null -eq $labels) { return "" }
+            $p = $labels.PSObject.Properties[$label]
+            return $(if ($p) { "$($p.Value)".Trim() } else { "" })
+        } catch { return "" }
+    }
     if ($runtime -eq 'docker') {
         $format = '{{ index .Config.Labels `' + $label + '` }}'
         return "$(docker image inspect --format $format $image 2>$null)".Trim()
@@ -212,11 +225,29 @@ function Get-CodeItImageToolchain([string]$runtime, [string]$image) {
     return $chains
 }
 
+# Get-CodeItWslcImageList: wslc's images as "repo:tag" names, leaving $LASTEXITCODE as
+# wslc's. Its table can shrink columns to fit the console, so read its JSON lines
+# instead, one compact {"Repository":"...","Tag":"...",...} object per image.
+function Get-CodeItWslcImageList {
+    $lines = @(wslc image list --format json 2>$null)
+    $rc = $LASTEXITCODE
+    $names = @(foreach ($l in $lines) {
+        if ("$l".Trim() -notlike '{*') { continue }
+        try {
+            $o = ConvertFrom-Json $l
+            if ($o.Repository) { "$($o.Repository):$($o.Tag)" }
+        } catch { }
+    })
+    $global:LASTEXITCODE = $rc
+    return $names
+}
+
 # Get-CodeItImageList RUNTIME: existing image "repo:tag" names, most recent first.
 function Get-CodeItImageList([string]$runtime) {
     if ($runtime -eq 'docker') {
         return @(docker images --format '{{.Repository}}:{{.Tag}}' 2>$null)
     }
+    if ($runtime -eq 'wslc') { return @(Get-CodeItWslcImageList) }
     # Apple container's ls is newest first; NAME and TAG are the first two columns.
     # Skip a header row if there is one.
     return @(container image ls 2>$null | Where-Object { $_ -and $_ -notmatch '^\s*NAME\b' } | ForEach-Object {
@@ -270,8 +301,8 @@ function Get-CodeItImageAgentBinary([string]$runtime, [string]$image, [string]$a
 # Test-CodeItImageExists RUNTIME IMAGE: true if the runtime has the image.
 function Test-CodeItImageExists([string]$runtime, [string]$image) {
     try {
-        if ($runtime -eq 'docker') {
-            & docker image inspect $image *> $null
+        if ($runtime -in 'docker', 'wslc') {
+            & $runtime image inspect $image *> $null
             return ($LASTEXITCODE -eq 0)
         }
         & container image inspect $image *> $null
@@ -645,7 +676,9 @@ function Invoke-CodeItAdder([string]$name, [string]$branch, [string]$repo, [stri
 }
 
 # Detect / validate the container runtime. On macOS prefer the Apple container CLI,
-# then docker, then the container CLI; warn and return $null if none is usable.
+# then docker, then the container CLI. Elsewhere prefer docker, then WSL's own
+# container CLI (wslc, Windows only), then container. Warn and return $null if none
+# is usable.
 function Detect-CodeItRuntime([string]$runtime) {
     # $IsMacOS/$IsLinux are not defined in Windows PowerShell 5.1, so treat unset as false
     $onMacOS = $IsMacOS -eq $true
@@ -656,6 +689,9 @@ function Detect-CodeItRuntime([string]$runtime) {
         }
         elseif (Get-Command docker -EA Silent) {
             $runtime = "docker"
+        }
+        elseif (Get-Command wslc -EA Silent) {
+            $runtime = "wslc"
         }
         elseif (Get-Command container -EA Silent) {
             $runtime = "container"
@@ -676,14 +712,17 @@ function Detect-CodeItRuntime([string]$runtime) {
                 Write-Host "       Fedora:        sudo dnf install docker"
             }
             else {
-                Write-Host "On Windows, the best option is Docker Desktop with WSL2:"
+                Write-Host "On Windows, the best options are:"
+                Write-Host "  - Docker Desktop with WSL2:"
                 Write-Host "      https://docs.docker.com/desktop/setup/install/windows-install/"
+                Write-Host "  - WSL's own container CLI, wslc (WSL 2.9.3 or later: wsl --update):"
+                Write-Host "      https://learn.microsoft.com/windows/wsl/tutorials/wsl-containers"
             }
             return $null
         }
     }
-    elseif ($runtime -notin @("docker", "container")) {
-        Write-Warning "Unknown runtime '$runtime'. Valid values are 'docker' or 'container'."
+    elseif ($runtime -notin @("docker", "container", "wslc")) {
+        Write-Warning "Unknown runtime '$runtime'. Valid values are 'docker', 'container' or 'wslc'."
         return $null
     }
     elseif (-not (Get-Command $runtime -EA Silent)) {

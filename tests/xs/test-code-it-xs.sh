@@ -52,7 +52,7 @@ assert_not_contains() {
 # Stubs. Each runtime prints the arguments it was run with, one [arg] each.
 # `image inspect` succeeds unless STUB_NO_IMAGE is set.
 # ---------------------------------------------------------------------------
-for rt in docker container; do
+for rt in docker container wslc; do
     mkdir -p "$tmp/stub-$rt"
     cat > "$tmp/stub-$rt/$rt" <<EOF
 #!/bin/sh
@@ -224,6 +224,11 @@ assert_contains "Apple's container gets 3g of memory" "$out" "[--memory] [3g]"
 out=$(cd "$work" && echo n | HOME="$home" PATH="$tmp/stub-darwin:$tmp/stub-container:$tmp/stub-docker:$PATH" bash "$code_it" -r docker 2>&1)
 assert_contains "--runtime docker overrides" "$out" "STUB-docker [run]"
 assert_not_contains "docker gets no --memory" "$out" "--memory"
+out=$(cd "$work" && echo n | HOME="$home" PATH="$tmp/stub-wslc:$tmp/stub-docker:$PATH" bash "$code_it" -r wslc 2>&1)
+assert_contains "--runtime wslc uses WSL's container CLI" "$out" "STUB-wslc [run] [-it] [--rm]"
+assert_not_contains "wslc gets no --memory" "$out" "--memory"
+out=$(cd "$work" && echo n | HOME="$home" PATH="$tmp/stub-wslc:$tmp/stub-docker:$PATH" bash "$code_it" 2>&1)
+assert_contains "docker is preferred over wslc" "$out" "STUB-docker [run]"
 out=$(run_xs -r podman); rc=$?
 assert "an unknown runtime fails" "$([[ $rc -ne 0 ]]; echo $?)"
 

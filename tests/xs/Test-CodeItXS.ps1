@@ -32,7 +32,7 @@ function Assert-NotContains([string]$desc, [string]$haystack, [string]$needle) {
 
 # Stubs. Each runtime prints the arguments it was run with, one [arg] each.
 # `image inspect` succeeds unless STUB_NO_IMAGE is set.
-foreach ($rt in 'docker', 'container') {
+foreach ($rt in 'docker', 'container', 'wslc') {
     $dir = Join-Path $tmp "stub-$rt"
     $null = New-Item -ItemType Directory -Force $dir
     if ($onWindows) {
@@ -222,6 +222,9 @@ Assert-Contains "-image is run" $out "[my-image]"
 $out = Run-XS '& $x -r container' 'n' @{ PATH = "$tmp/stub-container$sep$env:PATH" }
 Assert-Contains "-runtime container uses Apple's container" $out "STUB-container [run]"
 Assert-Contains "Apple's container gets 3g of memory" $out "[--memory] [3g]"
+$out = Run-XS '& $x -r wslc' 'n' @{ PATH = "$tmp/stub-wslc$sep$env:PATH" }
+Assert-Contains "-runtime wslc uses WSL's container CLI" $out "STUB-wslc [run] [-it] [--rm]"
+Assert-NotContains "wslc gets no --memory" $out "--memory"
 $out = Run-XS '& $x -r podman; "rc=$LASTEXITCODE"'
 Assert-Contains "an unknown runtime fails" $out "rc=1"
 

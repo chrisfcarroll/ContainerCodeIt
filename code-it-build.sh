@@ -42,8 +42,9 @@
 #                            a slug of the resolved --toolchain list.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile and definitions.
 #                            Defaults to this script's own directory.
-#   --runtime, -r NAME       Container runtime to use: "docker" or "container".
-#                            Default: auto-detected (Apple container on macOS, else docker).
+#   --runtime, -r NAME       Container runtime to use: "docker", "container" or "wslc".
+#                            Default: auto-detected (Apple container on macOS, else docker,
+#                            else wslc on Windows).
 #   --dry-run, -d            Print the build command without executing it.
 #   --yes, -y                Accept detected/default selections and build without asking.
 #   --interactive            Ask about any missing toolchain/agent selection.

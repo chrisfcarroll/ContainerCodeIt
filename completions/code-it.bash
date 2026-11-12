@@ -91,7 +91,7 @@ _code_it() {
         --work-dir|-w|--save-dir|-s)
             COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
         --runtime|-r)
-            COMPREPLY=( $(compgen -W "docker container" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "docker container wslc" -- "$cur") ); return ;;
         --env|-e)
             COMPREPLY=( $(compgen -e -- "$cur") ); return ;;
         --env-file)

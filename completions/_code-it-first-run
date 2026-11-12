@@ -9,7 +9,7 @@ _code_it_first_run() {
 
     case $prev in
         (--save-dir|-s|--work-dir|-w|--dockerfile-dir|--code-it-build) _files -/; return ;;
-        (--runtime|-r)     compadd -- docker container; return ;;
+        (--runtime|-r)     compadd -- docker container wslc; return ;;
         (--toolchain|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
         (--agents|-a)      compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null); return ;;
     esac

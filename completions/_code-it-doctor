@@ -8,7 +8,7 @@ _code_it_doctor() {
     prev=${words[CURRENT-1]}
 
     case $prev in
-        (--runtime|-r)                        compadd -- docker container; return ;;
+        (--runtime|-r)                        compadd -- docker container wslc; return ;;
         (--save-dir|-s|--repo|--code-it)      _files -/; return ;;
         (--image|-i|--branch)                 return ;;   # free text
     esac

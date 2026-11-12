@@ -13,7 +13,7 @@
 #   ./code-it-doctor.sh [OPTIONS] [PROBLEM]
 #
 # Options:
-#   --runtime, -r NAME   docker or container. Default: auto-detect, as code-it does.
+#   --runtime, -r NAME   docker, container or wslc. Default: auto-detect, as code-it does.
 #   --image, -i NAME     Image to check. Default: the most recently used existing
 #                        code-it image, else the most recently built.
 #   --save-dir, -s DIR   code-it's save dir. Default: ~/.config/code-it
@@ -127,6 +127,14 @@ if detected=$(ci_detect_runtime "$runtime" 2>&1); then
         else
             problem "the container system service is not running"
             detail "fix: container system start"
+        fi
+    elif [[ "$runtime" == wslc ]]; then
+        if wslc image list --format json >/dev/null 2>&1; then
+            ok "wslc can reach its WSL container session"
+            runtime_ok=true
+        else
+            problem "wslc cannot reach its WSL container session"
+            detail "fix: wsl --update (wslc needs WSL 2.9.3 or later), then try: wslc image list"
         fi
     elif docker info >/dev/null 2>&1; then
         ok "the docker daemon is reachable"

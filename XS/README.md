@@ -35,7 +35,7 @@ the [full version README.md](../README.md).
 
 ## Prerequisites
 
-- Docker, or Apple's container on macOS
+- Docker, or Apple's container on macOS, or WSL's `wslc` on Windows
 - bash or PowerShell
 
 ## First run
@@ -61,7 +61,7 @@ Each agent sees only its own state.
 | `--save-dir`, `-s DIR` | `-saveDir`, `-s DIR` | `~/.config/code-it-xs` | Where agent logins and state are kept |
 | `--image`, `-i NAME` | `-image`, `-i NAME` | `code-it-xs` | The image to run, built from the Dockerfile if missing |
 | `--build`, `-b` | `-build`, `-b` | off | Build the image even if it exists |
-| `--runtime`, `-r NAME` | `-runtime`, `-r NAME` | `container` on macOS if installed, else `docker` | `docker` or `container` |
+| `--runtime`, `-r NAME` | `-runtime`, `-r NAME` | `container` on macOS if installed, else `docker`, else `wslc` on Windows | `docker`, `container` or `wslc` |
 | `--locale`, `-l LOCALE` | `-locale`, `-l LOCALE` | the host's | The container's `LANG`, e.g. `en_GB.UTF-8` or `en-GB` |
 | `-D:ARG`, `--D:ARG` (repeatable) | `-D ARG,ARG…`, or `--D:ARG` | none | Pass ARG to `docker run` / `container run`, e.g. `-D:-p -D:8080:3000` |
 | `--no-wait` | `-noWait` | off | If the agent fails, close at once instead of keeping its error on screen until Enter |

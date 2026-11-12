@@ -30,7 +30,7 @@
     Directory containing the Dockerfile.
 
 .PARAMETER runtime
-    docker or container. Default: auto-detected.
+    docker, container or wslc. Default: auto-detected.
 
 .PARAMETER codeItBuild
     Code-It-Build.ps1 launcher to invoke. Default: sibling.

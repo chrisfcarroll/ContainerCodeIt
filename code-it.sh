@@ -5,6 +5,7 @@
 # Picks a container runtime automatically:
 # - On macOS, uses the Apple container CLI (container) if installed
 # - Otherwise uses Docker if installed
+# - Otherwise, on Windows, uses WSL's own container CLI (wslc) if installed
 # - Otherwise suggests the best runtime to install for the current platform
 # Use --runtime to force one.
 #
@@ -78,7 +79,7 @@
 #                            failing that, code-it-build.sh builds it first.
 #                            Set it explicitly to force a particular image (an error if it
 #                            does not exist).
-#   --runtime, -r NAME       Container runtime to use: "docker" or "container".
+#   --runtime, -r NAME       Container runtime to use: "docker", "container" or "wslc".
 #                            Default: auto-detected as described above.
 #   --locale, -l LOCALE      The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB.
 #                            Passed to the container when it runs, so it need not be
@@ -543,6 +544,8 @@ fi
 # selection below can use them, and a broken daemon is reported before first-run.
 if [[ "$runtime" == "docker" ]]; then
     valid_images=$(docker images --format "{{.Repository}}:{{.Tag}}") || images_rc=$?
+elif [[ "$runtime" == "wslc" ]]; then
+    valid_images=$(ci_wslc_image_list) || images_rc=$?
 else
     valid_images=$(container image ls) || images_rc=$?
 fi
@@ -906,8 +909,8 @@ fi
 
 # Extra run arguments: SAVE-DIR/run-args, then --env, --env-file and --run-arg. They
 # follow code-it's own, so they can override them. Docker reads a bare `-e NAME` from
-# the host's environment itself; for the Apple container CLI, code-it does, keeping the
-# printed command free of the value.
+# the host's environment itself; for the Apple container CLI and wslc, code-it does,
+# keeping the printed command free of the value.
 extra_run_args=()
 while IFS= read -r arg; do
     extra_run_args+=("$arg")
@@ -932,7 +935,7 @@ run_extra_args=()
 env_flag=""
 for arg in ${extra_run_args[@]+"${extra_run_args[@]}"}; do
     if [[ -n "$env_flag" ]]; then
-        if [[ "$runtime" == "container" && "$arg" != *=* ]] && ci_valid_env_spec "$arg"; then
+        if [[ ( "$runtime" == "container" || "$runtime" == "wslc" ) && "$arg" != *=* ]] && ci_valid_env_spec "$arg"; then
             [[ -n "${!arg+set}" ]] && run_extra_args+=("$env_flag" "$arg=${!arg}")
         else
             run_extra_args+=("$env_flag" "$arg")

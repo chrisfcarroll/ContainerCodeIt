@@ -24,7 +24,7 @@
 #   --agents, -a LIST        Select agents (skips that question).
 #   --image, -i NAME         Image name to build.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile.
-#   --runtime, -r NAME       docker or container. Default: auto-detected.
+#   --runtime, -r NAME       docker, container or wslc. Default: auto-detected.
 #   --code-it-build PATH     code-it-build launcher to invoke. Default: sibling.
 #   --yes, -y                Accept the defaults: no questions.
 #   --dry-run, -d            Do everything except build and copy; print what would happen.

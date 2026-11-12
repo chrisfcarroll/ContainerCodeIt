@@ -23,7 +23,7 @@
     The problem, in words. Implies -fix.
 
 .PARAMETER runtime
-    docker or container. Default: auto-detect, as Code-It.ps1 does.
+    docker, container or wslc. Default: auto-detect, as Code-It.ps1 does.
 
 .PARAMETER image
     Image to check. Default: the most recently used existing code-it image, else the
@@ -65,7 +65,7 @@
 param (
     [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
     [string[]]$Problem    = @(),
-    [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container') | Where-Object { $_ -like "$wordToComplete*" } })]
+    [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container', 'wslc') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$runtime      = "",
     [string]$image        = "",
     [string]$saveDir      = "$HOME/.config/code-it",
@@ -146,6 +146,10 @@ if ($detected) {
         & container system status *> $null
         if ($LASTEXITCODE -eq 0) { Ok "the container system service is running"; $runtimeOk = $true }
         else { Problem "the container system service is not running"; Detail "fix: container system start" }
+    } elseif ($runtime -eq 'wslc') {
+        & wslc image list --format json *> $null
+        if ($LASTEXITCODE -eq 0) { Ok "wslc can reach its WSL container session"; $runtimeOk = $true }
+        else { Problem "wslc cannot reach its WSL container session"; Detail "fix: wsl --update (wslc needs WSL 2.9.3 or later), then try: wslc image list" }
     } else {
         & docker info *> $null
         if ($LASTEXITCODE -eq 0) { Ok "the docker daemon is reachable"; $runtimeOk = $true }
@@ -153,7 +157,7 @@ if ($detected) {
     }
 } else {
     Problem "no usable container runtime"
-    Detail "install Docker, or on macOS the Apple container CLI; Code-It.ps1 says which suits your platform"
+    Detail "install Docker, or on macOS the Apple container CLI, or on Windows update WSL for wslc; Code-It.ps1 says which suits your platform"
 }
 
 # ---------------------------------------------------------------------------

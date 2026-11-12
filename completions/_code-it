@@ -76,7 +76,7 @@ _code_it() {
 
     case $prev in
         (--work-dir|-w|--save-dir|-s) _files -/; return ;;
-        (--runtime|-r)    compadd -- docker container; return ;;
+        (--runtime|-r)    compadd -- docker container wslc; return ;;
         (--env|-e)        _parameters; return ;;
         (--env-file)      _files; return ;;
         (--image|-i)      compadd -- $(docker images --format '{{.Repository}}' 2>/dev/null); return ;;

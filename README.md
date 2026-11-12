@@ -6,7 +6,7 @@ Your agents get work done by having a _single mounted directory_, typically one 
 
 ## Prerequisites
 
-- Docker or Apple Containers
+- Docker, Apple Containers, or on Windows WSL's own `wslc`
 - bash or PowerShell/pwsh.
 - Git, with `user.name` and `user.email` set, so the agent can commit.
 
@@ -55,6 +55,14 @@ Initial agents are opencode, claude and codex. Initial toolchains are dotnet, no
 - **Docker Desktop**: install it with WSL2
   (https://docs.docker.com/desktop/setup/install/windows-install/), and start it before
   the first run, which builds the image. `Code-It-Doctor.ps1` checks that Docker is running.
+- **Or wslc**, the container CLI built into WSL 2.9.3 and later, with no Docker Desktop:
+  `wsl --update`, then check with `wslc version`
+  (https://learn.microsoft.com/windows/wsl/tutorials/wsl-containers). code-it uses it
+  when Docker is not installed, or when you pass `--runtime wslc` (`-runtime wslc`).
+  It keeps its own image store, so build the image again with it. Mount Windows
+  directories (`C:\...`), not ones inside a WSL distro, which wslc cannot mount. Its
+  CPUs and memory are WSL container settings
+  (https://learn.microsoft.com/windows/wsl/wsl-container-settings), not `--memory`.
 
 ## Add new agents
 
@@ -123,7 +131,7 @@ Start a container without an agent with --no-agent / -noAgent
 | `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted in the container at `/work/<parent>/<name>` (the parent's and its own names, so directories keep their names for agents' per-directory memory). A DIR whose parent is `/` mounts at `/work/<name>`; `/`, at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image`, `-i` | `-image` | `code-it-alpine-<toolchains>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
-| `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
+| `--runtime`, `-r` | `-runtime` | auto-detect | `docker`, `container` or `wslc` |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--trust-work-dir`, `--no-trust-work-dir` | `-trustWorkDir`, `-trustWorkDir:$false` | off, or the saved default (`code-it-defaults`) | Tell the agent to trust the work dir, so it does not ask "do you trust this folder?". For Claude Code this sets `CLAUDE_CODE_SANDBOXED=1` (the agent's `AGENT_TRUST_ENV`). Only for code you trust: the folder's own hooks and settings then run unasked |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
@@ -161,7 +169,7 @@ toolchains and package caches). They accept the same logical parameters:
 | `--locale`, `-l` | `-locale` | `like-host` | The image's locale (`LANG`). See [Locale](#locale) |
 | `--image`, `-i` | `-image` | `code-it-alpine-<chains>` | Image name to build |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
-| `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
+| `--runtime`, `-r` | `-runtime` | auto-detect | `docker`, `container` or `wslc` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the build command without executing it |
 | `--yes`, `-y` | `-yes` | off | Accept detected/default interactive selections and build without asking |
 | `--interactive` | `-interactive` | off | Prompt for any omitted selections; used by first-run |
@@ -461,10 +469,11 @@ NO_PROXY
 
 The file's arguments come first, then `--env`, `--env-file` and `--run-arg` in the order
 given, all after code-it's own, so with docker a later `-e` of the same name wins. The
-runtime arguments are passed verbatim, and docker and Apple `container` take different
-flags, so check them against your runtime. `--env` and `--env-file` work with both:
-Docker reads a bare `-e NAME` from the host itself, and for Apple `container` code-it
-fills in the host's value. Either way the printed command does not show the value.
+runtime arguments are passed verbatim, and docker, Apple `container` and `wslc` take
+different flags, so check them against your runtime. `--env` and `--env-file` work with
+all three: Docker reads a bare `-e NAME` from the host itself, and for Apple `container`
+and `wslc` code-it fills in the host's value. Either way the printed command does not
+show the value.
 
 If the network problem is an HTTP proxy, Docker can also inject one into every
 container from `~/.docker/config.json`
@@ -581,9 +590,11 @@ options and the link to the source of the data.
 
 1. On **macOS**, they use the **Apple container CLI** (`container`) if installed
 2. Otherwise they use **Docker** if installed
-3. Otherwise they exit with a suggestion for the best runtime to install on your platform
+3. Otherwise, on **Windows**, they use WSL's own container CLI (`wslc`) if installed
+4. Otherwise they exit with a suggestion for the best runtime to install on your platform
 
-Or on MacOs, specify `--runtime docker` or `--runtime container` (`-runtime` in PowerShell).
+Or specify `--runtime docker`, `--runtime container` (macOS) or `--runtime wslc`
+(Windows); `-runtime` in PowerShell.
 
 ## Volume mounts
 
@@ -728,7 +739,7 @@ dirty repository, never commits to your current branch and never pushes.
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
 | *PROBLEM* | *Problem* | none | The problem, in words; implies `--fix` |
-| `--runtime`, `-r` | `-runtime` | auto-detect | `docker` or `container` |
+| `--runtime`, `-r` | `-runtime` | auto-detect | `docker`, `container` or `wslc` |
 | `--image`, `-i` | `-image` | the most recently used code-it image | Image to check |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | code-it's save dir |
 | `--no-live-test` | `-noLiveTest` | off | Skip the clipboard round trip |
@@ -741,7 +752,7 @@ dirty repository, never commits to your current branch and never pushes.
 
 ## Tests
 
-No container runtime needed. The tests stub `docker`/`container`/`uname` on the PATH and assert on `--dry-run` output, so they run on any machine, not just inside a container.
+No container runtime needed. The tests stub `docker`/`container`/`wslc`/`uname` on the PATH and assert on `--dry-run` output, so they run on any machine, not just inside a container.
 
 ```bash
 # Linux / macOS (runs the bash suite, then the pwsh suite if pwsh is installed)

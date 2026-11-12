@@ -13,8 +13,8 @@
 #   -s, --save-dir DIR    Where agent logins and state are kept. Default: ~/.config/code-it-xs
 #   -i, --image NAME      Image to run, built from the Dockerfile here if missing. Default: code-it-xs
 #   -b, --build           Build the image even if it exists
-#   -r, --runtime NAME    docker, or container (Apple's). Default: container on macOS if
-#                         installed, else docker
+#   -r, --runtime NAME    docker, container (Apple's) or wslc (WSL's). Default: container
+#                         on macOS if installed, else docker, else wslc on Windows
 #   -l, --locale LOCALE   The container's LANG, e.g. en_GB.UTF-8 or en-GB. Default: the host's
 #   -D:ARG, --D:ARG       Pass ARG to `docker run` / `container run`, e.g. -D:-p -D:8080:3000
 #   --no-wait             If the agent fails, close at once instead of waiting for Enter
@@ -87,12 +87,13 @@ fi
 if [[ -z "$runtime" ]]; then
     if [[ "$(uname -s)" == Darwin ]] && command -v container >/dev/null; then runtime=container
     elif command -v docker >/dev/null; then runtime=docker
+    elif command -v wslc >/dev/null; then runtime=wslc
     elif command -v container >/dev/null; then runtime=container
-    else echo "No container runtime found: install Docker, or on macOS Apple's container" >&2; exit 1
+    else echo "No container runtime found: install Docker, or on macOS Apple's container, or on Windows WSL's wslc" >&2; exit 1
     fi
 fi
-if [[ "$runtime" != docker && "$runtime" != container ]]; then
-    echo "Unknown runtime '$runtime': use docker or container" >&2; exit 1
+if [[ "$runtime" != docker && "$runtime" != container && "$runtime" != wslc ]]; then
+    echo "Unknown runtime '$runtime': use docker, container or wslc" >&2; exit 1
 fi
 
 # The container's LANG: --locale, else the host's LC_ALL or LANG.

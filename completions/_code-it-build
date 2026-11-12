@@ -12,7 +12,7 @@ _code_it_build() {
 
     case $prev in
         (--dockerfile-dir) _files -/; return ;;
-        (--runtime|-r)     compadd -- docker container; return ;;
+        (--runtime|-r)     compadd -- docker container wslc; return ;;
         (--image|-i)       compadd -- $(docker images --format '{{.Repository}}' 2>/dev/null); return ;;
         (--toolchain|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
         (--package-caches) compadd -- nuget npm bun; return ;;
