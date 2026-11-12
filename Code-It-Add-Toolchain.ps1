@@ -40,13 +40,18 @@ param (
     [Parameter(Position = 0)]
     [string]$Name         = "",
     [string]$url          = "",
-    [string]$repo         = $PSScriptRoot,
-    [string]$codeIt       = (Join-Path $PSScriptRoot 'Code-It.ps1'),
+    [string]$repo         = "",
+    [string]$codeIt       = "",
     [string]$branch       = "",
     [switch]$dryRun       = $false,
     [Alias('h')]
     [switch]$help         = $false
 )
+
+# Defaults naming this script's own directory are set here, not in param(): Windows
+# PowerShell 5.1 leaves $PSScriptRoot empty in param() when run with -File.
+if (-not $repo) { $repo = $PSScriptRoot }
+if (-not $codeIt) { $codeIt = Join-Path $PSScriptRoot 'Code-It.ps1' }
 
 if ($help) {
     Get-Help $PSCommandPath -Full

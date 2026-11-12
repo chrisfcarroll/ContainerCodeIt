@@ -52,14 +52,18 @@ param (
     [string]$toolchain    = "",
     [string]$agents        = "",
     [string]$image         = "",
-    [string]$dockerfileDir = $PSScriptRoot,
+    [string]$dockerfileDir = "",
     [string]$runtime       = "",
-    [string]$codeItBuild   = (Join-Path $PSScriptRoot 'Code-It-Build.ps1'),
+    [string]$codeItBuild   = "",
     [switch]$yes           = $false,
     [switch]$dryRun        = $false,
     [Alias('h')]
     [switch]$help          = $false
 )
+
+# Defaults naming this script's own directory are set here, not in param(): Windows
+# PowerShell 5.1 leaves $PSScriptRoot empty in param() when run with -File.
+if (-not $codeItBuild) { $codeItBuild = Join-Path $PSScriptRoot 'Code-It-Build.ps1' }
 
 if ($help) {
     Get-Help $PSCommandPath -Full
@@ -82,13 +86,16 @@ $buildParams = @{ interactive = $true; selectionFile = $selectionFile }
 if ($toolchain) { $buildParams['toolchain'] = $toolchain }
 if ($agents) { $buildParams['agent'] = $agents }
 if ($image) { $buildParams['image'] = $image }
-if ($dockerfileDir -ne $PSScriptRoot) { $buildParams['dockerfileDir'] = $dockerfileDir }
+if ($dockerfileDir) { $buildParams['dockerfileDir'] = $dockerfileDir }
 if ($runtime) { $buildParams['runtime'] = $runtime }
 if ($yes) { $buildParams['yes'] = $true }
 if ($dryRun) { $buildParams['dryRun'] = $true }
 
 Write-Host "  $codeItBuild -interactive"
-$powershellExe = (Get-Command pwsh -CommandType Application -EA Stop | Select-Object -First 1).Source
+# Build runs in the same PowerShell as this script: pwsh, or Windows PowerShell 5.1,
+# which is all a new Windows machine has.
+$powershellExe = Get-CodeItPowerShellExe
+if (-not $powershellExe) { Write-Warning 'Cannot find the PowerShell executable to run Code-It-Build.ps1.'; exit 1 }
 $buildArgumentList = @('-NoProfile', '-File', $codeItBuild)
 foreach ($name in $buildParams.Keys) {
     $value = $buildParams[$name]

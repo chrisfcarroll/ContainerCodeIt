@@ -17,7 +17,7 @@ function Test-PwshWorks([string]$exe) {
     if (-not $exe -or -not (Test-Path $exe)) { return $false }
     try { $null = & $exe -NoProfile -Command 'exit 0' 2>$null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
-$pwshExe = @((Get-Command pwsh -EA Silent).Source, "$HOME/.local/bin/pwsh", "$HOME/.dotnet/tools/pwsh") |
+$pwshExe = @($env:CODE_IT_TEST_PWSH, (Get-Command pwsh -EA Silent).Source, "$HOME/.local/bin/pwsh", "$HOME/.dotnet/tools/pwsh") |
     Where-Object { Test-PwshWorks $_ } | Select-Object -First 1
 if (-not $pwshExe) { throw "No working pwsh found to run test scenarios" }
 

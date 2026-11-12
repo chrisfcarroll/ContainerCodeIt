@@ -19,6 +19,9 @@
         Set-CodeItAgentPermissions DIR NAME SAVEDIR DRY -> set AGENT_PERMISSIONS under SAVEDIR
         Test-CodeItPidAlive PID                -> $true if process PID is running
         Get-CodeItSlot LOCKDIR PID TAKE        -> lowest free slot number, locked if TAKE
+        Get-CodeItPowerShellExe                -> the running pwsh or powershell.exe
+        Get-CodeItImageLabel RUNTIME IMAGE LABEL -> the image's LABEL, trimmed
+        ConvertTo-CodeItNativeArgs ARGS        -> ARGS escaped for a native command
 
     Toolchains, package caches and agents are data: each is a directory with a config
     and an install fragment. Known names come from the directory listing; aliases and
@@ -144,16 +147,63 @@ function Test-CodeItToolchainInclude([string]$imageChains, [string[]]$requested)
     return $true
 }
 
+# Get-CodeItPowerShellExe: the executable of the PowerShell running this script, so a
+# child script runs in the same one: pwsh, or Windows PowerShell 5.1, which is all a
+# new Windows machine has. Falls back to pwsh, then powershell, on the PATH (e.g. in
+# a host such as the ISE); $null if there is neither.
+function Get-CodeItPowerShellExe {
+    $exe = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    if ([IO.Path]::GetFileNameWithoutExtension($exe) -in @('pwsh', 'powershell')) { return $exe }
+    foreach ($name in @('pwsh', 'powershell')) {
+        $cmd = Get-Command $name -CommandType Application -EA Silent | Select-Object -First 1
+        if ($cmd) { return $cmd.Source }
+    }
+    return $null
+}
+
+# Test-CodeItLegacyArgPassing: $true if this PowerShell passes native command
+# arguments the legacy way, as Windows PowerShell 5.1 and pwsh before 7.3 do: an
+# embedded " is passed unescaped, so the command sees it as a quote, and an empty
+# argument is dropped.
+function Test-CodeItLegacyArgPassing {
+    if ($PSVersionTable.PSVersion -lt [version]'7.3') { return $true }
+    return ("$PSNativeCommandArgumentPassing" -eq 'Legacy')
+}
+
+# ConvertTo-CodeItNativeArgs ARGS [LEGACY] [DOUBLETRAILING]: ARGS as they must be
+# written for a native command to receive them unchanged. With legacy argument
+# passing, each " is escaped (with the backslashes before it doubled) as the C runtime
+# unescapes it, and an empty argument becomes "". Windows PowerShell 5.x, unlike
+# pwsh's legacy mode, also needs the trailing backslashes of an argument it will
+# quote (one with whitespace) doubled. Otherwise, ARGS unchanged.
+function ConvertTo-CodeItNativeArgs([string[]]$argList, [bool]$legacy = (Test-CodeItLegacyArgPassing),
+                                    [bool]$doubleTrailing = ($PSVersionTable.PSVersion.Major -lt 6)) {
+    if (-not $argList) { return ,@() }
+    if (-not $legacy) { return ,@($argList) }
+    return ,@(foreach ($a in $argList) {
+        if ($a -eq '') { '""'; continue }
+        $e = $a -replace '(\\*)"', '$1$1\"'
+        if ($doubleTrailing -and $e -match '\s') { $e = $e -replace '(\\+)$', '$1$1' }
+        $e
+    })
+}
+
+# Get-CodeItImageLabel RUNTIME IMAGE LABEL: IMAGE's LABEL, trimmed, or the runtime's
+# own (error) output. docker's template quotes LABEL with Go's backquotes, not ",
+# because legacy argument passing (Windows PowerShell 5.1) would strip a ".
+function Get-CodeItImageLabel([string]$runtime, [string]$image, [string]$label) {
+    if ($runtime -eq 'docker') {
+        $format = '{{ index .Config.Labels `' + $label + '` }}'
+        return "$(docker image inspect --format $format $image 2>$null)".Trim()
+    }
+    $format = '{{ index .Config.Labels "' + $label + '" }}'
+    return "$(container image inspect --format $format $image 2>$null)".Trim()
+}
+
 # Get-CodeItImageToolchain RUNTIME IMAGE: the comma-separated toolchains recorded on
 # IMAGE (its code-it.toolchains label, or the code-it-alpine-<chains> name), or "".
 function Get-CodeItImageToolchain([string]$runtime, [string]$image) {
-    $chains = ""
-    if ($runtime -eq 'docker') {
-        $chains = (docker image inspect --format '{{ index .Config.Labels "code-it.toolchains" }}' $image 2>$null)
-    } else {
-        $chains = (container image inspect --format '{{ index .Config.Labels "code-it.toolchains" }}' $image 2>$null)
-    }
-    $chains = "$chains".Trim()
+    $chains = Get-CodeItImageLabel $runtime $image 'code-it.toolchains'
     if ($chains -notmatch '^[a-z,]*$') { $chains = "" }
     if (-not $chains -and $image -like 'code-it-alpine-*') {
         $chains = ($image.Substring('code-it-alpine-'.Length)) -replace ':.*$', ''
@@ -194,12 +244,7 @@ function Find-CodeItSupersetImage([string]$runtime, [string[]]$requested) {
 # IMAGE (its code-it.agents label), or "" if it cannot be told. Only names of known
 # agents count, so an unlabelled image or a runtime's own error text gives "".
 function Get-CodeItImageAgents([string]$runtime, [string]$image, [string]$agentsDir) {
-    $raw = if ($runtime -eq 'docker') {
-        (docker image inspect --format '{{ index .Config.Labels "code-it.agents" }}' $image 2>$null)
-    } else {
-        (container image inspect --format '{{ index .Config.Labels "code-it.agents" }}' $image 2>$null)
-    }
-    $raw = "$raw".Trim()
+    $raw = Get-CodeItImageLabel $runtime $image 'code-it.agents'
     if (-not $raw -or $raw -notmatch '^[a-z0-9,-]+$') { return "" }
     $agents = @($raw -split ',' | Where-Object { $_ })
     foreach ($a in $agents) {
@@ -213,12 +258,7 @@ function Get-CodeItImageAgents([string]$runtime, [string]$image, [string]$agents
 # not list AGENT; $null if the image has no such label (built before it existed) or the
 # runtime's own error text came back instead.
 function Get-CodeItImageAgentBinary([string]$runtime, [string]$image, [string]$agent) {
-    $raw = if ($runtime -eq 'docker') {
-        (docker image inspect --format '{{ index .Config.Labels "code-it.agent-binaries" }}' $image 2>$null)
-    } else {
-        (container image inspect --format '{{ index .Config.Labels "code-it.agent-binaries" }}' $image 2>$null)
-    }
-    $raw = "$raw".Trim()
+    $raw = Get-CodeItImageLabel $runtime $image 'code-it.agent-binaries'
     if ($raw -notmatch '^[a-z0-9-]+=/[^,=\s]+(,[a-z0-9-]+=/[^,=\s]+)*$') { return $null }
     foreach ($entry in ($raw -split ',')) {
         $name, $bin = $entry -split '=', 2

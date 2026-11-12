@@ -5,6 +5,8 @@
 # Each scenario runs in a child pwsh process so `exit` in the scripts is isolated.
 # Run with:
 #   pwsh -NoProfile -File tests/Test-CodeIt.ps1
+# To run the scenarios in another PowerShell, such as Windows PowerShell 5.1, set
+#   $env:CODE_IT_TEST_PWSH = 'powershell.exe'
 
 $ErrorActionPreference = 'Continue'
 
@@ -19,7 +21,7 @@ function Test-PwshWorks([string]$exe) {
     if (-not $exe -or -not (Test-Path $exe)) { return $false }
     try { $null = & $exe -NoProfile -Command 'exit 0' 2>$null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
-$pwshExe = @((Get-Command pwsh -EA Silent).Source, "$HOME/.local/bin/pwsh", "$HOME/.dotnet/tools/pwsh") |
+$pwshExe = @($env:CODE_IT_TEST_PWSH, (Get-Command pwsh -EA Silent).Source, "$HOME/.local/bin/pwsh", "$HOME/.dotnet/tools/pwsh") |
     Where-Object { Test-PwshWorks $_ } | Select-Object -First 1
 if (-not $pwshExe) { throw "No working pwsh found to run test scenarios" }
 
@@ -1784,6 +1786,80 @@ $r = Invoke-Scenario $codeIt (@('-dryRun','-WorkDirToMount',$nested,'-saveDir',$
 Assert "dry-run with a nested work dir exit code 0" ($r.code -eq 0)
 Assert-Contains "nested work dir mounts at /work/<parent>/<name>" $r.out "work-parent${sep}work-dir:/work/work-parent/work-dir"
 Assert-Contains "nested work dir env tells go.sh where to cd" $r.out 'CODE_IT_WORK_DIR="/work/work-parent/work-dir"'
+
+# ---------------------------------------------------------------------------
+"24. Windows PowerShell 5.1, all a new Windows machine has"
+$ps1Files = @(Get-ChildItem -Path $scriptDir -Recurse -File -Filter '*.ps1' |
+    Where-Object { ($_.FullName -replace '\\', '/') -notmatch '/(news|\.git)/' })
+foreach ($f in $ps1Files) {
+    $rel = $f.FullName.Substring($scriptDir.Length).TrimStart('/', '\') -replace '\\', '/'
+    # 5.1 reads a script with no byte-order mark as ANSI, and a mark would break the shebang
+    $bytes = [IO.File]::ReadAllBytes($f.FullName)
+    Assert "is ASCII, so 5.1 reads it as written: $rel" (-not ($bytes | Where-Object { $_ -gt 127 } | Select-Object -First 1))
+    # 5.1 leaves $PSScriptRoot empty in param() defaults when a script is run with -File
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$null)
+    $usesRoot = $ast.ParamBlock -and $ast.ParamBlock.Extent.Text -match '\$PSScriptRoot'
+    Assert "param() defaults do not use `$PSScriptRoot: $rel" (-not $usesRoot)
+}
+Assert "first run does not require pwsh on the PATH" (-not ((Get-Content (Join-Path $scriptDir 'Code-It-FirstRun.ps1') -Raw) -match 'Get-Command pwsh'))
+$psExe = Get-CodeItPowerShellExe
+Assert "the running PowerShell's executable is found" ($psExe -and (Test-Path $psExe -PathType Leaf) -and ([IO.Path]::GetFileNameWithoutExtension($psExe) -in @('pwsh', 'powershell')))
+
+# Image labels: legacy argument passing strips a " embedded in docker's --format
+function docker { $script:dockerArgs = @($args); 'dotnet,node' }
+$label = Get-CodeItImageLabel 'docker' 'code-it-alpine-x' 'code-it.agents'
+Remove-Item Function:\docker
+$format = $script:dockerArgs[$script:dockerArgs.IndexOf('--format') + 1]
+Assert "image label is read and trimmed" ($label -eq 'dotnet,node')
+Assert "docker's label template has no embedded quote" (-not $format.Contains('"'))
+Assert "docker's label template quotes the label with Go backquotes" ($format -eq '{{ index .Config.Labels `code-it.agents` }}')
+
+# Native arguments: unchanged with standard passing; escaped with legacy passing
+$nativeIn = @('plain', 'has space', 'say "hi" now', 'a\"b', 'dir with space\', '', 'end\')
+$std = ConvertTo-CodeItNativeArgs $nativeIn $false
+Assert "standard argument passing leaves arguments unchanged" (($std -join '|') -ceq ($nativeIn -join '|'))
+$leg = ConvertTo-CodeItNativeArgs $nativeIn $true $false
+Assert "legacy: a quote is escaped" ($leg[2] -ceq 'say \"hi\" now')
+Assert "legacy: backslashes before a quote are doubled" ($leg[3] -ceq 'a\\\"b')
+Assert "legacy: an empty argument is kept" ($leg.Count -eq $nativeIn.Count -and $leg[5] -ceq '""')
+Assert "legacy pwsh: a trailing backslash is left to PowerShell" ($leg[4] -ceq 'dir with space\')
+$leg5 = ConvertTo-CodeItNativeArgs $nativeIn $true $true
+Assert "Windows PowerShell 5.x: a quoted argument's trailing backslash is doubled" ($leg5[4] -ceq 'dir with space\\' -and $leg5[6] -ceq 'end\')
+Assert "no arguments stay an empty array" ((ConvertTo-CodeItNativeArgs @() $true).Count -eq 0)
+if (-not $onWindows -and $PSVersionTable.PSVersion -ge [version]'7.3') {
+    # Round trip through a real native command, with pwsh's legacy passing as 5.1's stand-in
+    $argvSh = Join-Path $tmp 'argv.sh'
+    Set-Content -Path $argvSh -Value "#!/bin/sh`nfor a; do printf '[%s]\n' `"`$a`"; done"
+    chmod +x $argvSh
+    # A variable, as Code-It.ps1 passes them: legacy passing joins an inline @(...) into one
+    $escaped = ConvertTo-CodeItNativeArgs $nativeIn $true $false
+    $PSNativeCommandArgumentPassing = 'Legacy'
+    $got = @(& $argvSh $escaped)
+    $raw = @(& $argvSh @nativeIn)
+    $PSNativeCommandArgumentPassing = 'Standard'
+    Assert "legacy passing alone would mangle the arguments" (($raw -join '|') -cne (($nativeIn | ForEach-Object { "[$_]" }) -join '|'))
+    Assert "legacy passing receives the escaped arguments unchanged" (($got -join '|') -ceq (($nativeIn | ForEach-Object { "[$_]" }) -join '|'))
+}
+
+# 5.1-compatible syntax, commands and types, where PSScriptAnalyzer is installed
+if (Get-Module -ListAvailable PSScriptAnalyzer) {
+    $profile51 = 'win-48_x64_10.0.17763.0_5.1.17763.316_x64_4.0.30319.42000_framework'
+    $compat = @{
+        IncludeRules = @('PSUseCompatibleSyntax', 'PSUseCompatibleCommands', 'PSUseCompatibleTypes')
+        Rules = @{
+            PSUseCompatibleSyntax   = @{ Enable = $true; TargetVersions = @('5.1') }
+            PSUseCompatibleCommands = @{ Enable = $true; TargetProfiles = @($profile51) }
+            PSUseCompatibleTypes    = @{ Enable = $true; TargetProfiles = @($profile51) }
+        }
+    }
+    foreach ($f in ($ps1Files | Where-Object { ($_.FullName -replace '\\', '/') -notmatch '/tests/' })) {
+        $found = @(Invoke-ScriptAnalyzer -Path $f.FullName -Settings $compat)
+        Assert "PSScriptAnalyzer finds no 5.1 incompatibility: $($f.Name)" ($found.Count -eq 0)
+        $found | ForEach-Object { "      line $($_.Line): $($_.Message)" }
+    }
+} else {
+    "  skip: 5.1 compatibility analysis (Install-Module PSScriptAnalyzer to run it)"
+}
 
 # ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $tmp -EA Silent

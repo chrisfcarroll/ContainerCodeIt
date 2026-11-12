@@ -8,6 +8,13 @@ Your agents get work done by having a _single mounted directory_, typically one 
 
 - Docker or Apple Containers
 - bash or PowerShell/pwsh.
+- Git, with `user.name` and `user.email` set, so the agent can commit.
+
+On a new Windows machine, Windows PowerShell 5.1 (`powershell.exe`) is enough;
+PowerShell 7 (`winget install Microsoft.PowerShell`) is better. Windows blocks scripts
+by default, so allow local ones once with
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. Start Docker Desktop before
+the first run, which builds the image. `Code-It-Doctor.ps1` checks Git and Docker for you.
 
 ## Quick start
 
@@ -741,4 +748,4 @@ pwsh -NoProfile -File tests/Test-CodeItDoctor.ps1
 ```
 
 - **macOS**: `./tests/run-all-tests.sh` works with the stock bash 3.2; the Apple-container detection paths are exercised via stubs, so neither Docker nor the `container` CLI needs to be installed.
-- **Windows**: run the PowerShell suite; the bash suite additionally works under Git Bash or WSL. The suite stubs docker with a `.cmd` shim and only needs `git` and PowerShell 7+.
+- **Windows**: run the PowerShell suite; the bash suite additionally works under Git Bash or WSL. The suite stubs docker with a `.cmd` shim and only needs `git` and PowerShell 7+. To run its scenarios in Windows PowerShell 5.1, set `$env:CODE_IT_TEST_PWSH = 'powershell.exe'` first. Wherever the suite runs, it checks the scripts stay 5.1-compatible: ASCII-only, no `$PSScriptRoot` in `param()` defaults, and, if `PSScriptAnalyzer` is installed, its 5.1 compatibility rules.

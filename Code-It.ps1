@@ -224,16 +224,16 @@
 #>
 
 #   What each mount preserves:
-#   ┌──────────────────────────┬────────────────────────────────────────────────────────────────┐
-#   │          Mount           │                            Contains                            │
-#   ├──────────────────────────┼────────────────────────────────────────────────────────────────┤
-#   │ ~/.claude/               │ Credentials (.credentials.json), settings, permissions, memory │
-#   ├──────────────────────────┼────────────────────────────────────────────────────────────────┤
-#   │ ~/.claude.json           │ OAuth session data, MCP configs, theme/editor preferences      │
-#   ├──────────────────────────┼────────────────────────────────────────────────────────────────┤
-#   │ ~/.config/opencode/      │ OpenCode configuration (opencode.json, etc.)                  │
-#   │ ~/.local/share/opencode/ │ OpenCode data and auth (auth.json, etc.)                       │
-#   └──────────────────────────┴────────────────────────────────────────────────────────────────┘
+#   +--------------------------+----------------------------------------------------------------+
+#   |          Mount           |                            Contains                            |
+#   +--------------------------+----------------------------------------------------------------+
+#   | ~/.claude/               | Credentials (.credentials.json), settings, permissions, memory |
+#   +--------------------------+----------------------------------------------------------------+
+#   | ~/.claude.json           | OAuth session data, MCP configs, theme/editor preferences      |
+#   +--------------------------+----------------------------------------------------------------+
+#   | ~/.config/opencode/      | OpenCode configuration (opencode.json, etc.)                  |
+#   | ~/.local/share/opencode/ | OpenCode data and auth (auth.json, etc.)                       |
+#   +--------------------------+----------------------------------------------------------------+
 
 # PositionalBinding is off so that arguments meant for the coding agent, which often
 # look like parameters (e.g. --continue), all land in $agentArgs instead of being bound
@@ -907,6 +907,11 @@ if ($dryRun) {
     exit 0
 }
 
+# The prompt and extra run arguments are free text, so may hold a " that legacy
+# argument passing (Windows PowerShell 5.1) would not escape
+$agentCmdNative = ConvertTo-CodeItNativeArgs $agentCmd
+$runExtraArgsNative = ConvertTo-CodeItNativeArgs $runExtraArgs
+
 $runRc = 0
 try {
     & $runtime run $ttyArgs --rm `
@@ -921,8 +926,8 @@ try {
                 -v "$WorkDirToMount`:$containerWorkDir" `
                 $agentMountArgs `
                 $cacheMountArgs `
-                $runExtraArgs `
-        $image`:latest $agentCmd
+                $runExtraArgsNative `
+        $image`:latest $agentCmdNative
     if ($LASTEXITCODE -ne 0) { $runRc = $LASTEXITCODE }
 } finally {
     # Free this run's exclusive slot, even on Ctrl-C

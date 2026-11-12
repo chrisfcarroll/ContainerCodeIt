@@ -3,9 +3,9 @@
 <#
 .SYNOPSIS
     When dot-sourced, initializes powershell variables and functions in this session 
-    to simplify a “very” isolated agent git workflow.
+    to simplify a "very" isolated agent git workflow.
     
-    By “very isolated”, we mean, the containerised agent is unable to push or pull. It has
+    By "very isolated", we mean, the containerised agent is unable to push or pull. It has
     no access to your upstream origin repo, only to the working directory you give it.
 
     This script must be dot-sourced to be of any use:
@@ -77,7 +77,7 @@
     This script is not needed to containerise your agents. But is useful to support a workflow
     in which agents have no visibility of your remote repos, only of
     1) the working directory you supply to the container, and
-    2) implicit knowledge of the existence of —but no access to— an origin repo,
+    2) implicit knowledge of the existence of --but no access to-- an origin repo,
        which is also a local filesystem hosted working directory.
 
 .LINK

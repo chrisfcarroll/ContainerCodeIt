@@ -140,6 +140,8 @@ if (-not $dryRun) {
 function Invoke-Run {
     '    ' + (($args | ForEach-Object { if ($_ -match '[\s"''$]') { "'$($_ -replace "'", "''")'" } else { $_ } }) -join ' ')
     $exe, $rest = $args
+    # Windows PowerShell 5.1 (and pwsh before 7.3) would pass a " in a prompt unescaped
+    if ($PSVersionTable.PSVersion -lt [version]'7.3') { $rest = @($rest | ForEach-Object { $_ -replace '(\\*)"', '$1$1\"' }) }
     if (-not $dryRun) { & $exe @rest }
 }
 

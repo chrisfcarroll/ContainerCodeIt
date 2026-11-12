@@ -73,13 +73,18 @@ param (
     [Alias('y')]
     [switch]$yes          = $false,
     [switch]$fix          = $false,
-    [string]$repo         = $PSScriptRoot,
-    [string]$codeIt       = (Join-Path $PSScriptRoot 'Code-It.ps1'),
+    [string]$repo         = "",
+    [string]$codeIt       = "",
     [string]$branch       = "",
     [switch]$dryRun       = $false,
     [Alias('h')]
     [switch]$help         = $false
 )
+
+# Defaults naming this script's own directory are set here, not in param(): Windows
+# PowerShell 5.1 leaves $PSScriptRoot empty in param() when run with -File.
+if (-not $repo) { $repo = $PSScriptRoot }
+if (-not $codeIt) { $codeIt = Join-Path $PSScriptRoot 'Code-It.ps1' }
 
 if ($help) {
     Get-Help $PSCommandPath -Full
@@ -105,10 +110,18 @@ function Detail([string]$text)  { Say "           $text" }
 $onMacOS   = $IsMacOS -eq $true
 $onWindows = $env:OS -eq 'Windows_NT'
 $containerHome = '/home/agent1'
+# The Mac's key symbols, as [char]s: the file stays ASCII, which Windows PowerShell
+# 5.1 reads correctly without a byte-order mark
+$cmdKey = [char]0x2318
+$optKey = [char]0x2325
 
 # ---------------------------------------------------------------------------
 Section "Host"
-Say "  $([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture), PowerShell $($PSVersionTable.PSVersion)"
+# RuntimeInformation is .NET Core's: Windows PowerShell 5.1 may not have it loaded
+$runtimeInfo = 'System.Runtime.InteropServices.RuntimeInformation' -as [type]
+$hostOs = if ($runtimeInfo) { "$($runtimeInfo::OSDescription) $($runtimeInfo::OSArchitecture)" }
+          else { "$([Environment]::OSVersion.VersionString) $env:PROCESSOR_ARCHITECTURE" }
+Say "  $hostOs, PowerShell $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition)"
 if (Test-Path '/etc/code-it-agents') {
     Warn "this looks like the inside of a code-it container; run code-it-doctor on the host"
 }
@@ -193,7 +206,10 @@ if ($opencodeDbs.Count -and -not (Get-Command sqlite3 -EA Silent)) {
     Unknown "no sqlite3 on the host to check opencode's database"
 } else {
     foreach ($db in $opencodeDbs) {
-        $rel = [IO.Path]::GetRelativePath($saveDir, $db.FullName)
+        # Not [IO.Path]::GetRelativePath, which Windows PowerShell 5.1's .NET lacks
+        $rel = $db.FullName
+        $saveDirFull = (Resolve-Path $saveDir).Path.TrimEnd('/', '\')
+        if ($rel.StartsWith($saveDirFull)) { $rel = $rel.Substring($saveDirFull.Length).TrimStart('/', '\') }
         $check = (& sqlite3 $db.FullName 'pragma quick_check;' 2>&1 | Select-Object -First 1)
         if ("$check" -eq 'ok') { Ok "opencode's database passes quick_check: $rel" }
         else {
@@ -243,8 +259,8 @@ switch ($terminal) {
     'apple-terminal' {
         Problem "macOS Terminal.app ignores OSC 52, the escape sequence tmux and the agents"
         Detail "use to set the clipboard from the container, so nothing copied there arrives."
-        Detail "fix: turn mouse reporting off with View > Allow Mouse Reporting (⌘R), so a drag"
-        Detail "makes Terminal.app's own selection, not tmux's; ⌘C, then ⌘R to turn it back on;"
+        Detail "fix: turn mouse reporting off with View > Allow Mouse Reporting (${cmdKey}R), so a drag"
+        Detail "makes Terminal.app's own selection, not tmux's; ${cmdKey}C, then ${cmdKey}R to turn it back on;"
         Detail "or turn tmux's mouse off in the container: Ctrl-B then :set mouse off;"
         Detail "or use a terminal that supports OSC 52: iTerm2, Ghostty, WezTerm or kitty."
     }
@@ -261,7 +277,7 @@ switch ($terminal) {
             Unknown "iTerm2 over ssh: tick 'Applications in terminal may access clipboard' in"
             Detail "iTerm2 > Settings > General > Selection on your Mac"
         }
-        Detail "tip: hold ⌥ (Option) while dragging to make iTerm2's own selection instead of tmux's"
+        Detail "tip: hold $optKey (Option) while dragging to make iTerm2's own selection instead of tmux's"
     }
     'ghostty' {
         $denied = $false

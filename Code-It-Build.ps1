@@ -95,7 +95,7 @@ param (
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('like-host', 'C.UTF-8') | Where-Object { $_ -like "$wordToComplete*" } })]
     [string]$locale        = 'like-host',
     [string]$image         = "",
-    [string]$dockerfileDir = $PSScriptRoot,
+    [string]$dockerfileDir = "",
     [string]$runtime       = "",
     [switch]$dryRun        = $false,
     [switch]$yes           = $false,
@@ -104,6 +104,10 @@ param (
     [Alias('h')]
     [switch]$help          = $false
 )
+
+# Defaults naming this script's own directory are set here, not in param(): Windows
+# PowerShell 5.1 leaves $PSScriptRoot empty in param() when run with -File.
+if (-not $dockerfileDir) { $dockerfileDir = $PSScriptRoot }
 
 if ($help) {
     Get-Help $PSCommandPath -Full
