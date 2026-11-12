@@ -11,7 +11,7 @@ _code_it_build() {
     prev=${words[CURRENT-1]}
 
     case $prev in
-        (--dockerfile-dir) _files -/; return ;;
+        (--dockerfile-dir|--save-dir|-s) _files -/; return ;;
         (--runtime|-r)     compadd -- docker container wslc; return ;;
         (--image|-i)       compadd -- $(docker images --format '{{.Repository}}' 2>/dev/null); return ;;
         (--toolchain|-t|--stack) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
@@ -22,7 +22,7 @@ _code_it_build() {
 
     compadd -- --toolchain -t --stack --package-caches --agent --agents -a --list-agents \
         --list-toolchains --list-package-caches \
-        --rebuild --locale -l --image -i --dockerfile-dir --runtime -r --dry-run -d \
+        --rebuild --locale -l --image -i --dockerfile-dir --runtime -r --save-dir -s --dry-run -d \
         --yes -y --interactive --help -h
 }
 

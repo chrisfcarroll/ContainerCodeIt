@@ -13,9 +13,10 @@ _code_it_defaults() {
         (--model) compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null | sed 's/$/=/'); return ;;
         (--toolchain|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
         (--trust-work-dir) compadd -- yes no; return ;;
+        (--runtime|-r) compadd -- docker container wslc none; return ;;
     esac
 
-    compadd -- --agent -a --model --toolchain -t --trust-work-dir --show --refresh-models \
+    compadd -- --agent -a --model --toolchain -t --trust-work-dir --runtime -r --show --refresh-models \
         --save-dir -s --dry-run -d --help -h
 }
 

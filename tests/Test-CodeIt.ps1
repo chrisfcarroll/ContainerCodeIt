@@ -421,6 +421,8 @@ Assert-Contains "suggests an install link" $r.out 'docs.docker.com'
 
 # ---------------------------------------------------------------------------
 "7. Runtime selection"
+# Apple's container runs only on macOS, so these runs say they are on macOS
+$env:CODE_IT_PLATFORM = 'macos'
 $r = Invoke-Scenario $codeIt (@('-runtime', 'container') + $commonArgs) "$stubContainer$sep$stubPath"
 Assert "-runtime container exit code 0" ($r.code -eq 0)
 Assert-Contains "-runtime container forces apple container" $r.out 'Using container runtime: container'
@@ -431,6 +433,7 @@ if (-not $onWindows) {
     $r = Invoke-Scenario $codeIt @('-runtime', 'container', '-WorkDirToMount', $scriptDir, '-saveDir', $save) "$stubContainer$sep$stubPath"
     Assert-Contains "container run gets --memory and 3g as separate arguments" $r.out '[--memory][3g]'
 }
+$env:CODE_IT_PLATFORM = $null
 $r = Invoke-Scenario $codeIt (@('-runtime', 'bogus') + $commonArgs) $stubPath
 Assert "-runtime bogus fails" ($r.code -ne 0)
 
@@ -1108,11 +1111,13 @@ $r = Invoke-Scenario $codeIt (@('-c','-headless') + $commonArgs + @('-p','count 
 Assert "an agent flag that collides with a parameter prefix is rejected, not silently bound" ($r.code -ne 0)
 
 # The prompt reaches the container as a single argument
+$env:CODE_IT_PLATFORM = 'macos'
 $r = Invoke-Scenario $codeIt (@('-c','-runtime','container','explain this repo','-WorkDirToMount',$scriptDir,'-saveDir',$save)) "$stubContainer$sep$stubPath"
 Assert-Contains "prompt is passed as one argument" $r.out '[code-it-alpine-dotnet-node:latest][explain this repo]'
 $r = Invoke-Scenario $codeIt (@('-c','-runtime','container','-headless','fix it','-WorkDirToMount',$scriptDir,'-saveDir',$save)) "$stubContainer$sep$stubPath"
 Assert-Contains "headless run passes -i" $r.out '[-i][--rm]'
 Assert-Contains "headless run passes the prompt after -p" $r.out '[code-it-alpine-dotnet-node:latest][-p][fix it]'
+$env:CODE_IT_PLATFORM = $null
 
 # The alias scripts forward prompts and agent flags
 $r = Invoke-Scenario (Join-Path $scriptDir 'Claude-It.ps1') (@('explain this repo') + $commonArgs) $stubPath
@@ -1246,13 +1251,13 @@ Assert "add-toolchain propagates a gate refusal" ($r.code -eq 4)
 $firstRun = Join-Path $scriptDir 'Code-It-FirstRun.ps1'
 $stubFirst = Join-Path $tmp 'stub-first-build.ps1'
 Set-Content -Path $stubFirst -Value @'
-param([string]$toolchain, [string]$agent, [string]$runtime, [string]$image, [string]$dockerfileDir,
+param([string]$toolchain, [string]$agent, [string]$runtime, [string]$image, [string]$dockerfileDir, [string]$saveDir,
     [string]$selectionFile, [switch]$interactive, [switch]$yes, [switch]$dryRun)
 if (-not $toolchain) { $toolchain = 'node' }
 if (-not $agent) { $agent = 'opencode' }
 @("toolchains=$toolchain", "agents=$agent") | Set-Content -Path $selectionFile
 if (-not $dryRun) { Set-Content -Path (Join-Path $PSScriptRoot 'first-build-ran') -Value 'ran' }
-"STUB-FIRST-BUILD toolchain=$toolchain agent=$agent dryRun=$dryRun"
+"STUB-FIRST-BUILD toolchain=$toolchain agent=$agent runtime=$runtime saveDir=$saveDir dryRun=$dryRun"
 '@
 
 $fh = Join-Path $tmp 'firstcopy-home'
@@ -1671,10 +1676,10 @@ Assert "no run-args file, no extra arguments" (-not $r.out.Contains('Using run a
 
 # (d) the Apple container CLI is given the host's value for a bare -e NAME, and an
 # unset NAME is dropped, as docker does; the printout still shows no value
-$env:BAR = 'host-bar'
+$env:BAR = 'host-bar'; $env:CODE_IT_PLATFORM = 'macos'
 try {
     $r = Invoke-ScenarioCommand "& '$codeIt' $raArgs -runtime container -e 'BAR','UNSET_NAME_FOR_TEST','FOO=1' -runArgs '--env','BAZ=2'" "$stubContainer$sep$stubPath"
-} finally { $env:BAR = $null }
+} finally { $env:BAR = $null; $env:CODE_IT_PLATFORM = $null }
 Assert-Contains "container: bare -e NAME gets the host's value" $r.out '-e BAR=host-bar -e FOO=1 --env BAZ=2 code-it-alpine-dotnet-node:latest'
 Assert "container: printout shows the bare name" ($r.out -match '(?m)-e BAR\r?$')
 
@@ -2003,6 +2008,127 @@ Assert "Get-CodeItImageToolchain wslc reads the toolchains label" ((Get-CodeItIm
 $script:wslcMissing = $true
 Assert "Get-CodeItImageLabel wslc: a missing image gives nothing" ((Get-CodeItImageLabel 'wslc' 'img:latest' 'code-it.toolchains') -eq '')
 Remove-Item Function:\wslc
+
+# ---------------------------------------------------------------------------
+"26. The default runtime: saved by first-run and Code-It-Defaults, used by all"
+$rtPath = "$stubWslc$([IO.Path]::PathSeparator)$stubPath"
+# Library helpers, in-process
+$env:PATH = $rtPath
+try {
+    Assert "Get-CodeItRuntimesFound lists the installed runtimes" (((Get-CodeItRuntimesFound) -join ',') -eq 'docker,wslc')
+    try {
+        $env:CODE_IT_PLATFORM = 'windows'
+        Assert "Windows' own runtime is wslc" ((Get-CodeItPlatformRuntime) -eq 'wslc')
+        Assert "on Windows, wslc is preferred when found, over docker" ((Get-CodeItPreferredRuntime) -eq 'wslc')
+        $env:CODE_IT_PLATFORM = 'linux'
+        Assert "Linux's own runtime is docker" ((Get-CodeItPlatformRuntime) -eq 'docker')
+        Assert "on Linux, docker is preferred" ((Get-CodeItPreferredRuntime) -eq 'docker')
+        $env:CODE_IT_PLATFORM = 'macos'
+        Assert "macOS's own runtime is container" ((Get-CodeItPlatformRuntime) -eq 'container')
+    } finally { $env:CODE_IT_PLATFORM = $null }
+} finally { $env:PATH = $origPath }
+
+# Run a script with lines piped to its Read-Host answers
+function Invoke-ScenarioWithAnswers([string]$scriptPath, [string[]]$scenarioArgs, [string]$path, [string[]]$answers) {
+    $env:PATH = $path
+    try {
+        $out = ($answers -join "`n") | & $pwshExe -NoProfile -File $scriptPath @scenarioArgs 2>&1 | Out-String
+        return @{ out = $out; code = $LASTEXITCODE }
+    } finally {
+        $env:PATH = $origPath
+    }
+}
+
+# Code-It uses the saved default; -runtime beats it
+$rtSave = Join-Path $tmp 'runtime-save'
+$null = New-Item -ItemType Directory -Force -Path $rtSave
+Set-Content -Path (Join-Path $rtSave 'defaults') -Value 'default-runtime=wslc'
+$rtArgs = @('-dryRun', '-WorkDirToMount', $scriptDir, '-saveDir', $rtSave)
+$r = Invoke-Scenario $codeIt $rtArgs $rtPath
+Assert-Contains "Code-It says it uses the saved runtime" $r.out 'Using saved default runtime: wslc'
+Assert-Contains "Code-It uses the saved runtime over detection" $r.out 'Using container runtime: wslc'
+$r = Invoke-Scenario $codeIt (@('-runtime', 'docker') + $rtArgs) $rtPath
+Assert-Contains "-runtime beats the saved runtime" $r.out 'Using container runtime: docker'
+$r = Invoke-Scenario $codeIt $rtArgs $stubPath
+Assert "a saved runtime that is not installed fails" ($r.code -ne 0)
+Assert-Contains "and says which" $r.out "'wslc' not found"
+Assert "and stops there, with no empty runtime" (-not $r.out.Contains('Could not list  images'))
+# Code-It-Build and Code-It-Doctor use it too
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $scriptDir, '-saveDir', $rtSave) $rtPath
+Assert-Contains "Code-It-Build uses the saved runtime" $r.out 'STUB-WSLC-BUILD build'
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $scriptDir, '-saveDir', $rtSave, '-runtime', 'docker', '-dryRun') $rtPath
+Assert-Contains "Code-It-Build -runtime beats the saved runtime" $r.out 'docker build'
+$r = Invoke-Scenario (Join-Path $scriptDir 'Code-It-Doctor.ps1') @('-saveDir', $rtSave, '-noLiveTest') $rtPath
+Assert-Contains "Code-It-Doctor uses the saved runtime" $r.out 'saved default runtime: wslc'
+# An auto-detected runtime is not passed to first-run, which asks; a saved one is
+$env:CODE_IT_FIRST_RUN = $stubFirstRun
+try {
+    $r = Invoke-Scenario $codeIt @('-WorkDirToMount', $scriptDir, '-saveDir', (Join-Path $tmp 'rt-nosave')) $stubPath
+    Assert "a detected runtime is first-run's to ask about" ($r.out -match 'STUB-FIRST-RUN \S+ \S+ *(\r?\n|$)')
+    $r = Invoke-Scenario $codeIt @('-runtime', 'docker', '-WorkDirToMount', $scriptDir, '-saveDir', (Join-Path $tmp 'rt-nosave')) $stubPath
+    Assert "an explicit runtime is passed to first-run" ($r.out -match 'STUB-FIRST-RUN .* docker')
+} finally { $env:CODE_IT_FIRST_RUN = $null }
+
+# first-run asks, offering the platform's own, and saves the answer
+$frh = Join-Path $tmp 'rt-firsthome'; $null = New-Item -ItemType Directory -Force -Path $frh
+$own = if ($IsMacOS -eq $true) { 'container' } elseif ($onWindows) { 'wslc' } else { 'docker' }
+$env:HOME = $frh; $env:USERPROFILE = $frh
+try {
+    $frs = Join-Path $tmp 'rt-first-save1'
+    $r = Invoke-ScenarioWithAnswers $firstRun @('-toolchain', 'node', '-agents', 'opencode', '-saveDir', $frs, '-codeItBuild', $stubFirst) $rtPath @('')
+    Assert "first-run with the runtime question exit code" ($r.code -eq 0)
+    Assert-Contains "first-run asks for the runtime" $r.out 'Container runtime (* = found on this machine)'
+    Assert-Contains "first-run shows docker found" $r.out '* docker'
+    Assert-Contains "first-run shows wslc found" $r.out '* wslc'
+    Assert-Contains "first-run offers the platform's own runtime" $r.out "[$own]"
+    Assert "first-run saves the accepted runtime" ((Get-Content "$frs/defaults") -contains "default-runtime=$own")
+    Assert-Contains "first-run builds with it" $r.out "runtime=$own"
+    Assert-Contains "first-run gives the build its save dir" $r.out "saveDir=$frs"
+    $frs = Join-Path $tmp 'rt-first-save2'
+    $r = Invoke-ScenarioWithAnswers $firstRun @('-toolchain', 'node', '-agents', 'opencode', '-saveDir', $frs, '-codeItBuild', $stubFirst) $rtPath @('wslc')
+    Assert "first-run saves the runtime chosen by name" ((Get-Content "$frs/defaults") -contains 'default-runtime=wslc')
+    $frs = Join-Path $tmp 'rt-first-save3'
+    $r = Invoke-Scenario $firstRun @('-yes', '-toolchain', 'node', '-agents', 'opencode', '-saveDir', $frs, '-codeItBuild', $stubFirst) $rtPath
+    Assert "first-run -yes does not ask for the runtime" (-not $r.out.Contains('Container runtime (*'))
+    Assert "first-run -yes saves the platform's own runtime" ((Get-Content "$frs/defaults") -contains "default-runtime=$own")
+    $frs = Join-Path $tmp 'rt-first-save4'
+    $r = Invoke-Scenario $firstRun @('-runtime', 'wslc', '-toolchain', 'node', '-agents', 'opencode', '-saveDir', $frs, '-codeItBuild', $stubFirst) $rtPath
+    Assert "first-run -runtime does not ask" (-not $r.out.Contains('Container runtime (*'))
+    Assert "first-run -runtime saves it" ((Get-Content "$frs/defaults") -contains 'default-runtime=wslc')
+    $frs = Join-Path $tmp 'rt-first-save5'
+    $r = Invoke-Scenario $firstRun @('-yes', '-dryRun', '-toolchain', 'node', '-agents', 'opencode', '-saveDir', $frs, '-codeItBuild', $stubFirst) $stubPath
+    Assert-Contains "first-run -dryRun says it would save the runtime" $r.out 'default-runtime=docker'
+    Assert "first-run -dryRun saves no runtime" (-not (Test-Path -Path "$frs/defaults"))
+} finally { $env:HOME = $savedHome; $env:USERPROFILE = $savedUserProfile }
+
+# Off macOS, `container` is not Apple's: on Windows, WSL installs container.exe as
+# another name for wslc. It is never found, offered or used there.
+$allRtPath = "$stubContainer$([IO.Path]::PathSeparator)$rtPath"
+$env:PATH = $allRtPath
+try {
+    $env:CODE_IT_PLATFORM = 'windows'
+    Assert "on Windows, a container on the PATH is not found as Apple's" (((Get-CodeItRuntimesFound) -join ',') -eq 'docker,wslc')
+    Assert "on Windows, Apple's container is not offered" (((Get-CodeItPlatformRuntimes) -join ',') -eq 'docker,wslc')
+    Assert "on Windows, -runtime container is refused" ($null -eq (Detect-CodeItRuntime 'container' 3>$null))
+    Assert-Contains "and the reason says to use wslc" (Get-CodeItRuntimeUnavailable 'container') "container.exe is another name for WSL's container CLI: use wslc"
+    $env:CODE_IT_PLATFORM = 'linux'
+    Assert "on Linux, a container on the PATH is not found as Apple's" (-not ((Get-CodeItRuntimesFound) -contains 'container'))
+    $env:CODE_IT_PLATFORM = 'macos'
+    Assert "on macOS, Apple's container is found" ((Get-CodeItRuntimesFound) -contains 'container')
+    Assert "on macOS, Apple's container is preferred" ((Detect-CodeItRuntime '') -eq 'container')
+} finally { $env:PATH = $origPath; $env:CODE_IT_PLATFORM = $null }
+$env:CODE_IT_PLATFORM = 'windows'
+try {
+    $r = Invoke-ScenarioWithAnswers $firstRun @('-toolchain', 'node', '-agents', 'opencode', '-saveDir', (Join-Path $tmp 'rt-first-win'), '-codeItBuild', $stubFirst, '-dryRun') $allRtPath @('container', '')
+    Assert "on Windows, first-run does not offer Apple's container" (-not ($r.out -match '\) [* ] container '))
+    Assert-Contains "on Windows, answering container is refused, saying to use wslc" $r.out 'use wslc'
+    Assert-Contains "and first-run asks again, taking wslc" $r.out 'default-runtime=wslc'
+    $r = Invoke-Scenario $codeIt (@('-runtime', 'container') + $commonArgs) $allRtPath
+    Assert "on Windows, Code-It -runtime container fails" ($r.code -ne 0)
+    $r = Invoke-Scenario (Join-Path $scriptDir 'Code-It-Defaults.ps1') @('-saveDir', (Join-Path $tmp 'rt-def-win'), '-runtime', 'container') $allRtPath
+    Assert "on Windows, Code-It-Defaults -runtime container fails" ($r.code -ne 0)
+    Assert-Contains "and says to use wslc" $r.out 'use wslc'
+} finally { $env:CODE_IT_PLATFORM = $null }
 
 # ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $tmp -EA Silent

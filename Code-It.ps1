@@ -7,12 +7,12 @@
 .DESCRIPTION
     Creates and runs a container for development using OpenCode or Claude Code as an agent.
 
-    Picks a container runtime automatically:
+    Uses the container runtime given by -runtime, else the default saved by
+    Code-It-FirstRun.ps1 or Code-It-Defaults.ps1, else picks one automatically:
     - On macOS, uses the Apple container CLI (container) if installed
     - Otherwise uses Docker if installed
     - Otherwise, on Windows, uses WSL's own container CLI (wslc) if installed
     - Otherwise suggests the best runtime to install for the current platform
-    Use -runtime to force one.
 
     The script recognises:
     - Volume mounts for code repositories and agent configuration
@@ -79,7 +79,8 @@
 
 .PARAMETER runtime
     Container runtime to use: "docker", "container" or "wslc".
-    Default: auto-detected as described above.
+    Default: the saved default (Code-It-Defaults.ps1 -runtime), else auto-detected
+    as described above.
 
 .PARAMETER prompt
     Opens the agent with this text as its first prompt. A leading bare argument means the
@@ -184,7 +185,7 @@
     - Defaults saved by Code-It-Defaults.ps1 fill in whatever the command line does
       not say: the agent (-agent/-claude/-opencode win over the default) and the
       toolchain (-toolchain and -image win over it; the default beats the
-      remembered-image heuristic) and -trustWorkDir. Each agent's model comes from its own
+      remembered-image heuristic), -trustWorkDir and -runtime. Each agent's model comes from its own
       configuration under the save dir; run Code-It-Defaults.ps1 to set it there.
     - The prompt and any pass-through arguments are translated into each agent's own
       command line, from the AGENT_CMD_* templates in agents/<name>/config: -prompt
@@ -446,9 +447,21 @@ if (-not $containerLocale) { exit 1 }
 # code-it-alpine-node-bun. An explicit -image overrides it.
 if (-not $image -and $enabledToolchain.Count) { $image = CodeIt-ImageName $enabledToolchain }
 
+# The runtime Code-It-FirstRun or Code-It-Defaults saved; first-run itself asks again
+# only when there is neither.
+$runtimeExplicit = [bool]$runtime
+if (-not $runtime) {
+    $runtime = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-runtime'
+    if ($runtime) {
+        $runtimeExplicit = $true
+        "    Using saved default runtime: $runtime"
+    }
+}
+
 # Detect / validate the container runtime.
 $runtime = Detect-CodeItRuntime $runtime
-if ($null -eq $runtime) { exit 1 }
+# A [string] parameter turns $null into "", so test for empty
+if (-not $runtime) { exit 1 }
 "    Using container runtime: $runtime"
 "    Using code agent: $(if ($noAgent) { 'none (zsh shell)' } else { $codeAgent })"
 
@@ -495,7 +508,10 @@ if (-not $PSBoundParameters.ContainsKey('toolchain') -and -not $PSBoundParameter
             "    (dry run: would run $firstRun)"
             exit 0
         }
-        & $firstRun -saveDir $saveDir -workDir $WorkDirToMount -runtime $runtime
+        $firstRunArgs = @{ saveDir = $saveDir; workDir = $WorkDirToMount }
+        # An auto-detected runtime is first-run's to ask about
+        if ($runtimeExplicit) { $firstRunArgs['runtime'] = $runtime }
+        & $firstRun @firstRunArgs
         exit $LASTEXITCODE
     }
     $enabledToolchain = Select-CodeItKnownToolchain $selectedChains $toolchainsDir
@@ -605,6 +621,7 @@ if (-not $exactExists) {
             agent         = $buildAgents -join ','
             locale        = $locale
             runtime       = $runtime
+            saveDir       = $saveDir
             image         = $image
             yes           = $true
             dryRun        = [bool]$dryRun

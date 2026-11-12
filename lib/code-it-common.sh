@@ -15,7 +15,13 @@
 #   ci_default_image_name TOOLCHAINS                 -> code-it-alpine-<chains>
 #   ci_has LIST ITEM                                  return 0 if ITEM is in LIST
 #   ci_agent_state_mkdir_paths AGENTS_DIR AGENTS      home paths to pre-create for mounts
-#   ci_detect_runtime REQUESTED                       -> docker|container, or return 1
+#   ci_detect_runtime REQUESTED                       -> docker|container|wslc, or return 1
+#   ci_platform_runtimes                              -> the runtimes this platform can have
+#   ci_runtime_unavailable NAME                       why NAME cannot run here, else return 1
+#   ci_runtimes_found                                 -> the installed runtimes, space-separated
+#   ci_platform_runtime                               -> this platform's own runtime
+#   ci_preferred_runtime                              -> the platform's own if found, else detected
+#   ci_ask_runtime CURRENT                            ask which runtime; sets CI_CHOSEN_RUNTIME
 #   ci_join COMMA LIST                                space list -> comma list
 #   ci_resolve_locale RAW                             -> e.g. en_GB.UTF-8, or return 1
 #   ci_read_run_args FILE                             -> the file's run args, one per line
@@ -819,12 +825,116 @@ ci_resolve_locale() {
     fi
 }
 
+# ci_platform_runtimes: the runtimes this platform can have, installed or not, in the
+# order docker, container, wslc. Apple's container only on macOS: WSL installs its
+# own container CLI on Windows as both wslc.exe and container.exe, and that is wslc,
+# not Apple's. wslc on Windows, and wherever it is found.
+ci_platform_runtimes() {
+    local list="docker"
+    case "$(uname -s)" in
+        Darwin)               list+=" container" ;;
+        MINGW*|MSYS*|CYGWIN*) list+=" wslc" ;;
+        *)                    command -v wslc &>/dev/null && list+=" wslc" ;;
+    esac
+    printf '%s' "$list"
+}
+
+# ci_runtime_unavailable NAME: echo why runtime NAME cannot run on this platform, or
+# return 1 if it can. Only Apple's container is tied to one platform.
+ci_runtime_unavailable() {
+    [[ "$1" == container ]] || return 1
+    case "$(uname -s)" in
+        Darwin) return 1 ;;
+        MINGW*|MSYS*|CYGWIN*)
+            printf '%s' "'container' is Apple's container CLI, which runs only on macOS. On Windows, container.exe is another name for WSL's container CLI: use wslc." ;;
+        *)  printf '%s' "'container' is Apple's container CLI, which runs only on macOS." ;;
+    esac
+}
+
+# ci_runtimes_found: the platform's runtimes that are on the PATH, space-separated.
+ci_runtimes_found() {
+    local r found=""
+    for r in $(ci_platform_runtimes); do
+        command -v "$r" &>/dev/null && found=$(ci_comma_list_add "$found" "$r")
+    done
+    printf '%s' "$found"
+}
+
+# ci_platform_runtime: the platform's own runtime, installed or not: Apple's
+# container on macOS, wslc on Windows (Git Bash, MSYS2, Cygwin), docker elsewhere,
+# WSL's Linux among them.
+ci_platform_runtime() {
+    case "$(uname -s)" in
+        Darwin)               printf 'container' ;;
+        MINGW*|MSYS*|CYGWIN*) printf 'wslc' ;;
+        *)                    printf 'docker' ;;
+    esac
+}
+
+# ci_preferred_runtime: the platform's own runtime if it is installed, else the one
+# ci_detect_runtime would pick, else nothing. First-run's suggested default.
+ci_preferred_runtime() {
+    local own found
+    own=$(ci_platform_runtime)
+    found=$(ci_runtimes_found)
+    if ci_has "$found" "$own"; then
+        printf '%s' "$own"
+    elif [[ -n "$found" ]]; then
+        ci_detect_runtime "" 2>/dev/null || true
+    fi
+}
+
+# ci_ask_runtime CURRENT: list the platform's runtimes, those found marked *, and read a choice
+# by number or name from stdin. A blank answer takes CURRENT. Sets CI_CHOSEN_RUNTIME
+# to the choice, or to nothing for `none` or when CURRENT is empty and the answer
+# blank; returns 1, with a warning, for an answer that names no runtime.
+CI_CHOSEN_RUNTIME=""
+ci_ask_runtime() {
+    local current="$1" found runtimes r i=0 mark answer reason
+    found=$(ci_runtimes_found)
+    runtimes=$(ci_platform_runtimes)
+    CI_CHOSEN_RUNTIME=""
+    echo "Container runtime (* = found on this machine):"
+    for r in $runtimes; do
+        i=$((i+1))
+        mark=" "
+        ci_has "$found" "$r" && mark="*"
+        case "$r" in
+            docker)    printf '  %d) %s %-10s %s\n' "$i" "$mark" "$r" "Docker" ;;
+            container) printf '  %d) %s %-10s %s\n' "$i" "$mark" "$r" "Apple containers (macOS)" ;;
+            wslc)      printf '  %d) %s %-10s %s\n' "$i" "$mark" "$r" "WSL's own container CLI (also installed as container.exe)" ;;
+        esac
+    done
+    printf 'Runtime, by number or name [%s]: ' "${current:-none}"
+    read -r answer || answer=""
+    answer="${answer// /}"
+    case "$answer" in
+        "")   CI_CHOSEN_RUNTIME="$current"; return 0 ;;
+        none) return 0 ;;
+    esac
+    if reason=$(ci_runtime_unavailable "$answer"); then
+        echo "Warning: $reason" >&2
+        return 1
+    fi
+    i=0
+    for r in $runtimes; do
+        i=$((i+1))
+        if [[ "$answer" == "$i" || "$answer" == "$r" ]]; then
+            CI_CHOSEN_RUNTIME="$r"
+            ci_has "$found" "$r" || echo "Warning: '$r' is not found on this machine yet; install it before running code-it." >&2
+            return 0
+        fi
+    done
+    echo "Warning: Unknown runtime '$answer'. Valid values here are: $runtimes." >&2
+    return 1
+}
+
 # ci_detect_runtime REQUESTED: echo the runtime to use, warning and returning 1 if
-# none is found. On macOS prefer the Apple container CLI, then docker, then container.
-# Elsewhere prefer docker, then WSL's own container CLI (wslc, Windows only), then
-# container.
+# none is found. On macOS prefer the Apple container CLI, then docker. Elsewhere
+# prefer docker, then WSL's own container CLI (wslc, Windows only); never `container`,
+# which off macOS is not Apple's (on Windows it is wslc again).
 ci_detect_runtime() {
-    local runtime="$1" platform
+    local runtime="$1" platform reason
     platform=$(uname -s)
     case "$runtime" in
         "")
@@ -834,8 +944,6 @@ ci_detect_runtime() {
                 runtime="docker"
             elif command -v wslc &>/dev/null; then
                 runtime="wslc"
-            elif command -v container &>/dev/null; then
-                runtime="container"
             else
                 echo "Warning: No container runtime found." >&2
                 case "$platform" in
@@ -867,6 +975,10 @@ ci_detect_runtime() {
             fi
             ;;
         docker|container|wslc)
+            if reason=$(ci_runtime_unavailable "$runtime"); then
+                echo "Warning: $reason" >&2
+                return 1
+            fi
             if ! command -v "$runtime" &>/dev/null; then
                 echo "Warning: Requested runtime '$runtime' not found. Please install it and ensure it is in your PATH." >&2
                 return 1

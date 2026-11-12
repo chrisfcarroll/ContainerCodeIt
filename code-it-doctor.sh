@@ -13,7 +13,8 @@
 #   ./code-it-doctor.sh [OPTIONS] [PROBLEM]
 #
 # Options:
-#   --runtime, -r NAME   docker, container or wslc. Default: auto-detect, as code-it does.
+#   --runtime, -r NAME   docker, container or wslc. Default: the saved default, else
+#                        auto-detect, as code-it does.
 #   --image, -i NAME     Image to check. Default: the most recently used existing
 #                        code-it image, else the most recently built.
 #   --save-dir, -s DIR   code-it's save dir. Default: ~/.config/code-it
@@ -117,6 +118,10 @@ fi
 # ---------------------------------------------------------------------------
 section "Container runtime"
 runtime_ok=false
+if [[ -z "$runtime" ]]; then
+    runtime=$(ci_config_value "$save_dir/defaults" "default-runtime") || runtime=""
+    [[ -n "$runtime" ]] && say "  saved default runtime: $runtime"
+fi
 if detected=$(ci_detect_runtime "$runtime" 2>&1); then
     runtime="$detected"
     say "  $runtime: $("$runtime" --version 2>/dev/null | head -n 1 || true)"

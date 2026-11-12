@@ -60,7 +60,11 @@
     own directory.
 
 .PARAMETER runtime
-    Container runtime to use: "docker", "container" or "wslc". Default: auto-detected.
+    Container runtime to use: "docker", "container" or "wslc". Default: the saved
+    default in <saveDir>/defaults (Code-It-Defaults.ps1 -runtime), else auto-detected.
+
+.PARAMETER saveDir
+    Where the saved defaults are read from. Default: ~/.config/code-it
 
 .PARAMETER dryRun
     Print the build command without executing it.
@@ -97,6 +101,7 @@ param (
     [string]$image         = "",
     [string]$dockerfileDir = "",
     [string]$runtime       = "",
+    [string]$saveDir       = "$HOME/.config/code-it",
     [switch]$dryRun        = $false,
     [switch]$yes           = $false,
     [switch]$interactive   = $false,
@@ -220,8 +225,14 @@ if (-not $containerLocale) { exit 1 }
 
 if (-not $image) { $image = CodeIt-ImageName $enabledToolchain }
 
+# -runtime, else the saved default
+if (-not $runtime) {
+    $runtime = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-runtime'
+    if ($runtime) { "    Using saved default runtime: $runtime" }
+}
 $runtime = Detect-CodeItRuntime $runtime
-if ($null -eq $runtime) { exit 1 }
+# A [string] parameter turns $null into "", so test for empty
+if (-not $runtime) { exit 1 }
 
 if (-not (Test-Path -Path "$dockerfileDir/Dockerfile" -PathType Leaf)) {
     Write-Warning "Dockerfile not found at: $dockerfileDir/Dockerfile"

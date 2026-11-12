@@ -2,12 +2,12 @@
 #
 # Launches an Alpine Linux container with OpenCode, Claude Code, and a parameterisable set of toolchains.
 #
-# Picks a container runtime automatically:
+# Uses the container runtime given by --runtime, else the default saved by first-run
+# or code-it-defaults, else picks one automatically:
 # - On macOS, uses the Apple container CLI (container) if installed
 # - Otherwise uses Docker if installed
 # - Otherwise, on Windows, uses WSL's own container CLI (wslc) if installed
 # - Otherwise suggests the best runtime to install for the current platform
-# Use --runtime to force one.
 #
 # Creates and runs a container for development using Claude Code or OpenCode as an agent.
 # The script recognises:
@@ -80,7 +80,8 @@
 #                            Set it explicitly to force a particular image (an error if it
 #                            does not exist).
 #   --runtime, -r NAME       Container runtime to use: "docker", "container" or "wslc".
-#                            Default: auto-detected as described above.
+#                            Default: the saved default (code-it-defaults --runtime),
+#                            else auto-detected as described above.
 #   --locale, -l LOCALE      The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB.
 #                            Passed to the container when it runs, so it need not be
 #                            the image's. Default: like-host, the host's own locale
@@ -154,7 +155,7 @@
 #   - Defaults saved by code-it-defaults fill in whatever the command line does not
 #     say: the agent (its options win over the default) and the toolchain (the
 #     default beats the remembered-image heuristic; --toolchain and --image win over
-#     it) and --trust-work-dir. Each agent's model comes from its own configuration under the save dir;
+#     it), --trust-work-dir and --runtime. Each agent's model comes from its own configuration under the save dir;
 #     run code-it-defaults to set it there.
 #   - The prompt and any pass-through arguments are translated into each agent's own
 #     command line, from the AGENT_CMD_* templates in agents/NAME/config: --prompt
@@ -472,6 +473,18 @@ if [[ "$toolchain_explicit" == false && "$image_explicit" == false ]]; then
         echo "    Using saved default toolchain: $saved_toolchain"
     fi
 fi
+# The runtime first-run or code-it-defaults saved; first-run itself asks again only
+# when there is neither.
+runtime_explicit=false
+if [[ -n "$runtime" ]]; then
+    runtime_explicit=true
+else
+    runtime=$(ci_config_value "$save_dir/defaults" "default-runtime") || runtime=""
+    if [[ -n "$runtime" ]]; then
+        runtime_explicit=true
+        echo "    Using saved default runtime: $runtime"
+    fi
+fi
 if [[ -z "$trust_work_dir" ]]; then
     trust_work_dir=$(ci_config_value "$save_dir/defaults" "trust-work-dir") || trust_work_dir=""
     [[ "$trust_work_dir" == yes ]] && echo "    Using saved default: trust the work dir"
@@ -566,7 +579,10 @@ run_first_run() {
         echo "    (dry run: would run $first_run)"
         exit 0
     fi
-    "$first_run" --save-dir "$save_dir" --work-dir "$work_dir_to_mount" --runtime "$runtime"
+    first_run_args=(--save-dir "$save_dir" --work-dir "$work_dir_to_mount")
+    # An auto-detected runtime is first-run's to ask about
+    [[ "$runtime_explicit" == true ]] && first_run_args+=(--runtime "$runtime")
+    "$first_run" "${first_run_args[@]}"
     exit $?
 }
 
@@ -689,6 +705,7 @@ if ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
         build_args=(--toolchain "$(ci_join , "$enabled_toolchain")"
                     --package-caches "$(ci_join , "$enabled_package_caches")"
                     --agent "$(ci_join , "$build_agents")"
+                    --save-dir "$save_dir"
                     --locale "$locale" --runtime "$runtime" --image "$image" --yes)
         [[ "$dry_run" == true ]] && build_args+=(--dry-run)
         echo "Warning: $runtime image '$image' does not exist; building it with code-it-build.sh --toolchain ${build_args[1]} --agent ${build_args[5]}" >&2

@@ -675,14 +675,105 @@ function Invoke-CodeItAdder([string]$name, [string]$branch, [string]$repo, [stri
     return [int]$rc
 }
 
+# The host platform, for the runtime choice: macos, windows or linux.
+# CODE_IT_PLATFORM overrides it, for tests, as $IsMacOS cannot be faked.
+function Get-CodeItHostPlatform {
+    if ($env:CODE_IT_PLATFORM) { return $env:CODE_IT_PLATFORM }
+    # $IsMacOS is not defined in Windows PowerShell 5.1, so treat unset as false
+    if ($IsMacOS -eq $true) { return 'macos' }
+    if ($env:OS -eq 'Windows_NT') { return 'windows' }
+    return 'linux'
+}
+
+# The runtimes this platform can have, installed or not, in the order docker,
+# container, wslc. Apple's container only on macOS: WSL installs its own container
+# CLI on Windows as both wslc.exe and container.exe, and that is wslc, not Apple's.
+# wslc on Windows, and wherever it is found.
+function Get-CodeItPlatformRuntimes {
+    $list = @('docker')
+    switch (Get-CodeItHostPlatform) {
+        'macos'   { $list += 'container' }
+        'windows' { $list += 'wslc' }
+        default   { if (Get-Command wslc -EA Silent) { $list += 'wslc' } }
+    }
+    return ,$list
+}
+
+# Why runtime $name cannot run on this platform, or $null if it can. Only Apple's
+# container is tied to one platform.
+function Get-CodeItRuntimeUnavailable([string]$name) {
+    if ($name -ne 'container') { return $null }
+    switch (Get-CodeItHostPlatform) {
+        'macos'   { return $null }
+        'windows' { return "'container' is Apple's container CLI, which runs only on macOS. On Windows, container.exe is another name for WSL's container CLI: use wslc." }
+        default   { return "'container' is Apple's container CLI, which runs only on macOS." }
+    }
+}
+
+# The platform's runtimes that are on the PATH.
+function Get-CodeItRuntimesFound {
+    return ,@((Get-CodeItPlatformRuntimes) | Where-Object { Get-Command $_ -EA Silent })
+}
+
+# The platform's own runtime, installed or not: Apple's container on macOS, wslc on
+# Windows, docker elsewhere, WSL's Linux among them.
+function Get-CodeItPlatformRuntime {
+    switch (Get-CodeItHostPlatform) {
+        'macos'   { return 'container' }
+        'windows' { return 'wslc' }
+    }
+    return 'docker'
+}
+
+# The platform's own runtime if it is installed, else the one Detect-CodeItRuntime
+# would pick, else $null. First-run's suggested default.
+function Get-CodeItPreferredRuntime {
+    $found = Get-CodeItRuntimesFound
+    $own = Get-CodeItPlatformRuntime
+    if ($found -contains $own) { return $own }
+    if ($found.Count) { return (Detect-CodeItRuntime '' 3>$null 6>$null) }
+    return $null
+}
+
+# List the platform's runtimes, those found marked *, and read a choice by number or name with
+# Read-Host. A blank answer takes $current. Returns @{ ok; runtime }: runtime is the
+# choice, or '' for none (or a blank answer with no $current); ok is $false, with a
+# warning, for an answer that names no runtime.
+function Read-CodeItRuntime([string]$current) {
+    $found = Get-CodeItRuntimesFound
+    $runtimes = Get-CodeItPlatformRuntimes
+    $labels = @{ docker = 'Docker'; container = 'Apple containers (macOS)'; wslc = "WSL's own container CLI (also installed as container.exe)" }
+    Write-Host "Container runtime (* = found on this machine):"
+    for ($i = 0; $i -lt $runtimes.Count; $i++) {
+        $r = $runtimes[$i]
+        $mark = if ($found -contains $r) { '*' } else { ' ' }
+        Write-Host ("  {0}) {1} {2,-10} {3}" -f ($i + 1), $mark, $r, $labels[$r])
+    }
+    $shown = if ($current) { $current } else { 'none' }
+    $answer = "$(Read-Host "Runtime, by number or name [$shown]")".Trim()
+    if (-not $answer) { return @{ ok = $true; runtime = $current } }
+    if ($answer -eq 'none') { return @{ ok = $true; runtime = '' } }
+    $reason = Get-CodeItRuntimeUnavailable $answer
+    if ($reason) { Write-Warning $reason; return @{ ok = $false; runtime = '' } }
+    for ($i = 0; $i -lt $runtimes.Count; $i++) {
+        $r = $runtimes[$i]
+        if ($answer -eq "$($i + 1)" -or $answer -eq $r) {
+            if ($found -notcontains $r) { Write-Warning "'$r' is not found on this machine yet; install it before running code-it." }
+            return @{ ok = $true; runtime = $r }
+        }
+    }
+    Write-Warning "Unknown runtime '$answer'. Valid values here are: $($runtimes -join ' ')."
+    return @{ ok = $false; runtime = '' }
+}
+
 # Detect / validate the container runtime. On macOS prefer the Apple container CLI,
-# then docker, then the container CLI. Elsewhere prefer docker, then WSL's own
-# container CLI (wslc, Windows only), then container. Warn and return $null if none
-# is usable.
+# then docker. Elsewhere prefer docker, then WSL's own container CLI (wslc, Windows
+# only); never `container`, which off macOS is not Apple's (on Windows it is wslc
+# again). Warn and return $null if none is usable.
 function Detect-CodeItRuntime([string]$runtime) {
-    # $IsMacOS/$IsLinux are not defined in Windows PowerShell 5.1, so treat unset as false
-    $onMacOS = $IsMacOS -eq $true
-    $onLinux = $IsLinux -eq $true
+    $platform = Get-CodeItHostPlatform
+    $onMacOS = $platform -eq 'macos'
+    $onLinux = $platform -eq 'linux'
     if (-not $runtime) {
         if ($onMacOS -and (Get-Command container -EA Silent)) {
             $runtime = "container"
@@ -692,9 +783,6 @@ function Detect-CodeItRuntime([string]$runtime) {
         }
         elseif (Get-Command wslc -EA Silent) {
             $runtime = "wslc"
-        }
-        elseif (Get-Command container -EA Silent) {
-            $runtime = "container"
         }
         else {
             Write-Warning "No container runtime found."
@@ -723,6 +811,10 @@ function Detect-CodeItRuntime([string]$runtime) {
     }
     elseif ($runtime -notin @("docker", "container", "wslc")) {
         Write-Warning "Unknown runtime '$runtime'. Valid values are 'docker', 'container' or 'wslc'."
+        return $null
+    }
+    elseif ($reason = Get-CodeItRuntimeUnavailable $runtime) {
+        Write-Warning $reason
         return $null
     }
     elseif (-not (Get-Command $runtime -EA Silent)) {

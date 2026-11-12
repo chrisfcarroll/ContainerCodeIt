@@ -47,7 +47,7 @@ assert_contains() {
 # machines that have them.
 cleanbin="$tmp/cleanbin"
 mkdir -p "$cleanbin"
-for cmd in bash sh sed grep tr uname dirname mkdir cat head sort mv cp chmod git touch wc tail awk date find; do
+for cmd in bash sh sed grep tr uname dirname basename mkdir cat head sort mv cp chmod git touch wc tail awk date find; do
     src=$(command -v "$cmd" 2>/dev/null) && ln -s "$src" "$cleanbin/$cmd"
 done
 
@@ -384,6 +384,55 @@ printf '\n\n\n\nyes\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" >/dev/
 grep -q '^trust-work-dir=yes$' "$trust_d/defaults"; assert "interactive yes saves trust-work-dir" "$?"
 printf '\n\n\n\n\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" >/dev/null 2>&1
 grep -q '^trust-work-dir=yes$' "$trust_d/defaults"; assert "interactive blank keeps trust-work-dir" "$?"
+
+# ---------------------------------------------------------------------------
+echo "Default runtime: --runtime, --show, the interactive question"
+stub_wslc="$tmp/stub-wslc"; mkdir -p "$stub_wslc"
+printf '#!/bin/sh\necho "stub wslc: $*"\n' > "$stub_wslc/wslc"; chmod +x "$stub_wslc/wslc"
+rt_d="$tmp/rt-defaults"
+out=$(PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" --runtime wslc 2>&1)
+assert "--runtime wslc exits 0" "$?"
+grep -q '^default-runtime=wslc$' "$rt_d/defaults"; assert "--runtime wslc saves default-runtime" "$?"
+[[ "$out" != *"not found"* ]]; assert "an installed runtime saves without a warning" "$?"
+out=$(PATH="$cleanbin" "$defaults" -s "$rt_d" --show)
+printf '%s\n' "$out" | grep -q 'default runtime:.*wslc'; assert "--show shows the default runtime" "$?"
+out=$(PATH="$cleanbin" "$defaults" -s "$rt_d" -r docker 2>&1)
+assert "-r docker exits 0 though docker is not installed" "$?"
+assert_contains "a runtime not installed is saved with a warning" "$out" "'docker' is not found"
+grep -q '^default-runtime=docker$' "$rt_d/defaults"; assert "-r docker replaces the saved runtime" "$?"
+PATH="$cleanbin" "$defaults" -s "$rt_d" --runtime podman >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "--runtime podman fails" "$?"
+grep -q '^default-runtime=docker$' "$rt_d/defaults"; assert "an unknown runtime keeps what is saved" "$?"
+out=$(PATH="$cleanbin" "$defaults" -s "$rt_d" --runtime wslc --dry-run 2>&1)
+assert_contains "--runtime --dry-run says what it would set" "$out" "would set in $rt_d/defaults: default-runtime=wslc"
+grep -q '^default-runtime=docker$' "$rt_d/defaults"; assert "--runtime --dry-run changes nothing" "$?"
+# Apple's container only on macOS: on Windows, container.exe is wslc
+stub_mingw="$tmp/stub-mingw"; mkdir -p "$stub_mingw"
+printf '#!/bin/sh\necho MINGW64_NT-10.0\n' > "$stub_mingw/uname"; chmod +x "$stub_mingw/uname"
+printf '#!/bin/sh\necho "stub container: $*"\n' > "$stub_wslc/container"; chmod +x "$stub_wslc/container"
+out=$(PATH="$stub_mingw:$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" --runtime container 2>&1)
+[[ "$?" != "0" ]]; assert "on Windows, --runtime container fails" "$?"
+assert_contains "and says to use wslc" "$out" "use wslc"
+grep -q '^default-runtime=docker$' "$rt_d/defaults"; assert "and keeps what is saved" "$?"
+PATH="$cleanbin" "$defaults" -s "$rt_d" --runtime container >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "on Linux, --runtime container fails" "$?"
+rm -f "$stub_wslc/container"
+PATH="$cleanbin" "$defaults" -s "$rt_d" --runtime none >/dev/null 2>&1
+grep -q '^default-runtime=' "$rt_d/defaults"
+[[ "$?" != "0" ]]; assert "--runtime none clears it" "$?"
+out=$(PATH="$cleanbin" "$defaults" --help)
+assert_contains "--help documents --runtime" "$out" "--runtime, -r NAME"
+
+# Interactive: the last question; blank keeps, a number or name saves. Answers:
+# agent, claude's model, opencode's model, toolchain, trust, runtime
+printf '\n\n\n\n\nwslc\n' | PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" >"$tmp/rt-out" 2>&1
+grep -q '^default-runtime=wslc$' "$rt_d/defaults"; assert "interactive wslc saves wslc" "$?"
+assert_contains "interactive marks the runtimes found" "$(cat "$tmp/rt-out")" "* wslc"
+printf '\n\n\n\n\n\n' | PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" >/dev/null 2>&1
+grep -q '^default-runtime=wslc$' "$rt_d/defaults"; assert "interactive blank keeps the runtime" "$?"
+printf '\n\n\n\n\nnone\n' | PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" >/dev/null 2>&1
+grep -q '^default-runtime=' "$rt_d/defaults"
+[[ "$?" != "0" ]]; assert "interactive none clears the runtime" "$?"
 
 # ---------------------------------------------------------------------------
 echo

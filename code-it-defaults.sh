@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
 # Sets the defaults code-it uses when you give it no options: which agent to run,
-# which model each agent uses, which toolchain image to prefer, and whether agents
-# trust the work dir.
+# which model each agent uses, which toolchain image to prefer, whether agents
+# trust the work dir, and which container runtime to use.
 #
-# With no parameters it asks. With any of --agent/--model/--toolchain/--trust-work-dir
-# it sets exactly
-# those and asks nothing. Everything is saved in SAVE-DIR/defaults (default
+# With no parameters it asks. With any of --agent/--model/--toolchain/--trust-work-dir/
+# --runtime it sets exactly those and asks nothing. Everything is saved in SAVE-DIR/defaults (default
 # ~/.config/code-it/defaults), which code-it reads; models are also written into each
 # agent's own configuration under the save dir (from AGENT_MODEL_FILE in
 # agents/NAME/config), so the agent picks them up on every run.
@@ -33,6 +32,11 @@
 #                           you trust this folder?". Only for code you trust: the
 #                           folder's own hooks and settings then run unasked.
 #                           code-it --no-trust-work-dir still wins. Default: no.
+#   --runtime, -r NAME      Set the default container runtime: docker, container
+#                           (Apple containers) or wslc (WSL's own, on Windows), as
+#                           code-it --runtime would take it; code-it-first-run asks
+#                           for it. `none` clears it, so code-it auto-detects again.
+#                           code-it --runtime still wins.
 #   --show                  Print the current defaults and exit.
 #   --refresh-models        Refresh SAVE-DIR/model-catalog.txt, the model list offered
 #                           by the interactive picker, from https://models.dev/api.json
@@ -65,6 +69,7 @@ agent_arg=""
 toolchain_arg=""
 toolchain_set=false
 trust_arg=""
+runtime_arg=""
 model_args=()
 show=false
 refresh=false
@@ -78,6 +83,7 @@ while [[ $# -gt 0 ]]; do
         --model)          model_args+=("$2"); shift 2 ;;
         --toolchain|-t)   toolchain_arg="$2"; toolchain_set=true; shift 2 ;;
         --trust-work-dir) trust_arg="$2"; shift 2 ;;
+        --runtime|-r)     runtime_arg="$2"; shift 2 ;;
         --show)           show=true; shift ;;
         --refresh-models) refresh=true; shift ;;
         --save-dir|-s)    save_dir="$2"; shift 2 ;;
@@ -402,6 +408,8 @@ do_show() {
     if [[ -n "$t" ]]; then printf '  %-22s %s\n' "default toolchain:" "$t"; fi
     t=$(current trust-work-dir)
     if [[ -n "$t" ]]; then printf '  %-22s %s\n' "trust work dir:" "$t"; fi
+    t=$(current default-runtime)
+    if [[ -n "$t" ]]; then printf '  %-22s %s\n' "default runtime:" "$t"; fi
     while IFS= read -r a; do
         m=$(current "model.$a")
         m_file=""
@@ -427,6 +435,26 @@ set_trust() {
         y|yes) defaults_set trust-work-dir yes; echo "    Trust the work dir: yes" ;;
         n|no)  defaults_set trust-work-dir ""; echo "    Trust the work dir: no" ;;
         *)     echo "Warning: --trust-work-dir needs yes or no, not '$1'." >&2; return 1 ;;
+    esac
+}
+
+# set_runtime NAME: save the default container runtime; none clears it. A runtime
+# not installed here is saved anyway, with a warning, so it can be set up first.
+set_runtime() {
+    local reason
+    case "$1" in
+        none) defaults_set default-runtime ""; echo "    Default runtime: none (auto-detect)" ;;
+        docker|container|wslc)
+            if reason=$(ci_runtime_unavailable "$1"); then
+                echo "Warning: $reason" >&2
+                return 1
+            fi
+            ci_has "$(ci_runtimes_found)" "$1" \
+                || echo "Warning: '$1' is not found on this machine yet; install it before running code-it." >&2
+            defaults_set default-runtime "$1"
+            echo "    Default runtime: $1"
+            ;;
+        *)  echo "Warning: Unknown runtime '$1'. Valid values are 'docker', 'container', 'wslc' or 'none'." >&2; return 1 ;;
     esac
 }
 
@@ -632,6 +660,14 @@ interactive() {
         set_trust "$answer" || true
     fi
 
+    # 5. The container runtime
+    echo
+    local saved_runtime
+    saved_runtime=$(current default-runtime)
+    if ci_ask_runtime "$saved_runtime" && [[ "$CI_CHOSEN_RUNTIME" != "$saved_runtime" ]]; then
+        set_runtime "${CI_CHOSEN_RUNTIME:-none}" 2>/dev/null || true
+    fi
+
     echo
     do_show
 }
@@ -648,7 +684,7 @@ if [[ "$show" == true ]]; then
     exit 0
 fi
 
-if [[ -z "$agent_arg" && "$toolchain_set" == false && -z "$trust_arg" && ${#model_args[@]} -eq 0 ]]; then
+if [[ -z "$agent_arg" && "$toolchain_set" == false && -z "$trust_arg" && -z "$runtime_arg" && ${#model_args[@]} -eq 0 ]]; then
     interactive
     exit 0
 fi
@@ -686,5 +722,8 @@ if [[ "$toolchain_set" == true ]]; then
 fi
 if [[ -n "$trust_arg" ]]; then
     set_trust "$trust_arg" || rc=1
+fi
+if [[ -n "$runtime_arg" ]]; then
+    set_runtime "$runtime_arg" || rc=1
 fi
 exit "$rc"

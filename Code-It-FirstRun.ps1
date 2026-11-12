@@ -5,7 +5,12 @@
     Interactive first-run setup: detect, choose, build, carry over agent logins.
 
 .DESCRIPTION
-    Delegates runtime and build selection to Code-It-Build.ps1, offers to copy host
+    Asks which container runtime to use, showing which of docker, Apple's container
+    and wslc are found and suggesting the platform's own (container on macOS, wslc
+    on Windows, docker elsewhere) when it is found, and saves the answer as code-it's
+    default runtime (Code-It-Defaults.ps1 -runtime changes it later).
+
+    Delegates toolchain, agent and build selection to Code-It-Build.ps1, offers to copy host
     agent state into the save dir without overwriting existing files, sets each
     agent's config there to run without permission prompts (AGENT_PERMISSIONS), and
     prints the Code-It.ps1 command to start.
@@ -30,7 +35,8 @@
     Directory containing the Dockerfile.
 
 .PARAMETER runtime
-    docker, container or wslc. Default: auto-detected.
+    docker, container or wslc (skips that question, and is saved as the default).
+    Default: asked; with -yes, the platform's own if found, else auto-detected.
 
 .PARAMETER codeItBuild
     Code-It-Build.ps1 launcher to invoke. Default: sibling.
@@ -64,6 +70,7 @@ param (
 # Defaults naming this script's own directory are set here, not in param(): Windows
 # PowerShell 5.1 leaves $PSScriptRoot empty in param() when run with -File.
 if (-not $codeItBuild) { $codeItBuild = Join-Path $PSScriptRoot 'Code-It-Build.ps1' }
+$codeItDefaults = Join-Path $PSScriptRoot 'Code-It-Defaults.ps1'
 
 if ($help) {
     Get-Help $PSCommandPath -Full
@@ -80,6 +87,28 @@ if (-not (Get-Command git -EA Silent)) {
     exit 1
 }
 
+# Child scripts run in the same PowerShell as this script: pwsh, or Windows PowerShell
+# 5.1, which is all a new Windows machine has.
+$powershellExe = Get-CodeItPowerShellExe
+if (-not $powershellExe) { Write-Warning 'Cannot find the PowerShell executable to run Code-It-Build.ps1.'; exit 1 }
+
+# The container runtime: asked, unless given, and saved as the default, so Code-It,
+# Code-It-Build and Code-It-Doctor use it from now on.
+if (-not $runtime -and (Get-CodeItRuntimesFound).Count) {
+    $runtime = Get-CodeItPreferredRuntime
+    if (-not $yes) {
+        Write-Host ""
+        do { $choice = Read-CodeItRuntime $runtime } until ($choice.ok)
+        $runtime = $choice.runtime
+    }
+}
+if ($runtime) {
+    $defaultsArgs = @('-NoProfile', '-File', $codeItDefaults, '-saveDir', $saveDir, '-runtime', $runtime)
+    if ($dryRun) { $defaultsArgs += '-dryRun' }
+    & $powershellExe @defaultsArgs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 # Code-It-Build owns host detection, selection, runtime detection and build confirmation.
 $selectionFile = Join-Path ([IO.Path]::GetTempPath()) ("code-it-first-run-selection-" + [Guid]::NewGuid().ToString('N'))
 $buildParams = @{ interactive = $true; selectionFile = $selectionFile }
@@ -88,14 +117,11 @@ if ($agents) { $buildParams['agent'] = $agents }
 if ($image) { $buildParams['image'] = $image }
 if ($dockerfileDir) { $buildParams['dockerfileDir'] = $dockerfileDir }
 if ($runtime) { $buildParams['runtime'] = $runtime }
+if ($saveDir -ne "$HOME/.config/code-it") { $buildParams['saveDir'] = $saveDir }
 if ($yes) { $buildParams['yes'] = $true }
 if ($dryRun) { $buildParams['dryRun'] = $true }
 
 Write-Host "  $codeItBuild -interactive"
-# Build runs in the same PowerShell as this script: pwsh, or Windows PowerShell 5.1,
-# which is all a new Windows machine has.
-$powershellExe = Get-CodeItPowerShellExe
-if (-not $powershellExe) { Write-Warning 'Cannot find the PowerShell executable to run Code-It-Build.ps1.'; exit 1 }
 $buildArgumentList = @('-NoProfile', '-File', $codeItBuild)
 foreach ($name in $buildParams.Keys) {
     $value = $buildParams[$name]

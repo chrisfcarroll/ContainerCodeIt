@@ -297,9 +297,9 @@ esac
 out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert_contains "non-macOS prefers docker" "$out" "Using container runtime: docker"
 # Forced runtime
-out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" --runtime container "${common_args[@]}")
+out=$(PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" --runtime container "${common_args[@]}")
 assert_contains "--runtime container forces apple container" "$out" "Using container runtime: container"
-out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" --runtime container --work-dir "$script_dir" --save-dir "$save")
+out=$(PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" --runtime container --work-dir "$script_dir" --save-dir "$save")
 assert_contains "container run gets --memory and 3g as separate arguments" "$out" "[--memory][3g]"
 # Invalid runtime
 PATH="$stub_docker:$PATH" "$code_it" --runtime bogus "${common_args[@]}" >/dev/null 2>&1
@@ -728,13 +728,14 @@ out=$(CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-al
     "$code_it" --toolchain python --package-caches npm --locale en-GB --agent codex "${super_args[@]}" 2>&1)
 assert_contains "build gets the toolchains and package caches" "$out" "STUB-BUILD --toolchain python --package-caches npm"
 assert_contains "build gets the defaults plus the chosen agent" "$out" "--agent opencode,claude,codex"
+assert_contains "build gets the save dir, for the saved defaults" "$out" "--save-dir "
 assert_contains "build gets the locale, runtime and image" "$out" "--locale en-GB --runtime docker --image code-it-alpine-python --yes --dry-run"
 out=$(CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet:latest" \
     "$code_it" --toolchain python --agent claude "${super_args[@]}" 2>&1)
-assert_contains "an agent already in the defaults is not repeated" "$out" "--agent opencode,claude --locale"
+assert_contains "an agent already in the defaults is not repeated" "$out" "--agent opencode,claude --save-dir"
 out=$(CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet:latest" \
     "$code_it" --toolchain python --no-agent "${super_args[@]}" 2>&1)
-assert_contains "--no-agent builds the default agents" "$out" "--agent opencode,claude --locale"
+assert_contains "--no-agent builds the default agents" "$out" "--agent opencode,claude --save-dir"
 out=$(STUB_BUILD_RC=3 CODE_IT_BUILD="$stub_build" PATH="$superbin:$PATH" STUB_IMAGES="code-it-alpine-dotnet:latest" \
     "$code_it" --toolchain python "${super_args[@]}" 2>&1)
 [[ "$?" == "3" ]]; assert "a failed build exits with its code" "$?"
@@ -805,7 +806,7 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -p "explain this" "${common_args[@]}"
 assert_contains "-p is --prompt" "$out" '--prompt explain\ this'
 out=$(PATH="$stub_docker:$PATH" "$code_it" -t node "${common_args[@]}")
 assert_contains "-t is --toolchain" "$out" "'code-it-alpine-node' does not exist; using 'code-it-alpine-dotnet-node'"
-out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" -r container -i code-it-alpine-dotnet-node -w "$script_dir" -s "$save" -d)
+out=$(PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" -r container -i code-it-alpine-dotnet-node -w "$script_dir" -s "$save" -d)
 assert_contains "-r is --runtime" "$out" "Using container runtime: container"
 assert_contains "-i is --image" "$out" "code-it-alpine-dotnet-node:latest"
 case "$out" in
@@ -1708,7 +1709,7 @@ esac
 
 # (d) the Apple container CLI is given the host's value for a bare -e NAME, and an
 # unset NAME is dropped, as docker does; the printout still shows no value
-out=$(BAR=host-bar PATH="$stub_container:$stub_docker:$PATH" "$code_it" -r container "${ra_args[@]}" \
+out=$(BAR=host-bar PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" -r container "${ra_args[@]}" \
     -e BAR -e UNSET_NAME_FOR_TEST -e FOO=1 --run-arg --env --run-arg BAZ=2 2>&1)
 assert_contains "container: bare -e NAME gets the host's value" "$out" "[-e][BAR=host-bar][-e][FOO=1][--env][BAZ=2]"
 assert_contains "container: image follows runtime arguments" "$out" "[code-it-alpine-dotnet"
@@ -1915,6 +1916,119 @@ assert_contains "wslc build is labelled" "$out" "--label code-it.toolchains=dotn
 # The unknown-runtime message names wslc
 out=$(PATH="$stub_docker:$PATH" "$code_it" --runtime bogus "${common_args[@]}" 2>&1)
 assert_contains "unknown runtime lists wslc" "$out" "'docker', 'container' or 'wslc'"
+
+# ---------------------------------------------------------------------------
+echo "25. The default runtime: saved by first-run and code-it-defaults, used by all"
+stub_mingw="$tmp/stub-mingw"; mkdir -p "$stub_mingw"
+printf '#!/bin/sh\ncase "$1" in -r) echo 3.5.0;; *) echo MINGW64_NT-10.0;; esac\n' > "$stub_mingw/uname"
+chmod +x "$stub_mingw/uname"
+# Library helpers
+[[ "$(PATH="$stub_wslc:$stub_docker:$PATH" ci_runtimes_found)" == "docker wslc" ]]
+assert "ci_runtimes_found lists the installed runtimes" "$?"
+[[ "$(PATH="$stub_mingw:$PATH" ci_platform_runtime)" == wslc ]]; assert "Windows' own runtime is wslc" "$?"
+[[ "$(PATH="$stub_darwin:$PATH" ci_platform_runtime)" == container ]]; assert "macOS's own runtime is container" "$?"
+[[ "$(PATH="$cleanbin" ci_platform_runtime)" == docker ]]; assert "Linux's own runtime is docker" "$?"
+[[ "$(PATH="$stub_mingw:$stub_wslc:$stub_docker:$PATH" ci_preferred_runtime)" == wslc ]]
+assert "on Windows, wslc is preferred when found, over docker" "$?"
+[[ "$(PATH="$stub_mingw:$stub_docker:$PATH" ci_preferred_runtime)" == docker ]]
+assert "on Windows without wslc, docker is preferred" "$?"
+[[ "$(PATH="$stub_wslc:$stub_docker:$PATH" ci_preferred_runtime)" == docker ]]
+assert "on Linux, docker is preferred" "$?"
+out=$(printf '2\n' | { PATH="$stub_mingw:$stub_docker:$PATH" ci_ask_runtime docker; echo "CHOSEN=$CI_CHOSEN_RUNTIME"; })
+assert_contains "ci_ask_runtime marks a found runtime" "$out" "* docker"
+assert_contains "ci_ask_runtime offers wslc on Windows, found or not" "$out" "2)   wslc"
+assert_contains "ci_ask_runtime offers the current choice" "$out" "[docker]"
+assert_contains "ci_ask_runtime picks by number" "$out" "CHOSEN=wslc"
+out=$(printf '2\n' | { PATH="$stub_darwin:$stub_container:$PATH" ci_ask_runtime container; echo "CHOSEN=$CI_CHOSEN_RUNTIME"; })
+assert_contains "ci_ask_runtime offers Apple's container on macOS" "$out" "2) * container"
+assert_contains "ci_ask_runtime picks container on macOS" "$out" "CHOSEN=container"
+
+# Off macOS, `container` is not Apple's: on Windows, WSL installs container.exe as
+# another name for wslc. It is never found, offered or used there.
+[[ "$(PATH="$stub_mingw:$stub_container:$stub_wslc:$stub_docker:$PATH" ci_runtimes_found)" == "docker wslc" ]]
+assert "on Windows, a container on the PATH is not found as Apple's" "$?"
+[[ "$(PATH="$stub_container:$stub_docker:$PATH" ci_runtimes_found)" == "docker" ]]
+assert "on Linux, a container on the PATH is not found as Apple's" "$?"
+[[ "$(PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" ci_runtimes_found)" == "docker container" ]]
+assert "on macOS, Apple's container is found" "$?"
+out=$(printf '\n' | PATH="$stub_mingw:$stub_container:$stub_wslc:$stub_docker:$PATH" ci_ask_runtime wslc 2>&1)
+! printf '%s\n' "$out" | grep -qE '^  [0-9]+\) [* ] container ' && [[ "$out" != *Apple* ]]
+assert "on Windows, Apple's container is not offered" "$?"
+out=$(printf 'container\n' | { PATH="$stub_mingw:$stub_container:$stub_wslc:$PATH" ci_ask_runtime wslc; echo "rc=$?"; } 2>&1)
+assert_contains "on Windows, answering container is refused" "$out" "rc=1"
+assert_contains "and the refusal says to use wslc" "$out" "container.exe is another name for WSL's container CLI: use wslc"
+out=$(PATH="$stub_mingw:$stub_container:$cleanbin" "$code_it" "${common_args[@]}" 2>&1)
+[[ "$?" != 0 && "$out" == *"No container runtime found"* ]]
+assert "on Windows, container.exe alone is not detected as a runtime" "$?"
+out=$(PATH="$stub_mingw:$stub_container:$stub_wslc:$cleanbin" "$code_it" "${common_args[@]}" 2>&1)
+assert_contains "on Windows, wslc is detected beside container.exe" "$out" "Using container runtime: wslc"
+out=$(PATH="$stub_mingw:$stub_container:$stub_wslc:$stub_docker:$PATH" "$code_it" --runtime container "${common_args[@]}" 2>&1)
+[[ "$?" != 0 ]]; assert "on Windows, --runtime container fails" "$?"
+assert_contains "and says to use wslc" "$out" "use wslc"
+out=$(PATH="$stub_container:$stub_docker:$PATH" "$code_it" --runtime container "${common_args[@]}" 2>&1)
+[[ "$?" != 0 ]]; assert "on Linux, --runtime container fails" "$?"
+assert_contains "and says Apple's container is macOS only" "$out" "runs only on macOS"
+out=$(printf '\n' | { PATH="$stub_docker:$PATH" ci_ask_runtime docker; echo "CHOSEN=$CI_CHOSEN_RUNTIME"; })
+assert_contains "ci_ask_runtime: blank takes the current choice" "$out" "CHOSEN=docker"
+printf 'podman\n' | PATH="$stub_docker:$PATH" ci_ask_runtime docker >/dev/null 2>&1
+[[ "$?" != 0 ]]; assert "ci_ask_runtime refuses an unknown runtime" "$?"
+
+# code-it uses the saved default; --runtime beats it
+rts="$tmp/runtime-save"; mkdir -p "$rts"
+printf 'default-runtime=wslc\n' > "$rts/defaults"
+out=$(PATH="$stub_wslc:$stub_docker:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$rts" 2>&1)
+assert_contains "code-it says it uses the saved runtime" "$out" "Using saved default runtime: wslc"
+assert_contains "code-it uses the saved runtime over detection" "$out" "Using container runtime: wslc"
+out=$(PATH="$stub_wslc:$stub_docker:$PATH" "$code_it" --runtime docker --dry-run --work-dir "$script_dir" --save-dir "$rts" 2>&1)
+assert_contains "--runtime beats the saved runtime" "$out" "Using container runtime: docker"
+out=$(PATH="$stub_docker:$PATH" "$code_it" --dry-run --work-dir "$script_dir" --save-dir "$rts" 2>&1)
+[[ "$?" != 0 ]]; assert "a saved runtime that is not installed fails" "$?"
+assert_contains "and says which" "$out" "'wslc' not found"
+# code-it-build and code-it-doctor use it too
+out=$(PATH="$stub_wslc:$stub_docker:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$script_dir" --save-dir "$rts" 2>&1)
+assert_contains "code-it-build uses the saved runtime" "$out" "STUB-WSLC-BUILD build"
+out=$(PATH="$stub_wslc:$stub_docker:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$script_dir" --save-dir "$rts" --runtime docker --dry-run 2>&1)
+assert_contains "code-it-build --runtime beats the saved runtime" "$out" "docker build"
+out=$(PATH="$stub_wslc:$stub_docker:$PATH" "$script_dir/code-it-doctor.sh" --save-dir "$rts" --no-live-test 2>&1)
+assert_contains "code-it-doctor uses the saved runtime" "$out" "saved default runtime: wslc"
+# An auto-detected runtime is not passed to first-run, which asks; a saved one is
+out=$(CODE_IT_FIRST_RUN="$stub_first_run" PATH="$stub_docker:$PATH" "$code_it" --work-dir "$script_dir" --save-dir "$tmp/rt-nosave" 2>&1)
+[[ "$out" == *STUB-FIRST-RUN* && "$out" != *"--runtime"* ]]; assert "a detected runtime is first-run's to ask about" "$?"
+out=$(CODE_IT_FIRST_RUN="$stub_first_run" PATH="$stub_docker:$PATH" "$code_it" -r docker --work-dir "$script_dir" --save-dir "$tmp/rt-nosave" 2>&1)
+assert_contains "an explicit runtime is passed to first-run" "$out" "--runtime docker"
+
+# first-run asks, offering the platform's own, and saves the answer
+frh="$tmp/rt-firsthome"; mkdir -p "$frh"
+frs="$tmp/rt-first-save1"
+out=$(printf '\n' | HOME="$frh" STUB_FIRST_BUILD_MARKER="$tmp/rt-built" PATH="$stub_mingw:$stub_wslc:$stub_docker:$PATH" \
+        bash "$first_run" --toolchain node --agents opencode --save-dir "$frs" --code-it-build "$stub_first_build" 2>&1)
+assert "first-run with the runtime question exit code" "$?"
+assert_contains "first-run asks for the runtime" "$out" "Container runtime (* = found on this machine)"
+assert_contains "first-run shows docker found" "$out" "* docker"
+assert_contains "first-run shows wslc found" "$out" "* wslc"
+assert_contains "first-run offers Windows' own runtime" "$out" "[wslc]"
+grep -q '^default-runtime=wslc$' "$frs/defaults"; assert "first-run saves the accepted runtime" "$?"
+assert_contains "first-run builds with it" "$out" "--runtime wslc"
+assert_contains "first-run gives the build its save dir" "$out" "--save-dir $frs"
+frs="$tmp/rt-first-save2"
+printf 'docker\n' | HOME="$frh" STUB_FIRST_BUILD_MARKER="$tmp/rt-built" PATH="$stub_mingw:$stub_wslc:$stub_docker:$PATH" \
+        bash "$first_run" --toolchain node --agents opencode --save-dir "$frs" --code-it-build "$stub_first_build" >/dev/null 2>&1
+grep -q '^default-runtime=docker$' "$frs/defaults"; assert "first-run saves the runtime chosen" "$?"
+frs="$tmp/rt-first-save3"
+out=$(HOME="$frh" STUB_FIRST_BUILD_MARKER="$tmp/rt-built" PATH="$stub_wslc:$stub_docker:$PATH" \
+        bash "$first_run" --yes --toolchain node --agents opencode --save-dir "$frs" --code-it-build "$stub_first_build" 2>&1)
+[[ "$out" != *"Container runtime (*"* ]]; assert "first-run --yes does not ask for the runtime" "$?"
+grep -q '^default-runtime=docker$' "$frs/defaults"; assert "first-run --yes saves the platform's own runtime" "$?"
+frs="$tmp/rt-first-save4"
+out=$(HOME="$frh" STUB_FIRST_BUILD_MARKER="$tmp/rt-built" PATH="$stub_wslc:$stub_docker:$PATH" \
+        bash "$first_run" --runtime wslc --toolchain node --agents opencode --save-dir "$frs" --code-it-build "$stub_first_build" < /dev/null 2>&1)
+[[ "$out" != *"Container runtime (*"* ]]; assert "first-run --runtime does not ask" "$?"
+grep -q '^default-runtime=wslc$' "$frs/defaults"; assert "first-run --runtime saves it" "$?"
+frs="$tmp/rt-first-save5"
+out=$(HOME="$frh" STUB_FIRST_BUILD_MARKER="$tmp/rt-built" PATH="$stub_docker:$PATH" \
+        bash "$first_run" --yes --dry-run --toolchain node --agents opencode --save-dir "$frs" --code-it-build "$stub_first_build" 2>&1)
+assert_contains "first-run --dry-run says it would save the runtime" "$out" "would set in $frs/defaults: default-runtime=docker"
+[[ ! -e "$frs/defaults" ]]; assert "first-run --dry-run saves no runtime" "$?"
 
 # ---------------------------------------------------------------------------
 echo

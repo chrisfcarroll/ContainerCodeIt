@@ -340,6 +340,56 @@ $r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$trustD'" $stubPath @('
 Assert "interactive blank keeps trust-work-dir" ((Get-Content "$trustD/defaults") -contains 'trust-work-dir=yes')
 
 # ---------------------------------------------------------------------------
+"12. -runtime saves the default container runtime; -show shows it; the last question"
+$stubWslcD = Join-Path $tmp 'stub-wslc'
+$null = New-Item -ItemType Directory -Force -Path $stubWslcD
+if ($env:OS -eq 'Windows_NT') {
+    Set-Content -Path (Join-Path $stubWslcD 'wslc.cmd') -Value "@echo off`r`necho stub wslc: %*"
+} else {
+    Set-Content -Path (Join-Path $stubWslcD 'wslc') -Value "#!/bin/sh`necho `"stub wslc: `$*`""
+    chmod +x (Join-Path $stubWslcD 'wslc')
+}
+$wslcPathD = "$stubWslcD$sep$stubPath"
+$rtD = Join-Path $tmp 'rt-d'
+$r = Invoke-Scenario "& '$defaults' -saveDir '$rtD' -runtime wslc" $wslcPathD
+Assert "-runtime wslc exits 0" ($r.code -eq 0)
+Assert "-runtime wslc saves default-runtime" ((Get-Content "$rtD/defaults") -contains 'default-runtime=wslc')
+Assert "an installed runtime saves without a warning" (-not $r.out.Contains('not found'))
+$r = Invoke-Scenario "& '$defaults' -saveDir '$rtD' -show" $stubPath
+Assert "-show shows the default runtime" ($r.out -match 'default runtime:\s+wslc')
+$r = Invoke-Scenario "& '$defaults' -saveDir '$rtD' -r container" $stubPath
+Assert "off macOS, -r container is refused" ($r.code -ne 0)
+Assert-Contains "and says Apple's container is macOS only" $r.out 'runs only on macOS'
+Assert "and keeps what is saved" ((Get-Content "$rtD/defaults") -contains 'default-runtime=wslc')
+$env:CODE_IT_PLATFORM = 'windows'
+try { $r = Invoke-Scenario "& '$defaults' -saveDir '$rtD' -r container" $stubPath } finally { $env:CODE_IT_PLATFORM = $null }
+Assert-Contains "on Windows, the refusal says to use wslc" $r.out 'use wslc'
+# On macOS, where it can run, a container not installed is saved with a warning
+$env:CODE_IT_PLATFORM = 'macos'
+try { $r = Invoke-Scenario "& '$defaults' -saveDir '$rtD' -r container" $stubPath } finally { $env:CODE_IT_PLATFORM = $null }
+Assert "-r container exits 0 on macOS though container is not installed" ($r.code -eq 0)
+Assert-Contains "a runtime not installed is saved with a warning" $r.out "'container' is not found"
+Assert "-r container replaces the saved runtime" ((Get-Content "$rtD/defaults") -contains 'default-runtime=container')
+$r = Invoke-Scenario "& '$defaults' -saveDir '$rtD' -runtime podman" $stubPath
+Assert "-runtime podman fails" ($r.code -ne 0)
+Assert "an unknown runtime keeps what is saved" ((Get-Content "$rtD/defaults") -contains 'default-runtime=container')
+$r = Invoke-Scenario "& '$defaults' -saveDir '$rtD' -runtime wslc -dryRun" $stubPath
+Assert-Contains "-runtime -dryRun says what it would set" $r.out 'default-runtime=wslc'
+Assert "-runtime -dryRun changes nothing" ((Get-Content "$rtD/defaults") -contains 'default-runtime=container')
+$r = Invoke-Scenario "& '$defaults' -saveDir '$rtD' -runtime none" $stubPath
+Assert "-runtime none clears it" (-not ((Get-Content "$rtD/defaults") -match '^default-runtime='))
+$r = Invoke-Scenario "& '$defaults' -help" $stubPath
+Assert-Contains "-help documents -runtime" $r.out '-runtime'
+# Answers: agent, claude's model, opencode's model, toolchain, trust, runtime
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$rtD'" $wslcPathD @('', '', '', '', '', 'wslc')
+Assert "interactive wslc saves wslc" ((Get-Content "$rtD/defaults") -contains 'default-runtime=wslc')
+Assert-Contains "interactive marks the runtimes found" $r.out '* wslc'
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$rtD'" $wslcPathD @('', '', '', '', '', '')
+Assert "interactive blank keeps the runtime" ((Get-Content "$rtD/defaults") -contains 'default-runtime=wslc')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$rtD'" $wslcPathD @('', '', '', '', '', 'none')
+Assert "interactive none clears the runtime" (-not ((Get-Content "$rtD/defaults") -match '^default-runtime='))
+
+# ---------------------------------------------------------------------------
 ""
 "Results: $script:pass passed, $script:fail failed"
 if ($script:fail -gt 0) { exit 1 }

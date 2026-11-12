@@ -43,8 +43,11 @@
 #   --dockerfile-dir DIR     Directory containing the Dockerfile and definitions.
 #                            Defaults to this script's own directory.
 #   --runtime, -r NAME       Container runtime to use: "docker", "container" or "wslc".
-#                            Default: auto-detected (Apple container on macOS, else docker,
-#                            else wslc on Windows).
+#                            Default: the saved default in SAVE-DIR/defaults
+#                            (code-it-defaults --runtime), else auto-detected (Apple
+#                            container on macOS, else docker, else wslc on Windows).
+#   --save-dir, -s DIR       Where the saved defaults are read from.
+#                            Default: ~/.config/code-it
 #   --dry-run, -d            Print the build command without executing it.
 #   --yes, -y                Accept detected/default selections and build without asking.
 #   --interactive            Ask about any missing toolchain/agent selection.
@@ -77,6 +80,7 @@ locale="$CI_LOCALE_LIKE_HOST"
 image=""
 dockerfile_dir="$script_dir"
 runtime=""
+save_dir="$HOME/.config/code-it"
 dry_run=false
 yes=false
 interactive=false
@@ -134,6 +138,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --runtime|-r)
             runtime="$2"
+            shift 2
+            ;;
+        --save-dir|-s)
+            save_dir="$2"
             shift 2
             ;;
         --dry-run|-d)
@@ -294,7 +302,11 @@ if [[ -z "$image" ]]; then
     image=$(ci_default_image_name "$enabled_toolchain")
 fi
 
-# Detect / validate the container runtime
+# Detect / validate the container runtime: --runtime, else the saved default
+if [[ -z "$runtime" ]]; then
+    runtime=$(ci_config_value "$save_dir/defaults" "default-runtime") || runtime=""
+    [[ -n "$runtime" ]] && echo "    Using saved default runtime: $runtime"
+fi
 runtime=$(ci_detect_runtime "$runtime") || exit 1
 
 if [[ ! -f "$dockerfile_dir/Dockerfile" ]]; then

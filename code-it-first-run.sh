@@ -3,6 +3,11 @@
 # One interactive command that takes a new user from nothing to a built image with
 # their agent logins carried over.
 #
+# It asks which container runtime to use, showing which of docker, Apple's container
+# and wslc are found and suggesting the platform's own (container on macOS, wslc on
+# Windows, docker elsewhere) when it is found, and saves the answer as code-it's
+# default runtime (code-it-defaults --runtime changes it later).
+#
 # It delegates toolchain/agent selection and image building to code-it-build, then
 # optionally copies host agent state into the save dir, sets each agent's config there
 # to run without permission prompts (AGENT_PERMISSIONS), and prints the run command.
@@ -24,7 +29,9 @@
 #   --agents, -a LIST        Select agents (skips that question).
 #   --image, -i NAME         Image name to build.
 #   --dockerfile-dir DIR     Directory containing the Dockerfile.
-#   --runtime, -r NAME       docker, container or wslc. Default: auto-detected.
+#   --runtime, -r NAME       docker, container or wslc (skips that question, and is
+#                            saved as the default). Default: asked; with --yes, the
+#                            platform's own if found, else auto-detected.
 #   --code-it-build PATH     code-it-build launcher to invoke. Default: sibling.
 #   --yes, -y                Accept the defaults: no questions.
 #   --dry-run, -d            Do everything except build and copy; print what would happen.
@@ -44,6 +51,7 @@ image=""
 dockerfile_dir="$script_dir"
 runtime=""
 code_it_build="$script_dir/code-it-build.sh"
+code_it_defaults="$script_dir/code-it-defaults.sh"
 yes=false
 dry_run=false
 
@@ -84,6 +92,23 @@ if ! command -v git &>/dev/null; then
     exit 1
 fi
 
+# The container runtime: asked, unless given, and saved as the default, so code-it,
+# code-it-build and code-it-doctor use it from now on.
+found_runtimes=$(ci_runtimes_found)
+if [[ -z "$runtime" && -n "$found_runtimes" ]]; then
+    runtime=$(ci_preferred_runtime)
+    if [[ "$yes" != true ]]; then
+        echo
+        until ci_ask_runtime "$runtime"; do :; done
+        runtime="$CI_CHOSEN_RUNTIME"
+    fi
+fi
+if [[ -n "$runtime" ]]; then
+    defaults_cmd=("$code_it_defaults" --save-dir "$save_dir" --runtime "$runtime")
+    [[ "$dry_run" == true ]] && defaults_cmd+=(--dry-run)
+    "${defaults_cmd[@]}" || exit 1
+fi
+
 # code-it-build owns host detection, selection, runtime detection and build confirmation.
 selection_file=$(mktemp "${TMPDIR:-/tmp}/code-it-first-run-selection.XXXXXX")
 rm -f "$selection_file"
@@ -94,6 +119,7 @@ build_cmd=("$code_it_build" --interactive --selection-file "$selection_file")
 [[ -n "$image" ]] && build_cmd+=(--image "$image")
 [[ "$dockerfile_dir" != "$script_dir" ]] && build_cmd+=(--dockerfile-dir "$dockerfile_dir")
 [[ -n "$runtime" ]] && build_cmd+=(--runtime "$runtime")
+[[ "$save_dir" != "$HOME/.config/code-it" ]] && build_cmd+=(--save-dir "$save_dir")
 [[ "$yes" == true ]] && build_cmd+=(--yes)
 [[ "$dry_run" == true ]] && build_cmd+=(--dry-run)
 

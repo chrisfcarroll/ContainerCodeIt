@@ -3,13 +3,12 @@
 <#
 .SYNOPSIS
     Sets the defaults Code-It uses when you give it no options: which agent to run,
-    which model each agent uses, which toolchain image to prefer, and whether agents
-    trust the work dir.
+    which model each agent uses, which toolchain image to prefer, whether agents
+    trust the work dir, and which container runtime to use.
 
 .DESCRIPTION
-    With no parameters it asks. With any of -agent/-model/-toolchain/-trustWorkDir it
-    sets exactly
-    those and asks nothing. Everything is saved in <saveDir>/defaults (default
+    With no parameters it asks. With any of -agent/-model/-toolchain/-trustWorkDir/
+    -runtime it sets exactly those and asks nothing. Everything is saved in <saveDir>/defaults (default
     ~/.config/code-it/defaults), which Code-It reads; models are also written into
     each agent's own configuration under the save dir (from AGENT_MODEL_FILE in
     agents/<name>/config), so the agent picks them up on every run.
@@ -41,6 +40,12 @@
     code you trust: the folder's own hooks and settings then run unasked.
     Code-It -trustWorkDir:$false still wins. Default: no.
 
+.PARAMETER runtime
+    Set the default container runtime: docker, container (Apple containers) or wslc
+    (WSL's own, on Windows), as Code-It -runtime would take it; Code-It-FirstRun.ps1
+    asks for it. `none` clears it, so Code-It auto-detects again. Code-It -runtime
+    still wins.
+
 .PARAMETER show
     Print the current defaults and exit.
 
@@ -57,7 +62,7 @@
 .EXAMPLE
     .\Code-It-Defaults.ps1
     Interactive: asks for the default agent, each agent's default model, the
-    default toolchain, and whether to trust the work dir.
+    default toolchain, whether to trust the work dir, and the container runtime.
 
 .EXAMPLE
     .\Code-It-Defaults.ps1 -agent claude -toolchain node,bun
@@ -91,6 +96,9 @@ param (
     [string]$toolchain      = "",
     [ValidateSet('yes', 'no')]
     [string]$trustWorkDir   = "",
+    [Alias('r')]
+    [ValidateSet('docker', 'container', 'wslc', 'none')]
+    [string]$runtime        = "",
     [switch]$show           = $false,
     [switch]$refreshModels  = $false,
     [string]$saveDir        = "$HOME/.config/code-it",
@@ -306,6 +314,8 @@ function Show-Defaults {
     if ($savedToolchain) { Write-Host ("  {0,-22} {1}" -f 'default toolchain:', $savedToolchain) }
     $savedTrust = Get-Default 'trust-work-dir'
     if ($savedTrust) { Write-Host ("  {0,-22} {1}" -f 'trust work dir:', $savedTrust) }
+    $savedRuntime = Get-Default 'default-runtime'
+    if ($savedRuntime) { Write-Host ("  {0,-22} {1}" -f 'default runtime:', $savedRuntime) }
     foreach ($a in (Get-CodeItListAgents $agentsDir)) {
         $m = Get-Default "model.$a"
         $mFile = ""
@@ -325,6 +335,25 @@ function Show-Defaults {
 
 # Read-Choice LABEL DEFAULT DETECTED CURRENT ITEMS: print a numbered list and read a
 # choice from the console, echoing the answer ('none' clears, blank keeps DEFAULT)
+# Set-Runtime NAME: save the default container runtime; none clears it. A runtime
+# not installed here is saved anyway, with a warning, so it can be set up first; one
+# this platform cannot have (Apple's container off macOS) is refused: $false.
+function Set-Runtime([string]$name) {
+    if ($name -eq 'none') {
+        Set-DefaultLine 'default-runtime' ""
+        Write-Host "    Default runtime: none (auto-detect)"
+        return $true
+    }
+    $reason = Get-CodeItRuntimeUnavailable $name
+    if ($reason) { Write-Warning $reason; return $false }
+    if ((Get-CodeItRuntimesFound) -notcontains $name) {
+        Write-Warning "'$name' is not found on this machine yet; install it before running code-it."
+    }
+    Set-DefaultLine 'default-runtime' $name
+    Write-Host "    Default runtime: $name"
+    return $true
+}
+
 # Set-Trust ANSWER: save whether Code-It tells agents to trust the work dir. yes is
 # saved; no, the default, removes the line. Returns $false for anything else.
 function Set-Trust([string]$answer) {
@@ -481,6 +510,14 @@ function Invoke-Interactive {
     $answer = Read-Host "Trust the work dir, yes or no [$(if ($savedTrust) { $savedTrust } else { 'no' })]"
     if ($answer) { Set-Trust $answer | Out-Null }
 
+    # 5. The container runtime
+    Write-Host ""
+    $savedRuntime = Get-Default 'default-runtime'
+    $choice = Read-CodeItRuntime $savedRuntime 3>$null
+    if ($choice.ok -and $choice.runtime -ne $savedRuntime) {
+        $null = Set-Runtime $(if ($choice.runtime) { $choice.runtime } else { 'none' }) 3>$null
+    }
+
     Write-Host ""
     Show-Defaults
 }
@@ -494,7 +531,7 @@ if ($show) {
     exit 0
 }
 
-if (-not $agent -and -not $toolchain -and -not $trustWorkDir -and $model.Count -eq 0) {
+if (-not $agent -and -not $toolchain -and -not $trustWorkDir -and -not $runtime -and $model.Count -eq 0) {
     Invoke-Interactive
     exit 0
 }
@@ -535,4 +572,5 @@ if ($toolchain) {
 if ($trustWorkDir) {
     if (-not (Set-Trust $trustWorkDir)) { $rc = 1 }
 }
+if ($runtime -and -not (Set-Runtime $runtime)) { $rc = 1 }
 exit $rc

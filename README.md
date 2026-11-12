@@ -36,8 +36,11 @@ manage the Dockerfile yourself if you need more things in it.
 
 ## First run
 
-`code-it` first run checks for Git and a container runtime, asks you about toolchains 
-and agents, and then builds a Dockerfile image. Existing state and login can be copied 
+`code-it` first run checks for Git, asks which container runtime to use (showing which
+of the runtimes your platform can have it found — Docker everywhere, Apple Containers on
+macOS, `wslc` on Windows — and offering the platform's own: `container` on macOS, `wslc`
+on Windows, `docker` elsewhere) and saves that as your
+default, asks you about toolchains and agents, and then builds a Dockerfile image. Existing state and login can be copied 
 over for the contained agent to use. Copied or not, first run then sets Claude Code to
 `bypassPermissions` and OpenCode to auto-accept, in their configuration under the save
 dir: the container is the sandbox.
@@ -58,7 +61,9 @@ Initial agents are opencode, claude and codex. Initial toolchains are dotnet, no
 - **Or wslc**, the container CLI built into WSL 2.9.3 and later, with no Docker Desktop:
   `wsl --update`, then check with `wslc version`
   (https://learn.microsoft.com/windows/wsl/tutorials/wsl-containers). code-it uses it
-  when Docker is not installed, or when you pass `--runtime wslc` (`-runtime wslc`).
+  when you choose it at first run (it is offered first when found), save it with
+  `code-it-defaults --runtime wslc` (`Code-It-Defaults.ps1 -runtime wslc`), pass
+  `--runtime wslc` (`-runtime wslc`), or Docker is not installed.
   It keeps its own image store, so build the image again with it. Mount Windows
   directories (`C:\...`), not ones inside a WSL distro, which wslc cannot mount. Its
   CPUs and memory are WSL container settings
@@ -131,7 +136,7 @@ Start a container without an agent with --no-agent / -noAgent
 | `--work-dir`, `-w` | `-WorkDirToMount` | `.` | Host path mounted in the container at `/work/<parent>/<name>` (the parent's and its own names, so directories keep their names for agents' per-directory memory). A DIR whose parent is `/` mounts at `/work/<name>`; `/`, at `/work` |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Host path for agent state persistence |
 | `--image`, `-i` | `-image` | `code-it-alpine-<toolchains>` | Image name; derived from `--toolchain` (e.g. `code-it-alpine-node-bun`). If the derived image is missing, the most-recently built existing image whose label *contains* the requested chains is used instead; an explicit `--image` is used as-is |
-| `--runtime`, `-r` | `-runtime` | auto-detect | `docker`, `container` or `wslc` |
+| `--runtime`, `-r` | `-runtime` | the saved default (`code-it-defaults`), else auto-detect | `docker`, `container` or `wslc`. See [Runtime detection](#runtime-detection) |
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--trust-work-dir`, `--no-trust-work-dir` | `-trustWorkDir`, `-trustWorkDir:$false` | off, or the saved default (`code-it-defaults`) | Tell the agent to trust the work dir, so it does not ask "do you trust this folder?". For Claude Code this sets `CLAUDE_CODE_SANDBOXED=1` (the agent's `AGENT_TRUST_ENV`). Only for code you trust: the folder's own hooks and settings then run unasked |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
@@ -169,7 +174,8 @@ toolchains and package caches). They accept the same logical parameters:
 | `--locale`, `-l` | `-locale` | `like-host` | The image's locale (`LANG`). See [Locale](#locale) |
 | `--image`, `-i` | `-image` | `code-it-alpine-<chains>` | Image name to build |
 | `--dockerfile-dir` | `-dockerfileDir` | script's directory | Directory containing the Dockerfile |
-| `--runtime`, `-r` | `-runtime` | auto-detect | `docker`, `container` or `wslc` |
+| `--runtime`, `-r` | `-runtime` | the saved default (`code-it-defaults`), else auto-detect | `docker`, `container` or `wslc`. See [Runtime detection](#runtime-detection) |
+| `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | Where the saved default runtime is read from |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the build command without executing it |
 | `--yes`, `-y` | `-yes` | off | Accept detected/default interactive selections and build without asking |
 | `--interactive` | `-interactive` | off | Prompt for any omitted selections; used by first-run |
@@ -196,9 +202,10 @@ of your host machine.
 model in the agent's own configuration under the save dir, where every run picks it up:
 
 ```bash
-./code-it-defaults.sh                 # interactive: agent, models, toolchain, trust
+./code-it-defaults.sh                 # interactive: agent, models, toolchain, trust, runtime
 ./code-it-defaults.sh --agent claude --toolchain node,bun
 ./code-it-defaults.sh --trust-work-dir yes   # no "do you trust this folder?" prompt
+./code-it-defaults.sh --runtime wslc  # docker, container, wslc, or none to auto-detect
 ./code-it-defaults.sh --model 'opencode=opencode-go/glm-5.3' --model 'claude=opus'
 ./code-it-defaults.sh --show          # print the saved defaults
 ./code-it-defaults.sh --refresh-models   # update the model list from https://models.dev
@@ -208,24 +215,27 @@ model in the agent's own configuration under the save dir, where every run picks
 .\Code-It-Defaults.ps1                # interactive
 .\Code-It-Defaults.ps1 -agent claude -toolchain node,bun
 .\Code-It-Defaults.ps1 -trustWorkDir yes
+.\Code-It-Defaults.ps1 -runtime wslc
 .\Code-It-Defaults.ps1 -model 'claude=opus'
 .\Code-It-Defaults.ps1 -show
 .\Code-It-Defaults.ps1 -refreshModels
 ```
 
 They accept `--agent/-agent`, `--model/-model AGENT=MODEL` (an empty MODEL clears it),
-`--toolchain/-toolchain`, `--trust-work-dir/-trustWorkDir yes|no`, `--show/-show`, `--refresh-models/-refreshModels`,
+`--toolchain/-toolchain`, `--trust-work-dir/-trustWorkDir yes|no`,
+`--runtime/-runtime docker|container|wslc|none`, `--show/-show`, `--refresh-models/-refreshModels`,
 `--save-dir/-saveDir` and `--dry-run/-dryRun`; see `--help`.
 
 With no parameters code-it-defaults asks, reading answers from stdin (so they can be
 scripted); a blank answer keeps the current value. With any of `--agent`, `--model`,
-`--toolchain`, `--trust-work-dir`, it asks nothing and sets exactly those.
+`--toolchain`, `--trust-work-dir`, `--runtime`, it asks nothing and sets exactly those.
 
 `code-it` uses the saved defaults only when its own options do not say:
 `--agent`/`-c`/`-o` beats the saved agent, and `--toolchain` and `--image` beat the
 saved toolchain — which in turn beats the remembered-image heuristic of
 [Specs 09/10](Specs/10-default-first-run-or-existing-image.md) — and
-`--no-trust-work-dir` / `-trustWorkDir:$false` beats a saved `trust-work-dir=yes`. When it launches the
+`--no-trust-work-dir` / `-trustWorkDir:$false` beats a saved `trust-work-dir=yes`, and
+`--runtime` beats the saved runtime, which `code-it-build` and `code-it-doctor` use too. When it launches the
 saved agent it says so (`Using saved default agent: …`), because the agent brings its
 own state with it: each agent's state, and its login, live in its own directory under
 the save dir, so switching the default agent switches those too — opencode
@@ -586,7 +596,10 @@ options and the link to the source of the data.
 
 ## Runtime detection
 
-`code-it.sh` and `Code-It.ps1` choose a container runtime automatically:
+`code-it.sh` and `Code-It.ps1` use `--runtime` (`-runtime`) if given, else the default
+runtime saved in `<save dir>/defaults` as `default-runtime=` — which first run asks for,
+and `code-it-defaults --runtime NAME` (`-runtime NAME`) changes, `none` clearing it.
+With neither, they choose a container runtime automatically:
 
 1. On **macOS**, they use the **Apple container CLI** (`container`) if installed
 2. Otherwise they use **Docker** if installed
@@ -595,6 +608,11 @@ options and the link to the source of the data.
 
 Or specify `--runtime docker`, `--runtime container` (macOS) or `--runtime wslc`
 (Windows); `-runtime` in PowerShell.
+
+`container` means Apple's container CLI, so it is only found, offered or accepted on
+macOS. WSL installs its own container CLI on Windows as both `wslc.exe` and
+`container.exe`; that `container.exe` is wslc, so code-it ignores it there, and
+`--runtime container` on Windows tells you to use `wslc`.
 
 ## Volume mounts
 
@@ -739,7 +757,7 @@ dirty repository, never commits to your current branch and never pushes.
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
 | *PROBLEM* | *Problem* | none | The problem, in words; implies `--fix` |
-| `--runtime`, `-r` | `-runtime` | auto-detect | `docker`, `container` or `wslc` |
+| `--runtime`, `-r` | `-runtime` | the saved default (`code-it-defaults`), else auto-detect | `docker`, `container` or `wslc`. See [Runtime detection](#runtime-detection) |
 | `--image`, `-i` | `-image` | the most recently used code-it image | Image to check |
 | `--save-dir`, `-s` | `-saveDir` | `~/.config/code-it` | code-it's save dir |
 | `--no-live-test` | `-noLiveTest` | off | Skip the clipboard round trip |

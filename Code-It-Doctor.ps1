@@ -23,7 +23,8 @@
     The problem, in words. Implies -fix.
 
 .PARAMETER runtime
-    docker, container or wslc. Default: auto-detect, as Code-It.ps1 does.
+    docker, container or wslc. Default: the saved default, else auto-detect, as
+    Code-It.ps1 does.
 
 .PARAMETER image
     Image to check. Default: the most recently used existing code-it image, else the
@@ -138,6 +139,10 @@ if ($gitName -and $gitEmail) {
 # ---------------------------------------------------------------------------
 Section "Container runtime"
 $runtimeOk = $false
+if (-not $runtime) {
+    $runtime = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-runtime'
+    if ($runtime) { Say "  saved default runtime: $runtime" }
+}
 $detected = Detect-CodeItRuntime $runtime 3>$null 6>$null
 if ($detected) {
     $runtime = $detected

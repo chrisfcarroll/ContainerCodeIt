@@ -4,7 +4,7 @@
 #     source /path/to/ContainerCodeIt/completions/code-it-build.bash
 
 _code_it_build_opts='--toolchain -t --stack --package-caches --agent --agents -a --list-agents --list-toolchains --list-package-caches
-    --rebuild --locale -l --image -i --dockerfile-dir --runtime -r --dry-run -d
+    --rebuild --locale -l --image -i --dockerfile-dir --runtime -r --save-dir -s --dry-run -d
     --yes -y --interactive --help -h'
 
 _code_it_build() {
@@ -13,7 +13,7 @@ _code_it_build() {
     prev=${COMP_WORDS[COMP_CWORD-1]}
 
     case "$prev" in
-        --dockerfile-dir)
+        --dockerfile-dir|--save-dir|-s)
             COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
         --runtime|-r)
             COMPREPLY=( $(compgen -W "docker container wslc" -- "$cur") ); return ;;
