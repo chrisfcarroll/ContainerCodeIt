@@ -11,10 +11,8 @@ Your agents get work done by having a _single mounted directory_, typically one 
 - Git, with `user.name` and `user.email` set, so the agent can commit.
 
 On a new Windows machine, Windows PowerShell 5.1 (`powershell.exe`) is enough;
-PowerShell 7 (`winget install Microsoft.PowerShell`) is better. Windows blocks scripts
-by default, so allow local ones once with
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. Start Docker Desktop before
-the first run, which builds the image. `Code-It-Doctor.ps1` checks Git and Docker for you.
+PowerShell 7 (`winget install Microsoft.PowerShell`) is better. See also
+[Prerequisites for Windows](#prerequisites-for-windows).
 
 ## Quick start
 
@@ -49,6 +47,14 @@ Use `code-it-defaults` and `code-it-build` to change your setup.
 See help with `--help` (bash) or `-help` (PowerShell).
 
 Initial agents are opencode, claude and codex. Initial toolchains are dotnet, node, bun, python, powershell, rust, go, gcc, g++ and clang.
+
+### Prerequisites for Windows
+
+- **Script blocking**: Windows blocks PowerShell scripts by default. Allow local ones
+  once, for your user: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+- **Docker Desktop**: install it with WSL2
+  (https://docs.docker.com/desktop/setup/install/windows-install/), and start it before
+  the first run, which builds the image. `Code-It-Doctor.ps1` checks that Docker is running.
 
 ## Add new agents
 
