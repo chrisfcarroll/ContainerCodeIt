@@ -9,6 +9,10 @@ code-it-build copies this folder into the build context, and the Dockerfile trus
 each certificate before the first `apk add`. Certificate files are git-ignored, so
 they stay on your machine.
 
+For the XS version, paste `XS/snippets/ca-certificates.dockerfile` into
+`XS/Dockerfile` immediately after `FROM`. The XS launchers stage this same folder
+into their build context.
+
 Include the whole chain up to and including the self-signed root CA. apk (OpenSSL)
 does not accept a chain that ends at an intermediate CA, so with intermediates only
 it still reports `server certificate not trusted`.

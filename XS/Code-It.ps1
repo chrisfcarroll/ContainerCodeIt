@@ -146,7 +146,24 @@ function Invoke-Run {
 }
 
 & $runtime image inspect $image *> $null
-if ($build -or $LASTEXITCODE -ne 0) { Invoke-Run $runtime build -t $image $PSScriptRoot }
+if ($build -or $LASTEXITCODE -ne 0) {
+    # Stage XS and the shared top-level CA directory. This preserves local XS COPY
+    # inputs while keeping unrelated repository files out of the build context.
+    $buildContext = Join-Path ([IO.Path]::GetTempPath()) ("code-it-xs-build-" + [Guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Force -Path $buildContext
+    try {
+        Get-ChildItem -LiteralPath $PSScriptRoot -Force | Copy-Item -Destination $buildContext -Recurse -Force
+        $caContext = Join-Path $buildContext 'ca-certificates'
+        $null = New-Item -ItemType Directory -Force -Path $caContext
+        $caSource = Join-Path (Split-Path $PSScriptRoot -Parent) 'ca-certificates'
+        if (Test-Path -Path $caSource -PathType Container) {
+            Get-ChildItem -LiteralPath $caSource -Force | Copy-Item -Destination $caContext -Recurse -Force
+        }
+        Invoke-Run $runtime build -t $image $buildContext
+    } finally {
+        Remove-Item -LiteralPath $buildContext -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 $user = ($env:GIT_AUTHOR_NAME, "$(git config --get user.name 2>$null)" | Where-Object { $_ } | Select-Object -First 1)
 $email = ($env:GIT_AUTHOR_EMAIL, "$(git config --get user.email 2>$null)" | Where-Object { $_ } | Select-Object -First 1)

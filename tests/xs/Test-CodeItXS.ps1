@@ -41,6 +41,13 @@ foreach ($rt in 'docker', 'container') {
 if "%~1"=="image" ( if defined STUB_NO_IMAGE exit /b 1
   exit /b 0 )
 setlocal enabledelayedexpansion
+if "%~1"=="build" (
+  set context=
+  for %%a in (%*) do set context=%%~a
+  if exist "!context!\Dockerfile" echo STUB_HAS_DOCKERFILE
+  if exist "!context!\snippets\ca-certificates.dockerfile" echo STUB_HAS_XS_FILES
+  if exist "!context!\ca-certificates\README.md" echo STUB_HAS_TOP_LEVEL_CA_README
+)
 set out=STUB-$rt
 :loop
 if "%~1"=="" goto done
@@ -54,6 +61,13 @@ echo !out!
         Set-Content (Join-Path $dir $rt) @"
 #!/bin/sh
 [ "`$1" = image ] && { [ -n "`${STUB_NO_IMAGE:-}" ] && exit 1; exit 0; }
+if [ "`$1" = build ]; then
+  context=""
+  for arg do context="`$arg"; done
+  [ -f "`$context/Dockerfile" ] && echo STUB_HAS_DOCKERFILE
+  [ -f "`$context/snippets/ca-certificates.dockerfile" ] && echo STUB_HAS_XS_FILES
+  [ -f "`$context/ca-certificates/README.md" ] && echo STUB_HAS_TOP_LEVEL_CA_README
+fi
 printf 'STUB-$rt'; printf ' [%s]' "`$@"; echo
 "@
         chmod +x (Join-Path $dir $rt)
@@ -198,7 +212,10 @@ $out = Run-XS '& $x'
 Assert-Contains "docker is used when present" $out "STUB-docker [run] [-it] [--rm]"
 Assert-NotContains "an existing image is not rebuilt" $out "[build]"
 $out = Run-XS '& $x' 'n' @{ STUB_NO_IMAGE = '1' }
-Assert-Contains "a missing image is built from the XS dir" $out "[build] [-t] [code-it-xs] [$(Split-Path $codeIt -Parent)]"
+Assert-Contains "a missing image is built from the staged XS context" $out "[build] [-t] [code-it-xs] ["
+Assert-Contains "the staged XS context contains its Dockerfile" $out 'STUB_HAS_DOCKERFILE'
+Assert-Contains "the staged XS context preserves the XS files" $out 'STUB_HAS_XS_FILES'
+Assert-Contains "the staged XS context includes the top-level CA folder" $out 'STUB_HAS_TOP_LEVEL_CA_README'
 $out = Run-XS '& $x -b -i my-image'
 Assert-Contains "-build rebuilds, with -image's name" $out "[build] [-t] [my-image]"
 Assert-Contains "-image is run" $out "[my-image]"

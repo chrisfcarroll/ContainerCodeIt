@@ -57,6 +57,13 @@ for rt in docker container; do
     cat > "$tmp/stub-$rt/$rt" <<EOF
 #!/bin/sh
 [ "\$1" = image ] && { [ -n "\${STUB_NO_IMAGE:-}" ] && exit 1; exit 0; }
+if [ "\$1" = build ]; then
+  context=""
+  for arg do context="\$arg"; done
+  [ -f "\$context/Dockerfile" ] && echo STUB_HAS_DOCKERFILE
+  [ -f "\$context/snippets/ca-certificates.dockerfile" ] && echo STUB_HAS_XS_FILES
+  [ -f "\$context/ca-certificates/README.md" ] && echo STUB_HAS_TOP_LEVEL_CA_README
+fi
 printf 'STUB-$rt'; printf ' [%s]' "\$@"; echo
 EOF
     chmod +x "$tmp/stub-$rt/$rt"
@@ -204,7 +211,10 @@ out=$(run_xs)
 assert_contains "docker is used when present" "$out" "STUB-docker [run] [-it] [--rm]"
 assert_not_contains "an existing image is not rebuilt" "$out" "[build]"
 out=$(STUB_NO_IMAGE=1 run_xs)
-assert_contains "a missing image is built from the XS dir" "$out" "[build] [-t] [code-it-xs] [$(dirname "$code_it")]"
+assert_contains "a missing image is built from the staged XS context" "$out" "[build] [-t] [code-it-xs] ["
+assert_contains "the staged XS context contains its Dockerfile" "$out" "STUB_HAS_DOCKERFILE"
+assert_contains "the staged XS context preserves the XS files" "$out" "STUB_HAS_XS_FILES"
+assert_contains "the staged XS context includes the top-level CA folder" "$out" "STUB_HAS_TOP_LEVEL_CA_README"
 out=$(run_xs -b -i my-image)
 assert_contains "--build rebuilds, with --image's name" "$out" "[build] [-t] [my-image]"
 assert_contains "--image is run" "$out" "[my-image]"

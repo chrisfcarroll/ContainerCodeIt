@@ -28,6 +28,7 @@
 
 set -eo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_dir=$(dirname "$script_dir")
 
 agent=opencode
 work_dir=.
@@ -152,7 +153,16 @@ run() {
 }
 
 if [[ "$build" == true ]] || ! "$runtime" image inspect "$image" >/dev/null 2>&1; then
-    run "$runtime" build -t "$image" "$script_dir"
+    # Stage XS and the shared top-level CA directory. This preserves local XS COPY
+    # inputs while keeping unrelated repository files out of the build context.
+    build_context=$(mktemp -d "${TMPDIR:-/tmp}/code-it-xs-build.XXXXXX")
+    trap 'rm -rf "$build_context"' EXIT
+    cp -R "$script_dir/." "$build_context/"
+    mkdir -p "$build_context/ca-certificates"
+    if [[ -d "$repo_dir/ca-certificates" ]]; then
+        cp -R "$repo_dir/ca-certificates/." "$build_context/ca-certificates/"
+    fi
+    run "$runtime" build -t "$image" "$build_context"
 fi
 
 user=${GIT_AUTHOR_NAME:-$(git config --get user.name || true)}

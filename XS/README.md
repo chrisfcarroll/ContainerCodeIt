@@ -82,6 +82,10 @@ Paste a snippet into the Dockerfile where it says `--- Toolchains` or `--- Agent
 then run with `--build`. A new agent also needs a line in the scripts saying which
 of its state directories to mount; `codex` already has one.
 
+For a TLS-intercepting proxy, paste `snippets/ca-certificates.dockerfile` immediately
+after `FROM`. Put the CA certificate files in the repository's top-level
+`ca-certificates/` folder; the XS launchers include it in the build context.
+
 ## Rough Edges
 
 see [full version README.md](../README.md).
