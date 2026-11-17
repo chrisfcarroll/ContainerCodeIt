@@ -259,12 +259,13 @@ grep -q '^model.claude=' "$save_r/defaults"
 echo "11. code-it uses the saved defaults; its own options win"
 d="$tmp/launcher"; mkdir -p "$d"
 printf 'default-agent=claude\ndefault-toolchain=node\nmodel.opencode=y/z\n' > "$d/defaults"
+npm_cache="$tmp/npm-cache"; mkdir -p "$npm_cache"
 
-out=$(launched --save-dir "$d" 2>&1)
+out=$(NPM_CONFIG_CACHE="$npm_cache" launched --save-dir "$d" 2>&1)
 assert_contains "launches the saved agent" "$out" 'CODE_AGENT="claude"'
 assert_contains "says the toolchain came from defaults" "$out" "Using saved default toolchain: node"
 assert_contains "uses an image named for the default toolchain" "$out" "'code-it-alpine-node' does not exist; using 'code-it-alpine-dotnet-node'"
-assert_contains "no package cache for node but npm" "$out" 'npm-host'
+assert_contains "node default mounts the available npm cache read-only" "$out" "$npm_cache:/home/agent1/.npm-host:ro"
 
 out=$(launched --save-dir "$d" -o 2>&1)
 assert_contains "--opencode beats the saved agent" "$out" 'CODE_AGENT="opencode"'

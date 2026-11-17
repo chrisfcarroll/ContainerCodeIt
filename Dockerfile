@@ -218,7 +218,21 @@ for arg in "$@" ; do agent_cmd="$agent_cmd ${(q)arg}" ; done
 if [ -z "${CODE_IT_NO_WAIT:-}" ] && [ "${CODE_AGENT_SHELL:-}" != "1" ] ; then
     agent_cmd="$agent_cmd || { printf '\n%s exited with status %s. Press Enter to close. ' ${(q)agent_bin:t} \$?; read -r _; }"
 fi
-tmux -u new-session -d ; tmux -u new-session "$agent_cmd"
+# Keep the agent's last screen before its pane is destroyed. TUI agents use the
+# terminal's alternate screen, which would otherwise restore the old pane on exit.
+# Replay the captured screen after tmux exits, when it can be seen in the host terminal.
+if [ "${CODE_AGENT_SHELL:-}" != "1" ] ; then
+    agent_cmd="tmux set-window-option -t \$TMUX_PANE alternate-screen off; $agent_cmd; agent_rc=\$?; tmux capture-pane -p -t \$TMUX_PANE > /tmp/code-it-agent-exit-screen 2>/dev/null || true; exit \$agent_rc"
+fi
+tmux -u new-session -d
+tmux -u new-session "$agent_cmd"
+tmux_rc=$?
+if [ "${CODE_AGENT_SHELL:-}" != "1" ] && [ -s /tmp/code-it-agent-exit-screen ] ; then
+    printf '\n--- Agent screen at exit ---\n'
+    cat /tmp/code-it-agent-exit-screen
+    rm -f /tmp/code-it-agent-exit-screen
+fi
+exit "$tmux_rc"
 EOF
 RUN chmod a+x ~/go.sh
 RUN mkdir -p ~/.config/opencode

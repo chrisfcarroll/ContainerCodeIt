@@ -27,6 +27,10 @@ In Claude or OpenCode, press `Ctrl-C` twice in succession. Other agents may vary
 
 If the agent fails, its error stays on screen until you press Enter, unless you pass `--no-wait` (`-noWait`).
 
+When an interactive agent exits, code-it reprints its final screen after tmux closes,
+so any instructions for resuming the session remain visible. Rebuild an existing image
+with `code-it-build --rebuild` (`Code-It-Build.ps1 -rebuild`) to pick up this change.
+
 ### The XS Version
 
 If you are appropriately paranoid and also comfortable with editing your own 

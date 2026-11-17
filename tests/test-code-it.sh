@@ -1148,7 +1148,13 @@ EOF
     cat > "$gobin/tmux" <<'EOF'
 #!/bin/sh
 case "$*" in *" -d"*) exit 0 ;; esac
+case "$1" in
+    set-window-option) exit 0 ;;
+    capture-pane) printf 'Resume this session with --continue\n'; exit 0 ;;
+esac
 for a in "$@"; do last="$a"; done
+TMUX_PANE=%1
+export TMUX_PANE
 eval "$last"
 EOF
     chmod +x "$gobin/tmux"
@@ -1164,6 +1170,7 @@ EOF
     out=$(PATH="$gobin:$PATH" GIT_CALLS="$git_calls" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
     assert_contains "go.sh upgrades mounted repo indexes to version 4" "$(<"$git_calls")" "-C $gowork/repo/ update-index --index-version 4"
     assert_contains "go.sh runs the chosen agent in tmux" "$out" "AGENT-claude"
+    assert_contains "go.sh reprints the agent's final screen after tmux exits" "$out" "Resume this session with --continue"
     # The launcher mounts the work dir at /work/<parent>/<name>, so go.sh must trust
     # that path, not just /work and its immediate children. A work dir with no
     # subdirectories must not make zsh abort go.sh on an empty glob.
