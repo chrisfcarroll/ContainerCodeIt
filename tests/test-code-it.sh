@@ -1171,6 +1171,9 @@ EOF
     assert_contains "go.sh upgrades mounted repo indexes to version 4" "$(<"$git_calls")" "-C $gowork/repo/ update-index --index-version 4"
     assert_contains "go.sh runs the chosen agent in tmux" "$out" "AGENT-claude"
     assert_contains "go.sh reprints the agent's final screen after tmux exits" "$out" "Resume this session with --continue"
+    # The stub agent ends its output with a newline; go.sh then adds two more, so
+    # a blank line still separates the header from wherever the agent left the cursor.
+    assert_contains "go.sh puts a blank line between the agent's output and its reprinted screen" "$out" $'\n\n\n--- Agent screen at exit ---\n'
     # The launcher mounts the work dir at /work/<parent>/<name>, so go.sh must trust
     # that path, not just /work and its immediate children. A work dir with no
     # subdirectories must not make zsh abort go.sh on an empty glob.

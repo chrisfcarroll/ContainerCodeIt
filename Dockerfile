@@ -93,7 +93,7 @@ RUN curl -fsSL https://opencode.ai/v2/install -o /tmp/opencode-v2-install.sh \
     && HOME=/tmp/opencode-v2 bash /tmp/opencode-v2-install.sh --version 2.0.6 --no-modify-path \
     && mkdir -p ~/.opencode-v2/bin && mv /tmp/opencode-v2/.opencode/bin/opencode ~/.opencode-v2/bin/opencode \
     && rm -rf /tmp/opencode-v2 /tmp/opencode-v2-install.sh \
-    && test -x ~/.opencode-v2/bin/opencode # last changed 2026-11-04
+    && test -x ~/.opencode-v2/bin/opencode # last changed 2026-11-19
 USER root
 RUN printf '%s\n' 'opencode=/home/agent1/.opencode-v2/bin/opencode' > /etc/code-it-agents
 USER agent1
@@ -228,7 +228,7 @@ tmux -u new-session -d
 tmux -u new-session "$agent_cmd"
 tmux_rc=$?
 if [ "${CODE_AGENT_SHELL:-}" != "1" ] && [ -s /tmp/code-it-agent-exit-screen ] ; then
-    printf '\n--- Agent screen at exit ---\n'
+    printf '\n\n--- Agent screen at exit ---\n'
     cat /tmp/code-it-agent-exit-screen
     rm -f /tmp/code-it-agent-exit-screen
 fi
