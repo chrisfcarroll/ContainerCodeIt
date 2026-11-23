@@ -19,6 +19,7 @@
 # The tool refuses to run if the repository has uncommitted changes, creates the
 # branch, runs code-it headless with the prompt, and prints the branch and a diff
 # summary at the end. It never commits to the current branch and never pushes.
+# If code-it fails without changing anything, the branch is removed again.
 
 set -euo pipefail
 

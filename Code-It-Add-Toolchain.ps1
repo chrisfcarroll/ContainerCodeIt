@@ -12,6 +12,7 @@
     The tool refuses to run if the repository has uncommitted changes, creates the
     branch, runs code-it headless, and prints the branch and a diff summary. It never
     commits to the current branch and never pushes.
+    If code-it fails without changing anything, the branch is removed again.
 
 .PARAMETER Name
     The toolchain name to add, e.g. "java".

@@ -110,10 +110,17 @@ echo stub container: %*
 #!/bin/sh
 case "$1" in
     image)  case "$2" in
-                ls)      echo "code-it-alpine-dotnet-node  latest" ;;
+                ls)      if [ -n "${STUB_CONTAINER_DOWN:-}" ] && [ ! -e "$STUB_CONTAINER_DOWN" ]; then
+                             echo "Error: interrupted: XPC connection error: Connection invalid" >&2; exit 1
+                         fi
+                         echo "code-it-alpine-dotnet-node  latest" ;;
                 inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOLCHAINS-dotnet,node}" ;; esac ;;
                 *)       echo "stub container: $*" ;;
             esac ;;
+    system) [ "$2" = start ] || { echo "stub container: $*"; exit 0; }
+            [ -n "${STUB_CONTAINER_START_FAIL:-}" ] && exit 1
+            [ -n "${STUB_CONTAINER_DOWN:-}" ] && : > "$STUB_CONTAINER_DOWN"
+            echo "STUB-CONTAINER-SYSTEM-START" ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
     run)    echo "STUB-CONTAINER-RUN $*"; printf '[%s]' "$@"; echo ;;
     *)      echo "stub container: $*" ;;
@@ -432,6 +439,19 @@ Assert-Contains "container dry-run shows memory limit" $r.out '--memory 3g'
 if (-not $onWindows) {
     $r = Invoke-Scenario $codeIt @('-runtime', 'container', '-WorkDirToMount', $scriptDir, '-saveDir', $save) "$stubContainer$sep$stubPath"
     Assert-Contains "container run gets --memory and 3g as separate arguments" $r.out '[--memory][3g]'
+    # A stopped container system service is started, once, and the run goes on
+    $env:STUB_CONTAINER_DOWN = Join-Path $tmp 'container-started'
+    try {
+        $r = Invoke-Scenario $codeIt (@('-runtime', 'container') + $commonArgs) "$stubContainer$sep$stubPath"
+        Assert "a stopped container service is started and the run goes on" ($r.code -eq 0)
+        Assert-Contains "says it starts the container service" $r.out 'starting it with: container system start'
+        Assert-Contains "runs container system start" $r.out 'STUB-CONTAINER-SYSTEM-START'
+        Assert-Contains "runs after starting the service" $r.out 'container run -it'
+        Remove-Item -Force $env:STUB_CONTAINER_DOWN
+        $env:STUB_CONTAINER_START_FAIL = '1'
+        $r = Invoke-Scenario $codeIt (@('-runtime', 'container') + $commonArgs) "$stubContainer$sep$stubPath"
+        Assert "a container service that will not start fails" ($r.code -ne 0)
+    } finally { $env:STUB_CONTAINER_DOWN = $null; $env:STUB_CONTAINER_START_FAIL = $null }
 }
 $env:CODE_IT_PLATFORM = $null
 $r = Invoke-Scenario $codeIt (@('-runtime', 'bogus') + $commonArgs) $stubPath
@@ -1152,7 +1172,7 @@ $addAgent = Join-Path $scriptDir 'Code-It-Add-Agent.ps1'
 $stubCi = Join-Path $tmp 'stub-code-it.ps1'
 Set-Content -Path $stubCi -Value @'
 param([switch]$headless, [string]$WorkDirToMount, [string]$prompt)
-"STUB-CODE-IT $headless $WorkDirToMount"
+"STUB-CODE-IT headless=$headless workdir=$WorkDirToMount prompt-starts=$($prompt.Substring(0, [Math]::Min(12, $prompt.Length)))"
 if ($env:STUB_CODE_IT_EXIT) { exit [int]$env:STUB_CODE_IT_EXIT }
 exit 0
 '@
@@ -1190,7 +1210,9 @@ Assert "add-agent refuses a dirty repo" ($r.code -ne 0)
 # it creates the branch, runs code-it, and prints the branch and summary
 $r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoA, '-codeIt', $stubCi) $stubPath
 Assert "add-agent run exit code 0" ($r.code -eq 0)
-Assert-Contains "add-agent runs code-it headless" $r.out 'STUB-CODE-IT'
+Assert-Contains "add-agent runs code-it headless" $r.out 'STUB-CODE-IT headless=True'
+Assert-Contains "add-agent passes the repo as -WorkDirToMount" $r.out "workdir=$repoA "
+Assert-Contains "add-agent passes the prompt as -prompt" $r.out 'prompt-starts=You are addi'
 Assert "add-agent checks out the new branch" ((& git -C $repoA rev-parse --abbrev-ref HEAD) -eq 'add-agent/cursor')
 Assert-Contains "add-agent prints the branch" $r.out 'Branch: add-agent/cursor'
 Assert-Contains "add-agent prints a changes summary" $r.out 'Changes:'
@@ -1201,12 +1223,29 @@ $env:STUB_CODE_IT_EXIT = '3'
 try { $r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoB, '-codeIt', $stubCi) $stubPath }
 finally { $env:STUB_CODE_IT_EXIT = $null }
 Assert "add-agent propagates a non-zero gate refusal" ($r.code -eq 3)
+Assert "add-agent goes back to the starting branch after a failure with no changes" ((& git -C $repoB symbolic-ref --short HEAD) -ne 'add-agent/cursor')
+Assert "add-agent removes the empty branch after a failure" (-not (& git -C $repoB branch --list 'add-agent/cursor'))
+Assert-Contains "add-agent says it removed the empty branch" $r.out 'No changes were made'
+
+# a failure that leaves commits keeps the branch for inspection
+$stubCiCommit = Join-Path $tmp 'stub-code-it-commit.ps1'
+Set-Content -Path $stubCiCommit -Value @'
+param([switch]$headless, [string]$WorkDirToMount, [string]$prompt)
+Set-Content -Path (Join-Path $WorkDirToMount 'y') -Value 'y'
+& git -C $WorkDirToMount add y
+& git -C $WorkDirToMount commit -qm partial
+exit 3
+'@
+$repoB2 = Join-Path $tmp 'addagent-b2'; New-GitRepo $repoB2
+$r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoB2, '-codeIt', $stubCiCommit) $stubPath
+Assert "add-agent keeps a failed branch that has commits" ((& git -C $repoB2 symbolic-ref --short HEAD) -eq 'add-agent/cursor')
 
 # an existing branch is refused
 $repoC = Join-Path $tmp 'addagent-c'; New-GitRepo $repoC
 & git -C $repoC branch 'add-agent/cursor'
 $r = Invoke-Scenario $addAgent @('cursor', '-repo', $repoC, '-codeIt', $stubCi) $stubPath
 Assert "add-agent refuses an existing branch" ($r.code -ne 0)
+Assert-Contains "add-agent says how to delete an existing branch" $r.out "branch -D 'add-agent/cursor'"
 
 # ---------------------------------------------------------------------------
 "12c. Code-It-Add-Toolchain.ps1"

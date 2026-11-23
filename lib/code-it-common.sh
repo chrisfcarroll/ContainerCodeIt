@@ -277,6 +277,20 @@ ci_wslc_image_list() {
     printf '%s\n' "$out" | sed -nE 's/.*"Repository"[[:space:]]*:[[:space:]]*"([^"]*)".*"Tag"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1:\2/p'
 }
 
+# ci_container_image_list: Apple container's image list, failing if container does.
+# When its system service is not running (container reports an XPC connection
+# error), start it with container system start, once, and try again.
+ci_container_image_list() {
+    local out
+    if out=$(container image ls 2>/dev/null); then
+        printf '%s\n' "$out"
+        return 0
+    fi
+    echo "    The container system service is not running; starting it with: container system start" >&2
+    container system start >&2 || return 1
+    container image ls
+}
+
 # ci_find_superset_image RUNTIME REQUESTED_SPACE: echo the repo name of the
 # most-recently built image whose recorded toolchains contain every requested chain,
 # or nothing. Only images whose label (or name) can be read are considered.
@@ -690,7 +704,8 @@ ci_agent_detected() {
 # code-it-add-agent and code-it-add-toolchain. With DRY_RUN=true it prints the prompt
 # and command and returns 0. Otherwise it refuses a dirty repo or an existing branch,
 # creates BRANCH, runs CODE_IT headless with PROMPT, prints the branch and a diff
-# summary, and returns code-it's exit code.
+# summary, and returns code-it's exit code. If code-it fails having changed nothing,
+# BRANCH is deleted and the starting branch checked out again, so a retry can run.
 ci_add_via_code_it() {
     local name="$1" branch="$2" repo="$3" code_it="$4" dry_run="$5" prompt="$6"
     local cmd=("$code_it" --headless --work-dir "$repo" --prompt "$prompt")
@@ -712,11 +727,14 @@ ci_add_via_code_it() {
     fi
     if git -C "$repo" rev-parse --verify --quiet "$branch" >/dev/null; then
         echo "Warning: branch '$branch' already exists in '$repo'." >&2
+        echo "Delete it with: git -C '$repo' branch -D '$branch', or choose another with --branch." >&2
         return 1
     fi
 
-    local base_rev rc=0
+    local base_rev start_ref rc=0
     base_rev=$(git -C "$repo" rev-parse HEAD)
+    # The branch to return to if the run makes no changes, or the commit if detached
+    start_ref=$(git -C "$repo" symbolic-ref --quiet --short HEAD) || start_ref="$base_rev"
     echo "    Creating branch $branch in $repo"
     git -C "$repo" checkout -b "$branch" || return 1
 
@@ -731,6 +749,14 @@ ci_add_via_code_it() {
 
     if [[ "$rc" != "0" ]]; then
         echo "Warning: code-it exited $rc (the agent may have refused, or failed)." >&2
+        # A run that failed without committing or changing anything (a refusal, or a
+        # runtime that was not running) leaves an empty branch that would block a
+        # retry, so remove it and go back to where we started.
+        if [[ "$(git -C "$repo" rev-parse HEAD)" == "$base_rev" && -z "$(git -C "$repo" status --porcelain)" ]] \
+            && git -C "$repo" checkout -q "$start_ref" \
+            && git -C "$repo" branch -q -D "$branch"; then
+            echo "    No changes were made, so branch $branch was removed and $start_ref checked out again."
+        fi
     fi
     return "$rc"
 }

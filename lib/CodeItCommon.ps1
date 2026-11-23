@@ -242,6 +242,19 @@ function Get-CodeItWslcImageList {
     return $names
 }
 
+# Get-CodeItContainerImageList: Apple container's image list lines, leaving
+# $LASTEXITCODE as container's. When its system service is not running (container
+# reports an XPC connection error), start it with container system start, once, and
+# try again.
+function Get-CodeItContainerImageList {
+    $lines = @(container image ls 2>$null)
+    if ($LASTEXITCODE -eq 0) { return $lines }
+    Write-Host "    The container system service is not running; starting it with: container system start"
+    container system start | Out-Host
+    if ($LASTEXITCODE -ne 0) { return @() }
+    return @(container image ls)
+}
+
 # Get-CodeItImageList RUNTIME: existing image "repo:tag" names, most recent first.
 function Get-CodeItImageList([string]$runtime) {
     if ($runtime -eq 'docker') {
@@ -628,16 +641,19 @@ function Bool-Arg([bool]$on) { if ($on) { 'true' } else { 'false' } }
 # returns the exit code. With DRYRUN it prints the prompt and command and does nothing
 # else. Otherwise it refuses a dirty repo or an existing branch, creates BRANCH, runs
 # CODEIT headless with PROMPT, prints the branch and diff summary, and returns
-# code-it's exit code.
+# code-it's exit code. If code-it fails having changed nothing, BRANCH is deleted and
+# the starting branch checked out again, so a retry can run.
 function Invoke-CodeItAdder([string]$name, [string]$branch, [string]$repo, [string]$codeIt, [bool]$dryRun, [string]$prompt) {
-    $codeItArgs = @('-headless', '-WorkDirToMount', $repo, '-prompt', $prompt)
+    # A hashtable, as splatting an array into a script passes '-headless' and the
+    # rest as positional values, not as parameter names
+    $codeItArgs = @{ headless = $true; WorkDirToMount = $repo; prompt = $prompt }
 
     if ($dryRun) {
         Write-Host "Prompt:"
         Write-Host $prompt
         Write-Host ""
         Write-Host "Command:"
-        Write-Host "$codeIt $($codeItArgs -join ' ')"
+        Write-Host "$codeIt -headless -WorkDirToMount $repo -prompt <the prompt above>"
         return 0
     }
 
@@ -648,11 +664,14 @@ function Invoke-CodeItAdder([string]$name, [string]$branch, [string]$repo, [stri
     }
     & git -C $repo rev-parse --verify --quiet $branch *> $null
     if ($LASTEXITCODE -eq 0) {
-        Write-Warning "Branch '$branch' already exists in '$repo'."
+        Write-Warning "Branch '$branch' already exists in '$repo'. Delete it with: git -C '$repo' branch -D '$branch', or choose another with -branch."
         return 1
     }
 
     $baseRev = (git -C $repo rev-parse HEAD)
+    # The branch to return to if the run makes no changes, or the commit if detached
+    $startRef = (git -C $repo symbolic-ref --quiet --short HEAD)
+    if ($LASTEXITCODE -ne 0 -or -not $startRef) { $startRef = $baseRev }
     Write-Host "    Creating branch $branch in $repo"
     & git -C $repo checkout -b $branch | Out-Host
     if ($LASTEXITCODE -ne 0) { return [int]$LASTEXITCODE }
@@ -671,6 +690,16 @@ function Invoke-CodeItAdder([string]$name, [string]$branch, [string]$repo, [stri
 
     if ($rc -ne 0) {
         Write-Warning "code-it exited $rc (the agent may have refused, or failed)."
+        # A run that failed without committing or changing anything (a refusal, or a
+        # runtime that was not running) leaves an empty branch that would block a
+        # retry, so remove it and go back to where we started.
+        if ((git -C $repo rev-parse HEAD) -eq $baseRev -and -not (git -C $repo status --porcelain)) {
+            & git -C $repo checkout -q $startRef | Out-Host
+            if ($LASTEXITCODE -eq 0) { & git -C $repo branch -q -D $branch | Out-Host }
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "    No changes were made, so branch $branch was removed and $startRef checked out again."
+            }
+        }
     }
     return [int]$rc
 }

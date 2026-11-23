@@ -472,7 +472,7 @@ if ($runtime -eq "docker") {
 } elseif ($runtime -eq "wslc") {
     $validImages = Get-CodeItWslcImageList
 } else {
-    $validImages = (container image ls)
+    $validImages = Get-CodeItContainerImageList
 }
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "Could not list $runtime images. Is the $runtime daemon or service running?"

@@ -253,7 +253,8 @@ if ($onWindows) {
 "7. -fix hands the report to code-it"
 $stubCi = Join-Path $tmp 'Stub-Code-It.ps1'
 Set-Content -Path $stubCi -Value @'
-Write-Output "STUB-CODE-IT $($args -join ' ')"
+param([switch]$headless, [string]$WorkDirToMount, [string]$prompt)
+Write-Output "STUB-CODE-IT headless=$headless workdir=$WorkDirToMount"
 exit [int]($env:STUB_CODE_IT_EXIT ?? 0)
 '@
 function New-Repo([string]$d) {
@@ -281,7 +282,7 @@ Assert "nothing to fix exits 0" ($r.code -eq 0)
 
 $r = Invoke-Doctor @('-noLiveTest', '-repo', $repoA, '-codeIt', $stubCi, '-branch', 'doctor/test', 'it broke') @{ TERM_PROGRAM = 'WezTerm' }
 Assert "-fix run exit code" ($r.code -eq 0)
-Assert-Contains "-fix runs code-it headless" $r.out 'STUB-CODE-IT -headless -WorkDirToMount'
+Assert-Contains "-fix runs code-it headless" $r.out "STUB-CODE-IT headless=True workdir=$repoA"
 Assert "-fix works on its own branch" ((git -C $repoA rev-parse --abbrev-ref HEAD) -eq 'doctor/test')
 
 $repoB = Join-Path $tmp 'repo-b'; New-Repo $repoB

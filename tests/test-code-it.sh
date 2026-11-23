@@ -64,10 +64,17 @@ cat > "$stub_container/container" <<'EOF'
 #!/bin/sh
 case "$1" in
     image)  case "$2" in
-                ls)      echo "code-it-alpine-dotnet-node  latest" ;;
+                ls)      if [ -n "${STUB_CONTAINER_DOWN:-}" ] && [ ! -e "$STUB_CONTAINER_DOWN" ]; then
+                             echo "Error: interrupted: XPC connection error: Connection invalid" >&2; exit 1
+                         fi
+                         echo "code-it-alpine-dotnet-node  latest" ;;
                 inspect) case "$*" in *code-it.agent-binaries*) echo "${STUB_IMAGE_AGENT_BINARIES-}" ;; *code-it.agents*) echo "${STUB_IMAGE_AGENTS-}" ;; *) echo "${STUB_IMAGE_TOOLCHAINS-dotnet,node}" ;; esac ;;
                 *)       echo "stub container: $*" ;;
             esac ;;
+    system) [ "$2" = start ] || { echo "stub container: $*"; exit 0; }
+            [ -n "${STUB_CONTAINER_START_FAIL:-}" ] && exit 1
+            [ -n "${STUB_CONTAINER_DOWN:-}" ] && : > "$STUB_CONTAINER_DOWN"
+            echo "STUB-CONTAINER-SYSTEM-START" ;;
     build)  echo "STUB-CONTAINER-BUILD $*" ;;
     run)    echo "STUB-CONTAINER-RUN $*"; printf '[%s]' "$@"; echo ;;
     *)      echo "stub container: $*" ;;
@@ -301,6 +308,16 @@ out=$(PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" --runtim
 assert_contains "--runtime container forces apple container" "$out" "Using container runtime: container"
 out=$(PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" --runtime container --work-dir "$script_dir" --save-dir "$save")
 assert_contains "container run gets --memory and 3g as separate arguments" "$out" "[--memory][3g]"
+# A stopped container system service is started, once, and the run goes on
+container_state="$tmp/container-started"; rm -f "$container_state"
+out=$(STUB_CONTAINER_DOWN="$container_state" PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" --runtime container "${common_args[@]}" 2>&1)
+assert "a stopped container service is started and the run goes on" "$?"
+assert_contains "says it starts the container service" "$out" "starting it with: container system start"
+assert_contains "runs container system start" "$out" "STUB-CONTAINER-SYSTEM-START"
+assert_contains "runs after starting the service" "$out" "container run -it"
+rm -f "$container_state"
+STUB_CONTAINER_DOWN="$container_state" STUB_CONTAINER_START_FAIL=1 PATH="$stub_darwin:$stub_container:$stub_docker:$PATH" "$code_it" --runtime container "${common_args[@]}" >/dev/null 2>&1
+[[ "$?" != "0" ]]; assert "a container service that will not start fails" "$?"
 # Invalid runtime
 PATH="$stub_docker:$PATH" "$code_it" --runtime bogus "${common_args[@]}" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "--runtime bogus fails" "$?"
@@ -1289,12 +1306,34 @@ assert_contains "add-agent prints a changes summary" "$out" "Changes:"
 repo_b="$tmp/addagent-b"; mkrepo "$repo_b"
 STUB_CODE_IT_EXIT=3 PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_b" --code-it "$stub_ci" >/dev/null 2>&1
 [[ "$?" == "3" ]]; assert "add-agent propagates a non-zero gate refusal" "$?"
+[[ "$(git -C "$repo_b" symbolic-ref --short HEAD)" != "add-agent/cursor" ]]
+assert "add-agent goes back to the starting branch after a failure with no changes" "$?"
+[[ -z "$(git -C "$repo_b" branch --list 'add-agent/cursor')" ]]
+assert "add-agent removes the empty branch after a failure" "$?"
+STUB_CODE_IT_EXIT=3 PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_b" --code-it "$stub_ci" >/dev/null 2>&1
+[[ "$?" == "3" ]]; assert "add-agent can be retried after a failure with no changes" "$?"
+
+# (e2) a failure that leaves commits keeps the branch for inspection
+stub_ci_commit="$tmp/stub-code-it-commit.sh"
+cat > "$stub_ci_commit" <<'EOF'
+#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = --work-dir ] && dir="$2"; shift; done
+echo y > "$dir/y"; git -C "$dir" add y; git -C "$dir" commit -qm partial
+exit 3
+EOF
+chmod +x "$stub_ci_commit"
+repo_b2="$tmp/addagent-b2"; mkrepo "$repo_b2"
+PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_b2" --code-it "$stub_ci_commit" >/dev/null 2>&1
+[[ "$(git -C "$repo_b2" symbolic-ref --short HEAD)" == "add-agent/cursor" ]]
+assert "add-agent keeps a failed branch that has commits" "$?"
 
 # (f) an existing branch is refused
 repo_c="$tmp/addagent-c"; mkrepo "$repo_c"
 git -C "$repo_c" branch "add-agent/cursor"
 PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_c" --code-it "$stub_ci" >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "add-agent refuses an existing branch" "$?"
+out=$(PATH="$stub_docker:$PATH" "$add_agent" cursor --repo "$repo_c" --code-it "$stub_ci" 2>&1)
+assert_contains "add-agent says how to delete an existing branch" "$out" "branch -D 'add-agent/cursor'"
 
 # ---------------------------------------------------------------------------
 echo "17. code-it-add-toolchain"

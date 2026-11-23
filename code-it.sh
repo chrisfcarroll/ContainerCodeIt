@@ -560,7 +560,7 @@ if [[ "$runtime" == "docker" ]]; then
 elif [[ "$runtime" == "wslc" ]]; then
     valid_images=$(ci_wslc_image_list) || images_rc=$?
 else
-    valid_images=$(container image ls) || images_rc=$?
+    valid_images=$(ci_container_image_list) || images_rc=$?
 fi
 if [[ "${images_rc:-0}" != 0 ]]; then
     echo "Warning: Could not list $runtime images. Is the $runtime daemon or service running?" >&2
