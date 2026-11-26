@@ -52,6 +52,16 @@ $script:CodeItCodexArgs = @(
     'read-only', 'workspace-write', 'danger-full-access', 'on-request', 'never'
 )
 
+$script:CodeItAntigravityArgs = @(
+    # Google Antigravity CLI (agy): the flags people reach for most
+    '-i', '--prompt-interactive', '-p', '--print', '--prompt', '--model',
+    '--mode', '--effort', '--agent', '--continue', '-c', '--conversation', '--resume', '-r',
+    '--add-dir', '--sandbox', '--dangerously-skip-permissions', '--output-format',
+    '--input-format', '--disable-slash-commands', '--print-timeout', '--settings',
+    'default', 'accept-edits', 'auto', 'plan',
+    'low', 'medium', 'high', 'xhigh', 'max', 'text', 'json', 'stream-json'
+)
+
 $codeItCommands = @(
     'Code-It.ps1', './Code-It.ps1', '.\Code-It.ps1',
     'Claude-It.ps1', './Claude-It.ps1', '.\Claude-It.ps1',
@@ -67,7 +77,7 @@ Register-ArgumentCompleter -CommandName $codeItCommands -ParameterName agentArgs
     if ($fakeBoundParameters.ContainsKey('claude'))   { $agent = 'claude' }
     if ($fakeBoundParameters.ContainsKey('opencode')) { $agent = 'opencode' }
 
-    $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'codex') { $script:CodeItCodexArgs } else { $script:CodeItOpenCodeArgs }
+    $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'codex') { $script:CodeItCodexArgs } elseif ($agent -eq 'antigravity-cli') { $script:CodeItAntigravityArgs } else { $script:CodeItOpenCodeArgs }
     $candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "$agent $_")
 }

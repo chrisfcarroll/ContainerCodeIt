@@ -34,6 +34,15 @@ _code_it_codex_models='gpt-6.1-sol gpt-6-sol gpt-6-luna gpt-6-astra o4-mini'
 _code_it_codex_sandboxes='read-only workspace-write danger-full-access'
 _code_it_codex_approvals='on-request never'
 
+# Google Antigravity CLI (agy): the flags people reach for most
+_code_it_antigravity_opts='-i --prompt-interactive -p --print --prompt --model
+    --mode --effort --agent --continue -c --conversation --resume -r --add-dir
+    --sandbox --dangerously-skip-permissions --output-format --input-format
+    --disable-slash-commands --print-timeout --settings'
+_code_it_antigravity_modes='default accept-edits auto plan'
+_code_it_antigravity_efforts='low medium high xhigh max'
+_code_it_antigravity_formats='text json stream-json'
+
 _code_it() {
     local cur prev agent seen_dashdash=0 i
 
@@ -83,6 +92,14 @@ _code_it() {
                 -c|--config)  return ;; # free text key=value: leave it to the user
             esac
             COMPREPLY=( $(compgen -W "$_code_it_codex_opts" -- "$cur") )
+        elif [[ "$agent" == antigravity-cli ]]; then
+            case "$prev" in
+                --mode)          COMPREPLY=( $(compgen -W "$_code_it_antigravity_modes" -- "$cur") ); return ;;
+                --effort)        COMPREPLY=( $(compgen -W "$_code_it_antigravity_efforts" -- "$cur") ); return ;;
+                --output-format) COMPREPLY=( $(compgen -W "$_code_it_antigravity_formats" -- "$cur") ); return ;;
+                --add-dir|--settings|--log-file) COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
+            esac
+            COMPREPLY=( $(compgen -W "$_code_it_antigravity_opts" -- "$cur") )
         fi
         return
     fi

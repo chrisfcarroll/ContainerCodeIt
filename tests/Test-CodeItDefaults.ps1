@@ -188,15 +188,16 @@ Assert "-dryRun wrote no files" (@(Get-ChildItem $saveDry -Recurse -File).Count 
 # ---------------------------------------------------------------------------
 "8. Interactive: picks by number, blanks keep, none clears"
 $saveInt = Join-Path $tmp 'interactive'; $null = New-Item -ItemType Directory -Force -Path $saveInt
-# Agents are listed alphabetically: claude, codex, opencode. The toolchains
+# Agents are listed alphabetically: antigravity-cli, claude, codex, opencode; model
+# questions follow that list (codex has none, so it is skipped). The toolchains
 # are listed as Code-It-Build lists them: bun, dotnet, node, powershell, python.
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('1', '', '', 'node,python')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('2', '', '', '', 'node,python')
 Assert "interactive exit code 0" ($r.code -eq 0)
-Assert "first agent answer is claude" ((Get-Content "$saveInt/defaults") -contains 'default-agent=claude')
+Assert "agent answered by number is claude" ((Get-Content "$saveInt/defaults") -contains 'default-agent=claude')
 Assert "toolchain answered by name" ((Get-Content "$saveInt/defaults") -contains 'default-toolchain=node,python')
 Assert "blank model answer keeps (creates nothing)" (-not (Test-Path "$saveInt/.claude/settings.json"))
 # (answer by name so the scenario does not depend on the agent order)
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('opencode', '', 'my-favourite-model', 'node')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('opencode', '', '', 'my-favourite-model', 'node')
 Assert "second interactive run exit code 0" ($r.code -eq 0)
 Assert "agent answered as a name" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode')
 Assert "a free-text model is accepted" ((Get-Content "$saveInt/defaults") -contains 'model.opencode=my-favourite-model')
@@ -213,8 +214,8 @@ Assert "a model opencode-go does not serve keeps its provider" `
 Assert "claude's list keeps Anthropic's models without the prefix" `
     (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) claude-sonnet-5-5$' }).Count -gt 0)
 # Model questions follow the agent list (codex has none, so it is skipped):
-# claude, then opencode
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('9', 'sonnet', 'none', 'none')
+# antigravity-cli, then claude, then opencode
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('9', '', 'sonnet', 'none', 'none')
 Assert "third interactive run exit code 0" ($r.code -eq 0)
 Assert "out-of-range number keeps the saved agent" ((Get-Content "$saveInt/defaults") -contains 'default-agent=opencode')
 Assert "'sonnet' is accepted for claude" ((Get-Content "$saveInt/defaults") -contains 'model.claude=sonnet')
@@ -288,7 +289,7 @@ Assert-Contains "-show names the model file" $r.out "(set in $showD/opencode-v2/
 # Switching the default agent interactively explains that the agent's own state,
 # and login, come with it
 $noteD = Join-Path $tmp 'note-d'
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$noteD'" $stubPath @('opencode', 'none', 'none', 'none')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$noteD'" $stubPath @('opencode', 'none', 'none', 'none', 'none')
 Assert "interactive switch exits 0" ($r.code -eq 0)
 Assert-Contains "the switch explains each agent's own state and login" $r.out 'log in again'
 Assert "the switched agent is saved" ((Get-Content "$noteD/defaults") -contains 'default-agent=opencode')
@@ -332,11 +333,11 @@ Assert "by default claude is not told to trust" (-not $r.out.Contains('CLAUDE_CO
 $r = Invoke-Scenario "& '$codeIt' -c -trustWorkDir -dryRun -WorkDirToMount '$scriptDir' -saveDir '$trustD'" $stubPath
 Assert-Contains "-trustWorkDir sets claude's trust variable" $r.out '-e CLAUDE_CODE_SANDBOXED=1'
 
-# Interactive: the last question; blank keeps, yes saves. Answers: agent, claude's
-# model, opencode's model, toolchain, trust
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$trustD'" $stubPath @('', '', '', '', 'yes')
+# Interactive: the last question; blank keeps, yes saves. Answers: agent,
+# antigravity-cli's model, claude's model, opencode's model, toolchain, trust
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$trustD'" $stubPath @('', '', '', '', '', 'yes')
 Assert "interactive yes saves trust-work-dir" ((Get-Content "$trustD/defaults") -contains 'trust-work-dir=yes')
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$trustD'" $stubPath @('', '', '', '', '')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$trustD'" $stubPath @('', '', '', '', '', '')
 Assert "interactive blank keeps trust-work-dir" ((Get-Content "$trustD/defaults") -contains 'trust-work-dir=yes')
 
 # ---------------------------------------------------------------------------
@@ -380,13 +381,14 @@ $r = Invoke-Scenario "& '$defaults' -saveDir '$rtD' -runtime none" $stubPath
 Assert "-runtime none clears it" (-not ((Get-Content "$rtD/defaults") -match '^default-runtime='))
 $r = Invoke-Scenario "& '$defaults' -help" $stubPath
 Assert-Contains "-help documents -runtime" $r.out '-runtime'
-# Answers: agent, claude's model, opencode's model, toolchain, trust, runtime
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$rtD'" $wslcPathD @('', '', '', '', '', 'wslc')
+# Answers: agent, antigravity-cli's model, claude's model, opencode's model,
+# toolchain, trust, runtime
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$rtD'" $wslcPathD @('', '', '', '', '', '', 'wslc')
 Assert "interactive wslc saves wslc" ((Get-Content "$rtD/defaults") -contains 'default-runtime=wslc')
 Assert-Contains "interactive marks the runtimes found" $r.out '* wslc'
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$rtD'" $wslcPathD @('', '', '', '', '', '')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$rtD'" $wslcPathD @('', '', '', '', '', '', '')
 Assert "interactive blank keeps the runtime" ((Get-Content "$rtD/defaults") -contains 'default-runtime=wslc')
-$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$rtD'" $wslcPathD @('', '', '', '', '', 'none')
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$rtD'" $wslcPathD @('', '', '', '', '', '', 'none')
 Assert "interactive none clears the runtime" (-not ((Get-Content "$rtD/defaults") -match '^default-runtime='))
 
 # ---------------------------------------------------------------------------

@@ -53,7 +53,7 @@ Use `code-it-defaults` and `code-it-build` to change your setup.
 
 See help with `--help` (bash) or `-help` (PowerShell).
 
-Initial agents are opencode, claude and codex. Initial toolchains are dotnet, node, bun, python, powershell, rust, go, gcc, g++ and clang.
+Initial agents are opencode, claude, codex and antigravity-cli. Initial toolchains are dotnet, node, bun, python, powershell, rust, go, gcc, g++ and clang.
 
 ### Prerequisites for Windows
 
@@ -380,7 +380,10 @@ When running multiple OpenCode containers, code-it makes copies of the session
 database to avoid conflicts, so multiple sessions can't share context or history.
 We try to not make you log in again. This in `AGENT_EXCLUSIVE_DIRS` (below).
 
-Multiple Claude agents get on fine.
+Multiple Claude agents get on fine, and multiple Antigravity CLI agents too: their
+state is plain files (the Antigravity CLI's login lives in the OS keyring, which a
+container does not have, so in there it authenticates with `GEMINI_API_KEY` and the
+`modelProvider` its default-config sets).
 
 ### Agent definitions
 
@@ -501,6 +504,7 @@ The launcher translates the prompt into each agent's own command line
 |---|---|---|
 | Claude Code | `claude PROMPT` | `claude -p PROMPT` |
 | OpenCode | `opencode --prompt PROMPT` | `opencode run --standalone PROMPT` |
+| Antigravity CLI | `agy -i PROMPT` | `agy -p PROMPT` |
 
 Interactively the agent still runs inside tmux. With `--headless` it runs in the
 foreground with no TTY allocated (`docker run -i`), so output can be piped or redirected
@@ -596,7 +600,8 @@ options and the link to the source of the data.
     git config --global feature.manyFiles true
     ```
 - Coding agents are a moving target, especially permissions. We use
-  `--dangerously-skip-permissions` for Claude Code, `--auto` for OpenCode.
+  `--dangerously-skip-permissions` for Claude Code, `--auto` for OpenCode, and
+  `always-proceed` for Antigravity CLI.
 
 ## Runtime detection
 
@@ -630,11 +635,15 @@ The launcher scripts keep the chosen agent's state under one save dir (default `
 | `/home/agent1/.config/opencode` | OpenCode: configuration, including `opencode.json` and `cli.json`, from `<save dir>/opencode-v2/` |
 | `/home/agent1/.local/share/opencode` | OpenCode: session data and provider auth database |
 | `/home/agent1/.local/state/opencode` | OpenCode: shared-service state |
+| `/home/agent1/.gemini/antigravity-cli` | Antigravity CLI: settings, conversations, cache |
+| `/home/agent1/.gemini/antigravity` | Antigravity CLI: shared agent harness state (brain, artifacts, transcripts) |
+| `/home/agent1/.gemini/config` | Antigravity CLI: shared configuration (skills, workflows, MCP servers) |
 | `/home/agent1/.nuget/packages-host` | **Read-only.** Host NuGet package cache (a `fallbackPackageFolder`), if `nuget` is enabled and a cache is found |
 | `/home/agent1/.npm-host` | **Read-only.** Host npm cache, if `npm` is enabled and a cache is found; seeded into `~/.npm` at startup |
 | `/home/agent1/.bun-host` | **Read-only.** Host Bun cache, if `bun` is enabled and a cache is found; seeded into `~/.bun/install/cache` at startup |
 
-Alternatively, pass `--env ANTHROPIC_API_KEY` (claude) or a provider API key env var (opencode) instead of mounting state.
+Alternatively, pass `--env ANTHROPIC_API_KEY` (claude), a provider API key env var
+(opencode), or `--env GEMINI_API_KEY` (antigravity-cli) instead of mounting state.
 
 # Isolating your agent from upstream origin repos.
 

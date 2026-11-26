@@ -397,11 +397,22 @@ Assert "Codex config works free of permissions interruption" ((Get-Content "$sav
 Assert "Codex config treats the container as its sandbox" ((Get-Content "$save/.codex/config.toml" -Raw).Contains('sandbox_mode = "danger-full-access"'))
 Assert-Contains "codex mounts its state" $r.out "$save/.codex:/home/agent1/.codex"
 Assert "codex mounts no other agent's state" (-not ($r.out.Contains('/home/agent1/.claude') -or $r.out.Contains('/home/agent1/.config/opencode')))
+$r = Invoke-Scenario $codeIt (@('-agent','antigravity-cli') + $commonArgs) $stubPath
+Assert-Contains "-agent antigravity-cli selects antigravity-cli" $r.out 'CODE_AGENT="antigravity-cli"'
+Assert-Contains "reports Antigravity CLI settings creation" $r.out 'Created Antigravity CLI settings'
+$agySettings = Get-Content "$save/.gemini/antigravity-cli/settings.json" -Raw | ConvertFrom-Json
+Assert "Antigravity CLI config works free of permissions interruption" ($agySettings.toolPermission -eq 'always-proceed')
+Assert "Antigravity CLI default config keeps its API-key provider" ($agySettings.modelProvider -eq 'gemini')
+Assert-Contains "antigravity-cli mounts its CLI state" $r.out "$save/.gemini/antigravity-cli:/home/agent1/.gemini/antigravity-cli"
+Assert-Contains "antigravity-cli mounts the shared harness state" $r.out "$save/.gemini/antigravity:/home/agent1/.gemini/antigravity"
+Assert-Contains "antigravity-cli mounts the shared config" $r.out "$save/.gemini/config:/home/agent1/.gemini/config"
+Assert "antigravity-cli mounts no other agent's state" (-not ($r.out.Contains('/home/agent1/.claude') -or $r.out.Contains('/home/agent1/.config/opencode')))
 $r = Invoke-ScenarioCommand "& '$codeIt' -listAgents" $stubPath
 Assert "listAgents exit code 0" ($r.code -eq 0)
 Assert-Contains "-listAgents lists claude" $r.out 'claude'
 Assert-Contains "-listAgents lists opencode" $r.out 'opencode'
 Assert-Contains "-listAgents lists codex" $r.out 'codex'
+Assert-Contains "-listAgents lists antigravity-cli" $r.out 'antigravity-cli'
 $r = Invoke-Scenario $codeIt (@('-agent','nosuchagent') + $commonArgs) $stubPath
 Assert "unknown -agent fails" ($r.code -ne 0)
 Assert-Contains "unknown agent lists the available agents" $r.out 'The available agents are:'
@@ -601,16 +612,17 @@ foreach ($t in @('dotnet', 'bun')) {
     $p = Join-Path $bDfDir "toolchains/$t/install.dockerfile"
     [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'))
 }
-foreach ($a in @('opencode', 'claude', 'codex')) {
+foreach ($a in @('opencode', 'claude', 'codex', 'antigravity-cli')) {
     $p = Join-Path $bDfDir "agents/$a/install.dockerfile"
     [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p) -replace '# last changed [0-9-]+', '# last changed 2000-01-01'))
 }
-$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker', '-agent', 'opencode,claude,codex') $stubPath
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-rebuild', '-dockerfileDir', $bDfDir, '-runtime', 'docker', '-agent', 'opencode,claude,codex,antigravity-cli') $stubPath
 Assert "Code-It-Build -rebuild exit code 0" ($r.code -eq 0)
 Assert-Contains "Code-It-Build -rebuild invokes docker build" $r.out 'STUB-DOCKER-BUILD'
 Assert "Code-It-Build -rebuild bumps the opencode fragment" ((Get-Content (Join-Path $bDfDir 'agents/opencode/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the claude fragment" ((Get-Content (Join-Path $bDfDir 'agents/claude/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the codex fragment" ((Get-Content (Join-Path $bDfDir 'agents/codex/install.dockerfile') -Raw).Contains("# last changed $today"))
+Assert "Code-It-Build -rebuild bumps the antigravity-cli fragment" ((Get-Content (Join-Path $bDfDir 'agents/antigravity-cli/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild bumps the selected toolchain fragment" ((Get-Content (Join-Path $bDfDir 'toolchains/dotnet/install.dockerfile') -Raw).Contains("# last changed $today"))
 Assert "Code-It-Build -rebuild leaves unselected toolchain fragments alone" ((Get-Content (Join-Path $bDfDir 'toolchains/bun/install.dockerfile') -Raw).Contains('# last changed 2000-01-01'))
 # A missing Dockerfile is an error
@@ -655,6 +667,15 @@ $codexInstall = Get-Content (Join-Path $scriptDir 'agents/codex/install.dockerfi
 Assert "codex installs the pinned official release" ($codexInstall.Contains('releases/download/rust-v0.164.0'))
 Assert "codex installs to its own AGENT_BINARY path" ($codexInstall.Contains('mv "/tmp/codex-${arch}-unknown-linux-musl" ~/.local/bin/codex'))
 Assert "codex needs no apk packages (its musl build is static)" (-not ($codexInstall -match '(?m)^RUN apk add'))
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun','-dockerfileDir',$scriptDir,'-agent','antigravity-cli') $stubPath
+Assert-Contains "-agent antigravity-cli selects the antigravity-cli installer" $r.out 'agents antigravity-cli'
+Assert-Contains "antigravity-cli image label records the agent" $r.out '--label code-it.agents=antigravity-cli'
+Assert-Contains "antigravity-cli image label records its binary" $r.out '--label code-it.agent-binaries=antigravity-cli=/home/agent1/.local/bin/agy'
+$agyInstall = Get-Content (Join-Path $scriptDir 'agents/antigravity-cli/install.dockerfile') -Raw
+Assert "antigravity-cli installs the pinned official release" ($agyInstall.Contains('antigravity-public/antigravity-cli/1.5.18-'))
+Assert "antigravity-cli verifies its download against the official SHA-512" ($agyInstall.Contains('sha512sum -c -'))
+Assert "antigravity-cli installs to its own AGENT_BINARY path" ($agyInstall.Contains('mv /tmp/antigravity ~/.local/bin/agy'))
+Assert "antigravity-cli needs no apk packages (its musl build is static)" (-not ($agyInstall -match '(?m)^RUN apk add'))
 $r = Invoke-ScenarioCommand "& '$codeItBuild' -toolchain 'dotnet,node' -dryRun -dockerfileDir '$scriptDir' -agent 'claude,opencode'" $stubPath
 Assert-Contains "agent-binaries label lists every agent" $r.out '--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode-v2/bin/opencode'
 $v2Install = Get-Content (Join-Path $scriptDir 'agents/opencode/install.dockerfile') -Raw
@@ -1084,6 +1105,8 @@ $r = Invoke-Scenario $codeIt (@('-o','explain this repo') + $commonArgs) $stubPa
 Assert-Contains "opencode (v2): prompt becomes --prompt" $r.out 'code-it-alpine-dotnet-node:latest --prompt "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-agent','codex','explain this repo') + $commonArgs) $stubPath
 Assert-Contains "codex bare argument is the prompt" $r.out 'code-it-alpine-dotnet-node:latest "explain this repo"'
+$r = Invoke-Scenario $codeIt (@('-agent','antigravity-cli','explain this repo') + $commonArgs) $stubPath
+Assert-Contains "antigravity-cli prompt becomes -i" $r.out 'code-it-alpine-dotnet-node:latest -i "explain this repo"'
 $r = Invoke-Scenario $codeIt (@('-o') + $commonArgs) $stubPath
 Assert "opencode (v2) interactive no-prompt appends nothing" ($r.out.TrimEnd().EndsWith('code-it-alpine-dotnet-node:latest'))
 Assert-Contains "opencode (v2) interactive no-prompt allocates a TTY" $r.out 'docker run -it'
@@ -1112,6 +1135,8 @@ $r = Invoke-Scenario $codeIt (@('-o','-headless','fix the build') + $commonArgs)
 Assert-Contains "opencode (v2) -headless uses standalone run" $r.out 'code-it-alpine-dotnet-node:latest run --standalone "fix the build"'
 $r = Invoke-Scenario $codeIt (@('-agent','codex','-headless','fix the build') + $commonArgs) $stubPath
 Assert-Contains "codex -headless uses exec" $r.out 'code-it-alpine-dotnet-node:latest exec --skip-git-repo-check "fix the build"'
+$r = Invoke-Scenario $codeIt (@('-agent','antigravity-cli','-headless','fix the build') + $commonArgs) $stubPath
+Assert-Contains "antigravity-cli -headless uses -p" $r.out 'code-it-alpine-dotnet-node:latest -p "fix the build"'
 $r = Invoke-Scenario $codeIt (@('-o','-headless') + $commonArgs) $stubPath
 Assert-Contains "opencode (v2) headless no-prompt still runs standalone" $r.out 'code-it-alpine-dotnet-node:latest run --standalone'
 Assert-Contains "opencode (v2) headless no-prompt has no TTY" $r.out 'docker run -i --rm'
@@ -1123,6 +1148,8 @@ $r = Invoke-Scenario $codeIt (@('-c','-headless','-prompt','tidy') + $commonArgs
 Assert-Contains "agent flags precede the prompt for claude" $r.out 'code-it-alpine-dotnet-node:latest -p --max-turns 5 tidy'
 $r = Invoke-Scenario $codeIt (@('-o','-headless','-prompt','tidy') + $commonArgs + @('--model','example/coder')) $stubPath
 Assert-Contains "opencode (v2) headless flags precede prompt" $r.out 'code-it-alpine-dotnet-node:latest run --standalone --model example/coder tidy'
+$r = Invoke-Scenario $codeIt (@('-agent','antigravity-cli','-headless','-prompt','tidy') + $commonArgs + @('--model','gemini-x')) $stubPath
+Assert-Contains "antigravity-cli headless flags precede the prompt" $r.out 'code-it-alpine-dotnet-node:latest --model gemini-x -p tidy'
 # -headless without a prompt leaves the agent command to the caller. Short agent flags
 # that PowerShell reads as one of this script's own parameters (-p) have to be spelled out.
 $r = Invoke-Scenario $codeIt (@('-c','-headless') + $commonArgs + @('--print','count the files')) $stubPath

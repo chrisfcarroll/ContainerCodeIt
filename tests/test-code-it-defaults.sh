@@ -187,13 +187,15 @@ assert_contains "dry-run says what it would set" "$out" "would set"
 # ---------------------------------------------------------------------------
 echo "9. Interactive: picks by number, blanks keep, none clears"
 save_i="$tmp/save-int"; mkdir -p "$save_i"
-# Toolchains are listed as code-it-build lists them: bun, dotnet, node, powershell, python
-out=$(printf '1\n\n\nnode,python\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
+# Agents are listed alphabetically: antigravity-cli, claude, codex, opencode; model
+# questions follow that list (codex has none, so it is skipped). The toolchains are
+# listed as code-it-build lists them: bun, dotnet, node, powershell, python
+out=$(printf '2\n\n\n\nnode,python\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "interactive exit code" "$?"
-grep -q '^default-agent=claude$' "$save_i/defaults"; assert "first agent preselected answer is claude" "$?"
+grep -q '^default-agent=claude$' "$save_i/defaults"; assert "agent answered by number is claude" "$?"
 grep -q '^default-toolchain=node,python$' "$save_i/defaults"; assert "toolchain answered by name" "$?"
 [[ ! -e "$save_i/.claude/settings.json" ]]; assert "blank model answer keeps (creates nothing)" "$?"
-out=$(printf 'opencode\n\nmy-favourite-model\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
+out=$(printf 'opencode\n\n\nmy-favourite-model\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "second interactive run exit code" "$?"
 grep -q '^default-agent=opencode$' "$save_i/defaults"; assert "agent answered as a name" "$?"
 grep -q '^model.opencode=my-favourite-model$' "$save_i/defaults"; assert "a free-text model is accepted" "$?"
@@ -209,7 +211,7 @@ printf '%s\n' "$out" | grep -qE '^  [0-9]+\) zai/glm-5\.3-flashx$'
 assert "a model opencode-go does not serve keeps its provider" "$?"
 printf '%s\n' "$out" | grep -qE '^  [0-9]+\) claude-sonnet-5-5$'
 assert "claude's list keeps Anthropic's models without the prefix" "$?"
-out=$(printf '9\nsonnet\nnone\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
+out=$(printf '9\n\nsonnet\nnone\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "third interactive run exit code" "$?"
 grep -q '^default-agent=opencode$' "$save_i/defaults"; assert "out-of-range number keeps the saved agent" "$?"
 grep -q '^model.claude=sonnet$' "$save_i/defaults"; assert "claude model set by number from its list" "$?"
@@ -244,14 +246,14 @@ assert "--refresh-models exit code" "$?"
 assert_contains "--refresh-models reports it" "$out" "Refreshed"
 grep -q '^prov1/m-one$' "$save_r/model-catalog.txt"; assert "cache has the fetched models, sorted" "$?"
 grep -qv '^#' "$save_r/model-catalog.txt"; assert "cache has more than the header" "$?"
-out=$(printf '1\n99\n\nnode\n' | PATH="$stubbin:$cleanbin:$PATH" "$defaults" -s "$save_r" 2>&1)
+out=$(printf '1\n99\n\n\nnode\n' | PATH="$stubbin:$cleanbin:$PATH" "$defaults" -s "$save_r" 2>&1)
 assert_contains "the interactive picker offers the fetched catalog" "$out" "prov1/m-one"
 # opencode-go's models from a refreshed catalog are offered in its own name, once
 assert_contains "the refreshed catalog's opencode-go models are offered" "$out" "opencode-go/m-three"
 printf '%s\n' "$out" | grep -qE '^  [0-9]+\) prov2/m-three$'
 [[ "$?" != "0" ]]; assert "the fetched model opencode-go serves is not offered under its other provider" "$?"
 n=$(printf '%s\n' "$out" | grep -cE '^  [0-9]+\) opencode-go/m-three$')
-[[ "$n" == "1" ]]; assert "the mapped model appears once in opencode's list" "$?"
+[[ "$n" == "2" ]]; assert "the mapped model appears once per agent picker (antigravity-cli's and opencode's)" "$?"
 grep -q '^model.claude=' "$save_r/defaults"
 [[ "$?" != "0" ]]; assert "picker out-of-range number is refused" "$?"
 
@@ -379,11 +381,11 @@ out=$(launched --save-dir "$trust_d" -c 2>&1)
 out=$(launched --save-dir "$trust_d" -c --trust-work-dir 2>&1)
 assert_contains "--trust-work-dir sets claude's trust variable" "$out" "-e CLAUDE_CODE_SANDBOXED=1"
 
-# Interactive: the last question; blank keeps, yes saves. Answers: agent, claude's
-# model, opencode's model, toolchain, trust
-printf '\n\n\n\nyes\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" >/dev/null 2>&1
+# Interactive: the last question; blank keeps, yes saves. Answers: agent,
+# antigravity-cli's model, claude's model, opencode's model, toolchain, trust
+printf '\n\n\n\n\nyes\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" >/dev/null 2>&1
 grep -q '^trust-work-dir=yes$' "$trust_d/defaults"; assert "interactive yes saves trust-work-dir" "$?"
-printf '\n\n\n\n\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" >/dev/null 2>&1
+printf '\n\n\n\n\n\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$trust_d" >/dev/null 2>&1
 grep -q '^trust-work-dir=yes$' "$trust_d/defaults"; assert "interactive blank keeps trust-work-dir" "$?"
 
 # ---------------------------------------------------------------------------
@@ -425,13 +427,14 @@ out=$(PATH="$cleanbin" "$defaults" --help)
 assert_contains "--help documents --runtime" "$out" "--runtime, -r NAME"
 
 # Interactive: the last question; blank keeps, a number or name saves. Answers:
-# agent, claude's model, opencode's model, toolchain, trust, runtime
-printf '\n\n\n\n\nwslc\n' | PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" >"$tmp/rt-out" 2>&1
+# agent, antigravity-cli's model, claude's model, opencode's model, toolchain,
+# trust, runtime
+printf '\n\n\n\n\n\nwslc\n' | PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" >"$tmp/rt-out" 2>&1
 grep -q '^default-runtime=wslc$' "$rt_d/defaults"; assert "interactive wslc saves wslc" "$?"
 assert_contains "interactive marks the runtimes found" "$(cat "$tmp/rt-out")" "* wslc"
-printf '\n\n\n\n\n\n' | PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" >/dev/null 2>&1
+printf '\n\n\n\n\n\n\n' | PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" >/dev/null 2>&1
 grep -q '^default-runtime=wslc$' "$rt_d/defaults"; assert "interactive blank keeps the runtime" "$?"
-printf '\n\n\n\n\nnone\n' | PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" >/dev/null 2>&1
+printf '\n\n\n\n\n\nnone\n' | PATH="$stub_wslc:$cleanbin" "$defaults" -s "$rt_d" >/dev/null 2>&1
 grep -q '^default-runtime=' "$rt_d/defaults"
 [[ "$?" != "0" ]]; assert "interactive none clears the runtime" "$?"
 

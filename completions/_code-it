@@ -69,6 +69,19 @@ _code_it() {
                         --worktree --search --add-dir -i --image --oss
                     ) ;;
             esac
+        elif [[ $agent == antigravity-cli ]]; then
+            case $prev in
+                (--mode)          opts=(default accept-edits auto plan) ;;
+                (--effort)        opts=(low medium high xhigh max) ;;
+                (--output-format) opts=(text json stream-json) ;;
+                (--add-dir|--settings|--log-file) _files; return ;;
+                (*) opts=(
+                        -i --prompt-interactive -p --print --prompt --model
+                        --mode --effort --agent --continue -c --conversation --resume -r
+                        --add-dir --sandbox --dangerously-skip-permissions --output-format
+                        --input-format --disable-slash-commands --print-timeout --settings
+                    ) ;;
+            esac
         fi
         compadd -- $opts
         return

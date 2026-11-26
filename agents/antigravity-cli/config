@@ -1,0 +1,31 @@
+# Google Antigravity CLI (agy) agent definition. Readable from bash (it is sourced)
+# and PowerShell (parsed as key=value). Keep one key per line.
+AGENT_NAME=antigravity-cli
+AGENT_SHORT=
+AGENT_COMMAND=agy
+AGENT_BINARY=/home/agent1/.local/bin/agy
+AGENT_INSTALL=install.dockerfile
+AGENT_CONFIG_LABEL='Antigravity CLI settings'
+# How code-it-defaults sets the agent's default model: a JSON file under its save
+# dir, and the top-level key to set there (the model /model saves)
+AGENT_MODEL_FILE='.gemini/antigravity-cli/settings.json:model'
+# What code-it-first-run sets in its configuration under the save dir, copied or
+# not, so it works free of permissions interruption: the container is the sandbox.
+# Space-separated FILE:KEY.PATH=VALUE.
+AGENT_PERMISSIONS='.gemini/antigravity-cli/settings.json:toolPermission=always-proceed'
+# State created under --save-dir and mounted into the container home: the CLI's own
+# (settings, conversations, cache), the shared agent harness's (brain, artifacts,
+# transcripts), and the shared configuration (skills, workflows, MCP servers)
+AGENT_STATE_DIRS='.gemini/antigravity-cli:.gemini/antigravity:.gemini/config'
+AGENT_STATE_FILES=''
+# Several containers get on fine: the state is plain files (no database), and the
+# login lives in the OS keyring, which a container does not have — headless use
+# there is via GEMINI_API_KEY with the modelProvider the default-config sets.
+# Prompt translation: {args} is the agent arguments, {prompt} the opening prompt.
+# The prompt always ends the command line: Go's flag parsing stops at it, so agent
+# flags must come first. -i runs an initial prompt interactively; -p (--print) runs
+# one prompt headlessly and prints the response.
+AGENT_CMD_INTERACTIVE_PROMPT='{args} -i {prompt}'
+AGENT_CMD_INTERACTIVE_NO_PROMPT='{args}'
+AGENT_CMD_HEADLESS_PROMPT='{args} -p {prompt}'
+AGENT_CMD_HEADLESS_NO_PROMPT='{args}'

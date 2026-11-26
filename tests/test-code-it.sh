@@ -267,11 +267,26 @@ case "$out" in
     *"/home/agent1/.claude"*|*"/home/agent1/.config/opencode"*) assert "codex mounts no other agent's state" 1 ;;
     *)                                                                assert "codex mounts no other agent's state" 0 ;;
 esac
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent antigravity-cli "${common_args[@]}")
+assert_contains "--agent antigravity-cli selects antigravity-cli" "$out" 'CODE_AGENT="antigravity-cli"'
+assert_contains "reports Antigravity CLI settings creation" "$out" "Created Antigravity CLI settings"
+tr -d '[:space:]' < "$save/.gemini/antigravity-cli/settings.json" | grep -q '"toolPermission":"always-proceed"'
+assert "Antigravity CLI config works free of permissions interruption" "$?"
+tr -d '[:space:]' < "$save/.gemini/antigravity-cli/settings.json" | grep -q '"modelProvider":"gemini"'
+assert "Antigravity CLI default config keeps its API-key provider" "$?"
+assert_contains "antigravity-cli mounts its CLI state" "$out" "$save/.gemini/antigravity-cli:/home/agent1/.gemini/antigravity-cli"
+assert_contains "antigravity-cli mounts the shared harness state" "$out" "$save/.gemini/antigravity:/home/agent1/.gemini/antigravity"
+assert_contains "antigravity-cli mounts the shared config" "$out" "$save/.gemini/config:/home/agent1/.gemini/config"
+case "$out" in
+    *"/home/agent1/.claude"*|*"/home/agent1/.config/opencode"*) assert "antigravity-cli mounts no other agent's state" 1 ;;
+    *)                                                          assert "antigravity-cli mounts no other agent's state" 0 ;;
+esac
 out=$(PATH="$stub_docker:$PATH" "$code_it" --list-agents)
 assert "--list-agents exit code" "$?"
 assert_contains "--list-agents lists claude" "$out" "claude"
 assert_contains "--list-agents lists opencode" "$out" "opencode"
 assert_contains "--list-agents lists codex" "$out" "codex"
+assert_contains "--list-agents lists antigravity-cli" "$out" "antigravity-cli"
 assert_contains "--list-agents shows the short flag" "$out" "-o"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent nosuchagent "${common_args[@]}" 2>&1)
 [[ "$?" != "0" ]]; assert "unknown --agent fails" "$?"
@@ -508,13 +523,15 @@ grep -q "# last changed 2000-01-01" "$bdfdir/agents/opencode/install.dockerfile"
 assert "code-it-build without --rebuild leaves the dates unchanged" "$?"
 STUB_BUILD_FAIL=1 PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dockerfile-dir "$bdfdir" --runtime docker >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build failed build exits non-zero" "$?"
-out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --rebuild --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --rebuild --dockerfile-dir "$bdfdir" --runtime docker --agent opencode,claude,codex,antigravity-cli 2>&1)
 assert "code-it-build --rebuild exit code" "$?"
 assert_contains "code-it-build --rebuild invokes docker build" "$out" "STUB-DOCKER-BUILD"
 grep -q "# last changed $today" "$bdfdir/agents/opencode/install.dockerfile"
 assert "code-it-build --rebuild bumps the opencode fragment" "$?"
 grep -q "# last changed $today" "$bdfdir/agents/claude/install.dockerfile"
 assert "code-it-build --rebuild bumps the claude fragment" "$?"
+grep -q "# last changed $today" "$bdfdir/agents/antigravity-cli/install.dockerfile"
+assert "code-it-build --rebuild bumps the antigravity-cli fragment" "$?"
 grep -q "# last changed $today" "$bdfdir/toolchains/dotnet/install.dockerfile"
 assert "code-it-build --rebuild bumps the selected toolchain fragment" "$?"
 grep -q "# last changed 2000-01-01" "$bdfdir/toolchains/bun/install.dockerfile"
@@ -589,6 +606,18 @@ grep -qF 'mv "/tmp/codex-${arch}-unknown-linux-musl" ~/.local/bin/codex' "$scrip
 assert "codex installs to its own AGENT_BINARY path" "$?"
 [[ "$(grep -c '^RUN apk add' "$script_dir/agents/codex/install.dockerfile")" == "0" ]]
 assert "codex needs no apk packages (its musl build is static)" "$?"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent antigravity-cli 2>&1)
+assert_contains "--agent antigravity-cli selects the antigravity-cli installer" "$out" "agents antigravity-cli"
+assert_contains "antigravity-cli image label records the agent" "$out" "--label code-it.agents=antigravity-cli"
+assert_contains "antigravity-cli image label records its binary" "$out" "--label code-it.agent-binaries=antigravity-cli=/home/agent1/.local/bin/agy"
+grep -q 'antigravity-public/antigravity-cli/1\.5\.18-' "$script_dir/agents/antigravity-cli/install.dockerfile"
+assert "antigravity-cli installs the pinned official release" "$?"
+grep -q 'sha512sum -c -' "$script_dir/agents/antigravity-cli/install.dockerfile"
+assert "antigravity-cli verifies its download against the official SHA-512" "$?"
+grep -qF 'mv /tmp/antigravity ~/.local/bin/agy' "$script_dir/agents/antigravity-cli/install.dockerfile"
+assert "antigravity-cli installs to its own AGENT_BINARY path" "$?"
+[[ "$(grep -c '^RUN apk add' "$script_dir/agents/antigravity-cli/install.dockerfile")" == "0" ]]
+assert "antigravity-cli needs no apk packages (its musl build is static)" "$?"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
 assert_contains "agent-binaries label lists every agent" "$out" "--label code-it.agent-binaries=claude=/home/agent1/.local/bin/claude,opencode=/home/agent1/.opencode-v2/bin/opencode"
 grep -q 'bash /tmp/opencode-v2-install.sh --version 2.0.6' "$script_dir/agents/opencode/install.dockerfile"
@@ -1015,6 +1044,8 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -o "explain this repo" "${common_args
 assert_contains "opencode (v2): prompt becomes --prompt" "$out" 'code-it-alpine-dotnet-node:latest --prompt explain\ this\ repo'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent codex "explain this repo" "${common_args[@]}")
 assert_contains "codex: bare argument is the prompt" "$out" 'code-it-alpine-dotnet-node:latest explain\ this\ repo'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent antigravity-cli "explain this repo" "${common_args[@]}")
+assert_contains "antigravity-cli: prompt becomes -i" "$out" 'code-it-alpine-dotnet-node:latest -i explain\ this\ repo'
 # No prompt and no agent args: nothing is appended, and the run stays interactive
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o "${common_args[@]}")
 [[ "$out" == *"code-it-alpine-dotnet-node:latest" ]]; assert "opencode (v2): no prompt appends nothing" "$?"
@@ -1044,6 +1075,10 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "fix the build" "${comm
 assert_contains "opencode (v2) --headless uses standalone run" "$out" 'code-it-alpine-dotnet-node:latest run --standalone fix\ the\ build'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent codex --headless "fix the build" "${common_args[@]}")
 assert_contains "codex --headless uses exec" "$out" 'code-it-alpine-dotnet-node:latest exec --skip-git-repo-check fix\ the\ build'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent antigravity-cli --headless "fix the build" "${common_args[@]}")
+assert_contains "antigravity-cli --headless uses -p" "$out" 'code-it-alpine-dotnet-node:latest -p fix\ the\ build'
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent antigravity-cli --headless --prompt "tidy" "${common_args[@]}" -- --model gemini-x)
+assert_contains "antigravity-cli headless flags precede the prompt" "$out" "code-it-alpine-dotnet-node:latest --model gemini-x -p tidy"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -o --headless "${common_args[@]}" -- --session abc)
 assert_contains "opencode (v2) headless no-prompt still runs headless" "$out" 'code-it-alpine-dotnet-node:latest run --standalone --session abc'
 
@@ -1115,6 +1150,7 @@ completions_out=$(
     echo "OPENCODEDEF:$(comp ./code-it.sh -- --sta | tr '\n' ' ')"
     echo "OPENCODEALIAS:$(comp ./opencode-it.sh -- --se | tr '\n' ' ')"
     echo "CODEX:$(comp ./code-it.sh --agent codex -- --mo | tr '\n' ' ')"
+    echo "AGY:$(comp ./code-it.sh --agent antigravity-cli -- --mo | tr '\n' ' ')"
     echo "NOAGENT:$(comp ./code-it.sh --no- | tr '\n' ' ')"
 )
 assert_contains "completes launcher options" "$completions_out" "OPTS:--headless"
@@ -1132,6 +1168,7 @@ assert_contains "completes claude --permission-mode values" "$completions_out" "
 assert_contains "defaults to opencode (v2) flags after --" "$completions_out" "OPENCODEDEF:--standalone"
 assert_contains "opencode-it.sh completes opencode (v2) flags after --" "$completions_out" "OPENCODEALIAS:--server"
 assert_contains "codex completes its flags after --" "$completions_out" "CODEX:--model"
+assert_contains "antigravity-cli completes its flags after --" "$completions_out" "AGY:--mode"
 
 # ---------------------------------------------------------------------------
 echo "15. Container entrypoint (go.sh) passes its arguments to the agent"
