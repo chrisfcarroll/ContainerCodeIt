@@ -19,7 +19,7 @@
     - Git author environment variables or config settings (name and email)
     - Paths to preserve agent credentials, settings, and session data across container runs
     - A parameterisable set of toolchains (dotnet, node, bun, python, powershell,
-      rust, go, gcc, g++, clang) and package
+      rust, go, clang) and package
       caches (nuget, npm, bun), chosen with -toolchain and -packageCaches
     - The enabled host package caches, mounted read-only
 
@@ -127,7 +127,7 @@
 .PARAMETER toolchain
     Comma-separated toolchains. Known: dotnet, node (aliases js-node, ts-node), bun
     (aliases js-bun, ts-bun), python (alias uv), powershell (alias pwsh), rust,
-    go, gcc, g++, clang (alias llvm). Alias: -stack.
+    go, clang (alias llvm). Alias: -stack.
     There is no default list. Without -toolchain, they are those of the -image given;
     else of the saved default toolchain (see Code-It-Defaults.ps1); else of the
     remembered image, the most recent in <saveDir>/image-history whose

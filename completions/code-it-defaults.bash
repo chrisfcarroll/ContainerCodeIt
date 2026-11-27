@@ -19,7 +19,7 @@ _code_it_defaults() {
         --model)
             COMPREPLY=( $(compgen -W "$(ls "${BASH_SOURCE[0]%/*}/../agents" 2>/dev/null | sed 's/$/=/')" -- "$cur") ); return ;;
         --toolchain|-t)
-            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh rust go gcc g++ clang llvm" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh rust go clang llvm" -- "$cur") ); return ;;
         --trust-work-dir)
             COMPREPLY=( $(compgen -W "yes no" -- "$cur") ); return ;;
         --runtime|-r)

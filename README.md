@@ -138,7 +138,7 @@ docker run -it --rm \
 | `--locale`, `-l` | `-locale` | `like-host` | The container's locale (`LANG`), e.g. `en_GB.UTF-8` or `en-GB`. See [Locale](#locale) |
 | `--trust-work-dir`, `--no-trust-work-dir` | `-trustWorkDir`, `-trustWorkDir:$false` | off, or the saved default (`code-it-defaults`) | Tell the agent to trust the work dir, so it does not ask "do you trust this folder?". For Claude Code this sets `CLAUDE_CODE_SANDBOXED=1` (the agent's `AGENT_TRUST_ENV`). Only for code you trust: the folder's own hooks and settings then run unasked |
 | `--agent-name` | `-agentName` | `Agent1` | Agent name, used for git attribution; must match the Dockerfile USER |
-| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none: those of `--image`, else of the saved default toolchain (`code-it-defaults`), else of the remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell`, `rust`, `go`, `gcc`, `g++`, `clang` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`, `llvm` for `clang`; see `code-it-build --list-toolchains`) |
+| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none: those of `--image`, else of the saved default toolchain (`code-it-defaults`), else of the remembered/existing code-it image, else first-run | Comma-separated toolchains: `dotnet`, `node`, `bun`, `python`, `powershell`, `rust`, `go`, `clang` (aliases `js-node`/`ts-node` for `node`, `js-bun`/`ts-bun` for `bun`, `uv` for `python`, `pwsh` for `powershell`, `llvm` for `clang`; see `code-it-build --list-toolchains`) |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Comma-separated package repos to mount read-only: `nuget`, `npm`, `bun` |
 | `--dry-run`, `-d` | `-dryRun` | off | Print the run command without executing |
 
@@ -310,7 +310,7 @@ because Apple's `container` builder sends it in a gRPC header and fails above ~1
 The launchers expose them as two comma-separated lists:
 
 - `--toolchain` / `-toolchain` (alias `--stack` / `-stack`) — toolchains to build:
-  `dotnet`, `node`, `bun`, `python`, `powershell`, `rust`, `go`, `gcc`, `g++`, `clang`.
+  `dotnet`, `node`, `bun`, `python`, `powershell`, `rust`, `go`, `clang`.
   There is no default list: without it,
   `code-it` uses those of `--image`, else of the remembered image, else of an existing
   code-it image, else runs the first-run setup (see below), and `code-it-build` builds

@@ -21,7 +21,7 @@
 .PARAMETER toolchain
     Comma-separated toolchains to build. Known: dotnet, node (aliases js-node,
     ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell
-    (alias pwsh), rust, go, gcc, g++, clang (alias llvm). Alias: -stack.
+    (alias pwsh), rust, go, clang (alias llvm). Alias: -stack.
     Default: none, which is valid: a container with no toolchain. -interactive
     asks which detected toolchains to build.
 

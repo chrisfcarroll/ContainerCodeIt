@@ -20,7 +20,7 @@ _code_it_build() {
         --image|-i)
             COMPREPLY=( $(compgen -W "$(docker images --format '{{.Repository}}' 2>/dev/null)" -- "$cur") ); return ;;
         --toolchain|-t|--stack)
-            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh rust go gcc g++ clang llvm" -- "$cur") ); return ;;
+            COMPREPLY=( $(compgen -W "dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh rust go clang llvm" -- "$cur") ); return ;;
         --package-caches)
             COMPREPLY=( $(compgen -W "nuget npm bun" -- "$cur") ); return ;;
         --locale|-l)

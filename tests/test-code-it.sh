@@ -512,17 +512,13 @@ assert_contains "rust derives the image name" "$out" "-t code-it-alpine-rust:lat
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain go 2>&1)
 assert_contains "go derives the image name" "$out" "-t code-it-alpine-go:latest"
 
-# The C and C++ toolchains (Spec 18): gcc, g++ and clang from Alpine's own packages
-do_capture --dockerfile-dir "$script_dir" --toolchain gcc --runtime docker
-assert_in_df "build assembles gcc" "apk add --no-cache gcc musl-dev"
-do_capture --dockerfile-dir "$script_dir" --toolchain g++ --runtime docker
-assert_in_df "build assembles g++" "apk add --no-cache g++"
+# The C toolchain (Spec 18): clang from Alpine's own packages
 do_capture --dockerfile-dir "$script_dir" --toolchain clang --runtime docker
 assert_in_df "build assembles clang" "apk add --no-cache clang"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain llvm 2>&1)
 assert_contains "llvm aliases clang and derives its image name" "$out" "-t code-it-alpine-clang:latest"
 
-# Toolchain names with '+' (g++) match existing images and custom-named image labels
+# Names with '+' (as g++) match existing images and custom-named image labels
 gpp_docker="$tmp/gpp-docker"; mkdir -p "$gpp_docker"
 cat > "$gpp_docker/docker" <<'EOF'
 #!/bin/sh
@@ -533,9 +529,6 @@ case "$1" in
 esac
 EOF
 chmod +x "$gpp_docker/docker"
-out=$(PATH="$gpp_docker:$PATH" "$code_it" --toolchain g++ "${common_args[@]}" 2>&1)
-assert "code-it --toolchain g++ finds existing code-it-alpine-g++" "$?"
-[[ "$out" != *"'code-it-alpine-g++' does not exist"* ]]; assert "code-it --toolchain g++ does not mistake g++ for missing" "$?"
 out=$(PATH="$gpp_docker:$PATH" "$code_it" --image code-it-alpine-g++ "${common_args[@]}" 2>&1)
 assert "code-it --image code-it-alpine-g++ succeeds" "$?"
 [[ "$(PATH="$gpp_docker:$PATH" ci_image_toolchain docker my-custom-cpp:latest)" == "g++" ]]
