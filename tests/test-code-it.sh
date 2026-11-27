@@ -432,6 +432,7 @@ case "\$1" in
 esac
 EOF
 chmod +x "$capturebin/docker"
+cp "$capturebin/docker" "$capturebin/container"
 # do_capture ARGS...: build with the capture stub; the assembled file lands in $capture
 do_capture() {
     rm -f "$capture"
@@ -612,13 +613,23 @@ out=$(PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "
 assert "code-it-build without ca-certificates/ gives the context an empty one" "$?"
 assert_contains "code-it-build says when no certificate trust was requested" "$out" "No additional certificate trust was requested"
 # The context is named by its physical path even when TMPDIR runs through a
-# symlink, as macOS's /var/folders does: Apple's container builder before 1.5.0
-# sends a COPY'd directory empty otherwise.
+# symlink. With Apple's container, it is also staged under ~/Library/Caches/code-it
+# rather than TMPDIR (/var/folders -> /private/var), because Foundation's
+# URL.standardizedFileURL strips /private back off and Globber then drops every
+# file inside a COPY'd directory (apple/container#2253).
 mkdir -p "$tmp/real-tmp" && ln -sfn "$tmp/real-tmp" "$tmp/link-tmp"
 real_tmp=$(cd "$tmp/real-tmp" && pwd -P)
 TMPDIR="$tmp/link-tmp" PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker >/dev/null 2>&1
 [[ "$(cat "$capture.ctx" 2>/dev/null)" == "$real_tmp"/* ]]
 assert "code-it-build names the build context by its physical path" "$?"
+ct_home="$tmp/ct-home"; mkdir -p "$ct_home"
+real_ct_home=$(cd "$ct_home" && pwd -P)
+rm -f "$capture.ctx" "$capture.img"
+HOME="$ct_home" TMPDIR="$tmp/link-tmp" PATH="$stub_darwin:$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime container >/dev/null 2>&1
+[[ "$(cat "$capture.ctx" 2>/dev/null)" == "$real_ct_home/Library/Caches/code-it/"* ]]
+assert "code-it-build stages Apple container contexts under ~/Library/Caches/code-it, outside TMPDIR" "$?"
+[[ "$(tr '\n' ' ' < "$capture.img")" == "go.zsh tmux.conf zshrc " ]]
+assert "code-it-build copies image-sources/ into the Apple container context" "$?"
 # image-sources/ (go.zsh, zshrc, tmux.conf) reaches the context, from next to this
 # script when the Dockerfile's directory has none
 [[ "$(tr '\n' ' ' < "$capture.img")" == "go.zsh tmux.conf zshrc " ]]

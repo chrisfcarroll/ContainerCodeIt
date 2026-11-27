@@ -157,10 +157,18 @@ run() {
 if [[ "$build" == true ]] || ! "$runtime" image inspect "$image" >/dev/null 2>&1; then
     # Stage XS and the shared top-level CA directory. This preserves local XS COPY
     # inputs while keeping unrelated repository files out of the build context.
-    # Apple's container builder before 1.5.0 sends a COPY'd directory empty when the
-    # context path runs through a symlink, as macOS's /var/folders does (/var is
-    # /private/var), so the context is named by its physical path.
-    build_context=$(mktemp -d "${TMPDIR:-/tmp}/code-it-xs-build.XXXXXX")
+    # Apple's container builder before 1.7.1 (apple/container#2253) runs
+    # URL.standardizedFileURL on the context root, stripping /private back off
+    # /private/var and /private/tmp so Globber drops files inside COPY'd dirs.
+    # Stage under ~/Library/Caches/code-it for container, and resolve symlinks.
+    if [[ "$runtime" == container && -n "${HOME:-}" ]]; then
+        build_base="$HOME/Library/Caches/code-it"
+        mkdir -p "$build_base"
+    else
+        build_base="${TMPDIR:-/tmp}"
+        build_base="${build_base%/}"
+    fi
+    build_context=$(mktemp -d "$build_base/code-it-xs-build.XXXXXX")
     trap 'rm -rf "$build_context"' EXIT
     build_context=$(cd "$build_context" && pwd -P)
     cp -R "$script_dir/." "$build_context/"

@@ -24,6 +24,7 @@
         Get-CodeItImageLabel RUNTIME IMAGE LABEL -> the image's LABEL, trimmed
         ConvertTo-CodeItNativeArgs ARGS        -> ARGS escaped for a native command
         Get-CodeItPhysicalPath DIR             -> DIR with its symlinks resolved (pwd -P)
+        New-CodeItBuildContext RUNTIME [PREFIX] -> physical path of a new build-context dir
 
     Toolchains, package caches and agents are data: each is a directory with a config
     and an install fragment. Known names come from the directory listing; aliases and
@@ -384,13 +385,30 @@ function Get-CodeItHistoryImage([string]$runtime, [string]$file, [string]$tcDir)
 }
 
 # Get-CodeItPhysicalPath DIR: DIR named by its physical path, with every symlink on
-# it resolved, as pwd -P does. Apple's container builder before 1.5.0 sends a
-# COPY'd directory empty when the context path runs through a symlink, as macOS's
-# /var/folders does (/var is /private/var). Windows has no such temp folder.
+# it resolved, as pwd -P does. Windows has no /var -> /private/var temp symlink.
 function Get-CodeItPhysicalPath([string]$dir) {
     if (-not ($IsMacOS -or $IsLinux)) { return $dir }
     Push-Location -LiteralPath $dir
     try { return (& /bin/pwd -P) } finally { Pop-Location }
+}
+
+# New-CodeItBuildContext RUNTIME [PREFIX]: create and return the physical path of a
+# temporary build-context directory.
+# Apple's container builder before 1.7.1 (apple/container#2253) runs Foundation's
+# URL.standardizedFileURL on the context root, which strips /private back off
+# /private/var and /private/tmp; Globber then drops every file inside a COPY'd
+# directory even when the path was resolved with pwd -P. Stage outside /private
+# under ~/Library/Caches/code-it when building with Apple's container, and still
+# resolve any symlinks on the path with Get-CodeItPhysicalPath.
+function New-CodeItBuildContext([string]$runtime, [string]$prefix = 'code-it-build') {
+    $base = if ($runtime -eq 'container' -and $HOME) {
+        Join-Path $HOME 'Library/Caches/code-it'
+    } else {
+        [IO.Path]::GetTempPath()
+    }
+    $dir = Join-Path $base ("$prefix-" + [Guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Force -Path $dir
+    return (Get-CodeItPhysicalPath $dir)
 }
 
 # Remove-CodeItDockerfileComments TEXT: drop Dockerfile-level comment and blank lines,

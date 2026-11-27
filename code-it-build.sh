@@ -471,12 +471,10 @@ require_marker() {
 [[ -n "$enabled_package_caches" ]] && require_marker "$package_cache_marker" "package caches"
 require_marker "$agents_begin" "agents"
 
-# Apple's container builder before 1.5.0 sends a COPY'd directory empty when the
-# context path runs through a symlink, as macOS's /var/folders does (/var is
-# /private/var), so the context is named by its physical path.
-build_context=$(mktemp -d)
+# Stage the assembled Dockerfile and its COPY sources in a temp build context
+# (outside /private for Apple's container builder: see ci_make_build_context).
+build_context=$(ci_make_build_context "$runtime" code-it-build)
 trap 'rm -rf "$build_context"' EXIT
-build_context=$(cd "$build_context" && pwd -P)
 in_agents=false
 while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in

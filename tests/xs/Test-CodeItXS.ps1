@@ -1,4 +1,4 @@
-# Tests for XS/Code-It.ps1.
+﻿# Tests for XS/Code-It.ps1.
 #
 # No container runtime is required: the tests put stub `docker` and `container`
 # executables on the PATH, and assert on the arguments the stubs receive. Each
@@ -234,9 +234,9 @@ Assert-Contains "a missing image is built from the staged XS context" $out "[bui
 Assert-Contains "the staged XS context contains its Dockerfile" $out 'STUB_HAS_DOCKERFILE'
 Assert-Contains "the staged XS context preserves the XS files" $out 'STUB_HAS_XS_FILES'
 Assert-Contains "the staged XS context includes the top-level CA folder" $out 'STUB_HAS_TOP_LEVEL_CA_README'
-# Named by its physical path even when TMPDIR runs through a symlink, as macOS's
-# /var/folders does: Apple's container builder before 1.5.0 sends a COPY'd
-# directory empty otherwise. Windows has no such temp folder.
+# Named by its physical path even when TMPDIR runs through a symlink. With
+# Apple's container, staged under ~/Library/Caches/code-it rather than TMPDIR
+# (/private/var), which loses files in COPY'd dirs before 1.7.1 (#2253).
 if (-not $onWindows) {
     $realTmp = Join-Path $tmp 'real-tmp'
     $null = New-Item -ItemType Directory -Force -Path $realTmp
@@ -244,6 +244,10 @@ if (-not $onWindows) {
     if (-not (Test-Path $linkTmp)) { $null = New-Item -ItemType SymbolicLink -Path $linkTmp -Target $realTmp }
     $out = Run-XS '& $x' 'n' @{ STUB_NO_IMAGE = '1'; TMPDIR = $linkTmp }
     Assert-Contains "the staged XS context is named by its physical path" $out 'STUB_CONTEXT_PHYSICAL'
+    Push-Location -LiteralPath $home_; try { $realHome = (& /bin/pwd -P) } finally { Pop-Location }
+    $out = Run-XS '& $x -r container' 'n' @{ STUB_NO_IMAGE = '1'; TMPDIR = $linkTmp; PATH = "$tmp/stub-container$sep$env:PATH" }
+    Assert-Contains "XS stages Apple container contexts under ~/Library/Caches/code-it" $out "[$realHome/Library/Caches/code-it/code-it-xs-build-"
+    Assert-Contains "the staged XS Apple container context is physical" $out 'STUB_CONTEXT_PHYSICAL'
 }
 $out = Run-XS '& $x -b -i my-image'
 Assert-Contains "-build rebuilds, with -image's name" $out "[build] [-t] [my-image]"

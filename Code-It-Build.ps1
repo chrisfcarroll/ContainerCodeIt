@@ -416,9 +416,7 @@ $assembled = ($assembled -join "`n")
 # touching heredoc bodies.
 $assembled = Remove-CodeItDockerfileComments $assembled
 
-$buildContext = Join-Path ([IO.Path]::GetTempPath()) ("code-it-build-" + [Guid]::NewGuid().ToString('N'))
-$null = New-Item -ItemType Directory -Force -Path $buildContext
-$buildContext = Get-CodeItPhysicalPath $buildContext
+$buildContext = New-CodeItBuildContext $runtime 'code-it-build'
 [IO.File]::WriteAllText((Join-Path $buildContext 'Dockerfile'), $assembled, [System.Text.UTF8Encoding]::new($false))
 # Extra CA certificates (ca-certificates/ next to the Dockerfile) go into the
 # context, so a corporate TLS proxy's CA is trusted from the first apk fetch. The
@@ -468,7 +466,7 @@ try {
 
     if ($interactive -and -not $yes) {
         $answer = Read-Host 'Build now? [Y/n]'
-        if ($answer -match '^[Nn]') { Write-Host 'Aborted.'; exit 0 }
+        if ($answer -match '^[Nn]') { Remove-Item -Recurse -Force $buildContext -EA Silent; Write-Host 'Aborted.'; exit 0 }
     }
 
     if ($selectionFile) {
@@ -476,7 +474,7 @@ try {
             Set-Content -Path $selectionFile -Encoding UTF8
     }
 
-    if ($dryRun) { exit 0 }
+    if ($dryRun) { Remove-Item -Recurse -Force $buildContext -EA Silent; exit 0 }
 
     & $runtime build $buildArgs -t "$image`:latest" $buildContext
     if ($LASTEXITCODE -ne 0) {

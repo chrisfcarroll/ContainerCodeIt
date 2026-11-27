@@ -140,9 +140,7 @@ if (-not $dryRun) {
 }
 
 # Get-XSPhysicalPath DIR: DIR named by its physical path, with every symlink on
-# it resolved, as pwd -P does. Apple's container builder before 1.5.0 sends a
-# COPY'd directory empty when the context path runs through a symlink, as macOS's
-# /var/folders does (/var is /private/var). Windows has no such temp folder.
+# it resolved, as pwd -P does. Windows has no /var -> /private/var temp symlink.
 function Get-XSPhysicalPath([string]$dir) {
     if (-not ($IsMacOS -or $IsLinux)) { return $dir }
     Push-Location -LiteralPath $dir
@@ -162,7 +160,15 @@ function Invoke-Run {
 if ($build -or $LASTEXITCODE -ne 0) {
     # Stage XS and the shared top-level CA directory. This preserves local XS COPY
     # inputs while keeping unrelated repository files out of the build context.
-    $buildContext = Join-Path ([IO.Path]::GetTempPath()) ("code-it-xs-build-" + [Guid]::NewGuid().ToString('N'))
+    # Stage under ~/Library/Caches/code-it for Apple's container builder (before
+    # 1.7.1, URL.standardizedFileURL strips /private off /private/var and drops
+    # files inside COPY'd directories: apple/container#2253).
+    $buildBase = if ($runtime -eq 'container' -and $HOME) {
+        Join-Path $HOME 'Library/Caches/code-it'
+    } else {
+        [IO.Path]::GetTempPath()
+    }
+    $buildContext = Join-Path $buildBase ("code-it-xs-build-" + [Guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Force -Path $buildContext
     $buildContext = Get-XSPhysicalPath $buildContext
     try {

@@ -224,12 +224,16 @@ assert_contains "a missing image is built from the staged XS context" "$out" "[b
 assert_contains "the staged XS context contains its Dockerfile" "$out" "STUB_HAS_DOCKERFILE"
 assert_contains "the staged XS context preserves the XS files" "$out" "STUB_HAS_XS_FILES"
 assert_contains "the staged XS context includes the top-level CA folder" "$out" "STUB_HAS_TOP_LEVEL_CA_README"
-# Named by its physical path even when TMPDIR runs through a symlink, as macOS's
-# /var/folders does: Apple's container builder before 1.5.0 sends a COPY'd
-# directory empty otherwise.
+# Named by its physical path even when TMPDIR runs through a symlink. With
+# Apple's container, staged under ~/Library/Caches/code-it rather than TMPDIR
+# (/private/var), which loses files in COPY'd dirs before 1.7.1 (#2253).
 mkdir -p "$tmp/real-tmp" && ln -sfn "$tmp/real-tmp" "$tmp/link-tmp"
 out=$(STUB_NO_IMAGE=1 TMPDIR="$tmp/link-tmp" run_xs)
 assert_contains "the staged XS context is named by its physical path" "$out" "STUB_CONTEXT_PHYSICAL"
+real_home=$(cd "$home" && pwd -P)
+out=$(cd "$work" && echo n | STUB_NO_IMAGE=1 HOME="$home" TMPDIR="$tmp/link-tmp" PATH="$tmp/stub-darwin:$tmp/stub-container:$tmp/stub-docker:$PATH" bash "$code_it" 2>&1)
+assert_contains "XS stages Apple container contexts under ~/Library/Caches/code-it" "$out" "[$real_home/Library/Caches/code-it/code-it-xs-build."
+assert_contains "the staged XS Apple container context is physical" "$out" "STUB_CONTEXT_PHYSICAL"
 out=$(run_xs -b -i my-image)
 assert_contains "--build rebuilds, with --image's name" "$out" "[build] [-t] [my-image]"
 assert_contains "--image is run" "$out" "[my-image]"

@@ -32,6 +32,7 @@
 #   ci_self_pid                                       -> this shell's pid (Windows pid on Windows)
 #   ci_pid_alive PID                                  return 0 if process PID is running
 #   ci_claim_slot LOCK_DIR PID TAKE                   -> lowest free slot number, locked if TAKE=true
+#   ci_make_build_context RUNTIME [PREFIX]            -> physical path of a new build-context dir
 #
 # Toolchains, package caches and agents are data: each is a directory with a config
 # and an install.dockerfile. Known names come from the directory listing, aliases and
@@ -1053,4 +1054,25 @@ ci_detect_runtime() {
             ;;
     esac
     printf '%s' "$runtime"
+}
+
+# ci_make_build_context RUNTIME [PREFIX]: create and print the physical path of a
+# temporary build-context directory.
+# Apple's container builder before 1.7.1 (apple/container#2253) runs Foundation's
+# URL.standardizedFileURL on the context root, which strips /private back off
+# /private/var and /private/tmp; Globber then drops every file inside a COPY'd
+# directory even when the path was resolved with pwd -P. Stage outside /private
+# under ~/Library/Caches/code-it when building with Apple's container, and still
+# resolve any symlinks on the path with pwd -P.
+ci_make_build_context() {
+    local runtime="$1" prefix="${2:-code-it-build}" base dir
+    if [[ "$runtime" == container && -n "${HOME:-}" ]]; then
+        base="$HOME/Library/Caches/code-it"
+        mkdir -p "$base"
+    else
+        base="${TMPDIR:-/tmp}"
+        base="${base%/}"
+    fi
+    dir=$(mktemp -d "$base/$prefix.XXXXXX")
+    (cd "$dir" && pwd -P)
 }

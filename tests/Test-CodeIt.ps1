@@ -288,6 +288,8 @@ case "$1" in
 esac
 '@
     chmod +x (Join-Path $captureBin 'docker')
+    Copy-Item -Path (Join-Path $captureBin 'docker') -Destination (Join-Path $captureBin 'container') -Force
+    chmod +x (Join-Path $captureBin 'container')
 }
 $capturePath = "$captureBin$sep$origPath"
 function Invoke-Capture([string]$scriptPath, [string[]]$scenarioArgs) {
@@ -771,8 +773,10 @@ $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $b
 Assert "Code-It-Build without ca-certificates/ gives the context an empty one" ((Test-Path $caCapture) -and -not ([IO.File]::ReadAllText($caCapture).Trim()))
 Assert-Contains "Code-It-Build says when no certificate trust was requested" $r.out 'No additional certificate trust was requested'
 # The context is named by its physical path even when TMPDIR runs through a
-# symlink, as macOS's /var/folders does: Apple's container builder before 1.5.0
-# sends a COPY'd directory empty otherwise. Windows has no such temp folder.
+# symlink. With Apple's container, it is also staged under ~/Library/Caches/code-it
+# rather than TMPDIR (/var/folders -> /private/var), because Foundation's
+# URL.standardizedFileURL strips /private back off and Globber then drops every
+# file inside a COPY'd directory (apple/container#2253).
 if (-not $onWindows) {
     $realTmp = Join-Path $tmp 'real-tmp'
     $null = New-Item -ItemType Directory -Force -Path $realTmp
@@ -785,6 +789,16 @@ if (-not $onWindows) {
     finally { $env:TMPDIR = $savedTmpDir }
     $ctx = if (Test-Path "$capture.ctx") { ([IO.File]::ReadAllText("$capture.ctx")).Trim() } else { '' }
     Assert "Code-It-Build names the build context by its physical path" ($ctx.StartsWith("$realTmp/"))
+    $ctHome = Join-Path $tmp 'ct-home'
+    $null = New-Item -ItemType Directory -Force -Path $ctHome
+    Push-Location -LiteralPath $ctHome; try { $realCtHome = (& /bin/pwd -P) } finally { Pop-Location }
+    $savedHome = $env:HOME; $savedPlat = $env:CODE_IT_PLATFORM
+    $env:HOME = $ctHome; $env:TMPDIR = $linkTmp; $env:CODE_IT_PLATFORM = 'macos'
+    Remove-Item "$capture.ctx", "$capture.img" -Force -EA Silent
+    try { $null = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $bDfDir, '-runtime', 'container') $capturePath }
+    finally { $env:HOME = $savedHome; $env:TMPDIR = $savedTmpDir; $env:CODE_IT_PLATFORM = $savedPlat }
+    $ctx = if (Test-Path "$capture.ctx") { ([IO.File]::ReadAllText("$capture.ctx")).Trim() } else { '' }
+    Assert "Code-It-Build stages Apple container contexts under ~/Library/Caches/code-it, outside TMPDIR" ($ctx.StartsWith("$realCtHome/Library/Caches/code-it/"))
 }
 # image-sources/ (go.zsh, zshrc, tmux.conf) reaches the context, from next to this
 # script when the Dockerfile's directory has none
