@@ -1,18 +1,14 @@
 # ContainerCodeIt XS
 
-Sandbox your agentic AI properly: in a container, with access to a single 
-working directory, where it can work free of permissions interruption.
+Sandbox your agentic AI properly: in a container, with access to a single working directory, where it can work free of permissions interruption.
 
-Your agents get work done by having a _single mounted directory_, typically 
-containing a git repo or repos, so they can work and commit.
+Your agents get work done by having only a mounted directory, typically one containing a git repo or repos, where they can work and commit. Agents are configured to skip permissions. That's the point of having them inside a container.
 
 ## Quick start
 
-```bash
-./code-it.sh        # OpenCode, in the current directory
-./code-it.sh -c     # Claude Code
-.\Code-It.ps1 -c    # PowerShell
-./code-it.sh 'add a README'   # OpenCode, with an opening prompt
+```shell
+./code-it.sh # bash
+./Code-It.ps1 # powershell/pwsh
 ```
 
 The first run builds the image `code-it-xs` from the Dockerfile. After you edit the
@@ -20,7 +16,7 @@ Dockerfile, rebuild with `--build` (`-build`).
 
 The agent runs in tmux, next to a zsh session: `Ctrl-B S` switches between them.
 
-To exit, `Ctrl-C` twice currently works in both Claude Code and OpenCode.
+To exit an agent and a container, `Ctrl-D` twice or `Ctrl-C` twice currently works inside most agents.
 
 ## Maintenance and Change
 
@@ -35,8 +31,8 @@ the [full version README.md](../README.md).
 
 ## Prerequisites
 
-- Docker, or Apple's container on macOS, or WSL's `wslc` on Windows
-- bash or PowerShell
+- Docker, or Apple Containers on macOS, or WSL Containers on Windows
+- bash or PowerShell or pwsh
 
 ## First run
 
