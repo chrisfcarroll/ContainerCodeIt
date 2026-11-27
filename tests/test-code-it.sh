@@ -202,10 +202,15 @@ assert_contains "code-it-build --help documents the no-toolchain default" "$out"
 echo "3. Default dry-run with docker: opencode agent, only its state mounted"
 out=$(PATH="$stub_docker:$PATH" "$code_it" "${common_args[@]}")
 assert "dry-run exit code" "$?"
-assert_contains "reports OpenCode config creation" "$out" "Created OpenCode configuration"
+assert_contains "dry run says it would create the OpenCode configuration" "$out" "(dry run: would create OpenCode configuration: $save/opencode-v2/"
+[[ "$out" != *"    Created "* ]]; assert "dry run reports no creation" "$?"
+[[ ! -e "$save/opencode-v2" ]]; assert "dry run creates no agent state" "$?"
 assert_contains "uses docker runtime" "$out" "Using container runtime: docker"
 assert_contains "defaults to opencode" "$out" 'CODE_AGENT="opencode"'
 assert_contains "docker run command" "$out" "docker run -it"
+assert_contains "dry-run line continuation has no empty extra backslash" "$out" "docker run -it --rm \\"
+[[ "$out" != *"docker run -it --rm \\ \\"* ]]; assert "dry-run avoids double backslash when container_args is empty" "$?"
+assert_contains "dry-run separates CODE_AGENT from trailing backslash" "$out" '-e CODE_AGENT="opencode" \'
 assert_contains "image name" "$out" "code-it-alpine-dotnet-node:latest"
 expected_work=$(ci_work_mount_path "$script_dir")
 assert_contains "work dir mount" "$out" "$script_dir:$expected_work"
@@ -223,14 +228,41 @@ esac
 
 # ---------------------------------------------------------------------------
 echo "4. Save dir structure is created for first run"
-# The default agent is opencode: its state lives under save/opencode-v2/
-# (AGENT_SAVE_SUBDIR), where it has always lived
+# A real run (stub docker), in its own save dir so its image history does not
+# steer later dry runs. The default agent is opencode: its state lives under
+# save/opencode-v2/ (AGENT_SAVE_SUBDIR), where it has always lived
+real_save="$tmp/save-real"; mkdir -p "$real_save"
+real_args=(--work-dir "$script_dir" --save-dir "$real_save")
+out=$(PATH="$stub_docker:$PATH" "$code_it" "${real_args[@]}" 2>&1)
+assert "real run exit code" "$?"
+assert_contains "reports OpenCode config creation" "$out" "Created OpenCode configuration"
+save_dry="$save"; save="$real_save"
 [[ -d "$save/opencode-v2/.config/opencode" ]];      assert "save/opencode-v2/.config/opencode created" "$?"
 [[ -d "$save/opencode-v2/.local/share/opencode" ]]; assert "save/opencode-v2/.local/share/opencode created" "$?"
 [[ -d "$save/opencode-v2/.local/state/opencode" ]]; assert "save/opencode-v2/.local/state/opencode created" "$?"
 [[ "$(tr -d '[:space:]' < "$save/opencode-v2/.config/opencode/opencode.json")" == '{"$schema":"https://opencode.ai/config.json","permissions":[{"action":"*","resource":"*","effect":"allow"}]}' ]]
 assert "OpenCode config allows actions without prompts" "$?"
 [[ ! -e "$save/.claude" ]];               assert "opencode run creates no claude state" "$?"
+for agent in claude codex antigravity-cli; do
+    out=$(PATH="$stub_docker:$PATH" "$code_it" --agent "$agent" "${real_args[@]}" 2>&1)
+    case "$agent" in
+        claude)          assert_contains "reports Claude settings creation" "$out" "Created Claude Code settings" ;;
+        codex)           assert_contains "reports Codex config creation" "$out" "Created Codex configuration" ;;
+        antigravity-cli) assert_contains "reports Antigravity CLI settings creation" "$out" "Created Antigravity CLI settings" ;;
+    esac
+done
+[[ "$(tr -d '[:space:]' < "$save/.claude/settings.json")" == '{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true}' ]]
+assert "Claude settings bypass permissions and skip prompt" "$?"
+[[ -f "$save/.claude.json" ]];            assert "save/.claude.json pre-created as a file" "$?"
+grep -q 'approval_policy = "never"' "$save/.codex/config.toml"
+assert "Codex config works free of permissions interruption" "$?"
+grep -q 'sandbox_mode = "danger-full-access"' "$save/.codex/config.toml"
+assert "Codex config treats the container as its sandbox" "$?"
+tr -d '[:space:]' < "$save/.gemini/antigravity-cli/settings.json" | grep -q '"toolPermission":"always-proceed"'
+assert "Antigravity CLI config works free of permissions interruption" "$?"
+! grep -q 'modelProvider' "$save/.gemini/antigravity-cli/settings.json"
+assert "Antigravity CLI default config leaves Google login usable without an API key" "$?"
+save="$save_dry"
 
 # ---------------------------------------------------------------------------
 echo "5. Agent selection switches"
@@ -240,10 +272,6 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" -o "${common_args[@]}")
 assert_contains "-o selects opencode" "$out" 'CODE_AGENT="opencode"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --claude "${common_args[@]}")
 assert_contains "--claude selects claude" "$out" 'CODE_AGENT="claude"'
-assert_contains "reports Claude settings creation" "$out" "Created Claude Code settings"
-[[ "$(tr -d '[:space:]' < "$save/.claude/settings.json")" == '{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true}' ]]
-assert "Claude settings bypass permissions and skip prompt" "$?"
-[[ -f "$save/.claude.json" ]];            assert "save/.claude.json pre-created as a file" "$?"
 assert_contains "claude dir mount" "$out" "/.claude:/home/agent1/.claude"
 assert_contains "claude.json mount" "$out" "/.claude.json:/home/agent1/.claude.json"
 case "$out" in
@@ -258,11 +286,6 @@ out=$(PATH="$stub_docker:$PATH" "$code_it" --agent opencode "${common_args[@]}")
 assert_contains "--agent opencode selects opencode" "$out" 'CODE_AGENT="opencode"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent codex "${common_args[@]}")
 assert_contains "--agent codex selects codex" "$out" 'CODE_AGENT="codex"'
-assert_contains "reports Codex config creation" "$out" "Created Codex configuration"
-grep -q 'approval_policy = "never"' "$save/.codex/config.toml"
-assert "Codex config works free of permissions interruption" "$?"
-grep -q 'sandbox_mode = "danger-full-access"' "$save/.codex/config.toml"
-assert "Codex config treats the container as its sandbox" "$?"
 assert_contains "codex mounts its state" "$out" "$save/.codex:/home/agent1/.codex"
 case "$out" in
     *"/home/agent1/.claude"*|*"/home/agent1/.config/opencode"*) assert "codex mounts no other agent's state" 1 ;;
@@ -270,11 +293,6 @@ case "$out" in
 esac
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent antigravity-cli "${common_args[@]}")
 assert_contains "--agent antigravity-cli selects antigravity-cli" "$out" 'CODE_AGENT="antigravity-cli"'
-assert_contains "reports Antigravity CLI settings creation" "$out" "Created Antigravity CLI settings"
-tr -d '[:space:]' < "$save/.gemini/antigravity-cli/settings.json" | grep -q '"toolPermission":"always-proceed"'
-assert "Antigravity CLI config works free of permissions interruption" "$?"
-! grep -q 'modelProvider' "$save/.gemini/antigravity-cli/settings.json"
-assert "Antigravity CLI default config leaves Google login usable without an API key" "$?"
 assert_contains "antigravity-cli mounts its CLI state" "$out" "$save/.gemini/antigravity-cli:/home/agent1/.gemini/antigravity-cli"
 assert_contains "antigravity-cli mounts the shared harness state" "$out" "$save/.gemini/antigravity:/home/agent1/.gemini/antigravity"
 assert_contains "antigravity-cli mounts the shared config" "$out" "$save/.gemini/config:/home/agent1/.gemini/config"
@@ -503,6 +521,35 @@ do_capture --dockerfile-dir "$script_dir" --toolchain clang --runtime docker
 assert_in_df "build assembles clang" "apk add --no-cache clang"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain llvm 2>&1)
 assert_contains "llvm aliases clang and derives its image name" "$out" "-t code-it-alpine-clang:latest"
+
+# Toolchain names with '+' (g++) match existing images and custom-named image labels
+gpp_docker="$tmp/gpp-docker"; mkdir -p "$gpp_docker"
+cat > "$gpp_docker/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+    images) printf 'code-it-alpine-g++:latest\nmy-custom-cpp:latest\n' ;;
+    image)  echo "g++" ;;
+    run)    echo "STUB-DOCKER-RUN $*" ;;
+esac
+EOF
+chmod +x "$gpp_docker/docker"
+out=$(PATH="$gpp_docker:$PATH" "$code_it" --toolchain g++ "${common_args[@]}" 2>&1)
+assert "code-it --toolchain g++ finds existing code-it-alpine-g++" "$?"
+[[ "$out" != *"'code-it-alpine-g++' does not exist"* ]]; assert "code-it --toolchain g++ does not mistake g++ for missing" "$?"
+out=$(PATH="$gpp_docker:$PATH" "$code_it" --image code-it-alpine-g++ "${common_args[@]}" 2>&1)
+assert "code-it --image code-it-alpine-g++ succeeds" "$?"
+[[ "$(PATH="$gpp_docker:$PATH" ci_image_toolchain docker my-custom-cpp:latest)" == "g++" ]]
+assert "ci_image_toolchain accepts '+' in code-it.toolchains label" "$?"
+
+# All bash and zsh completion scripts with --toolchain include every defined toolchain
+for comp in "$script_dir"/completions/code-it*.bash "$script_dir"/completions/_code-it*; do
+    grep -q -- '--toolchain' "$comp" || continue
+    for tc_dir in "$script_dir"/toolchains/*/; do
+        tc=$(basename "$tc_dir")
+        grep -qE "(^|[[:space:]\"])${tc//+/\\+}([[:space:]\";]|$)" "$comp"
+        assert "$(basename "$comp") completes toolchain $tc" "$?"
+    done
+done
 
 # --tech is the kept alias of --toolchain
 out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --tech bun 2>&1)

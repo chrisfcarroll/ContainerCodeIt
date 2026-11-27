@@ -49,7 +49,7 @@
 #   -- AGENT-ARGS...         Everything after -- is passed to the coding agent verbatim,
 #                            e.g. -- --model opus --continue. See
 #                              https://code.claude.com/docs/en/cli-reference
-#                              https://opencode.ai/docs/cli/
+#                              https://opencode.ai/v2/docs/cli/
 #   --env, -e NAME[=VALUE]   Set an environment variable in the container. Repeatable.
 #                            A bare NAME passes the host's value of NAME, if it is set,
 #                            e.g. --env HTTPS_PROXY --env NO_PROXY=localhost
@@ -126,7 +126,7 @@
 #                            read-only in the virtual machine at the package manager's 
 #                            default location on Alpine Linux.
 #
-#   --dry-run, -d            Print the run command without executing it.
+#   --dry-run, -d            Print the run command without executing it or writing to the save dir.
 #   --help, -h               Show this help message.
 #
 # Examples:
@@ -213,6 +213,14 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Absolute path of an existing directory, without realpath (absent on older macOS)
 abs_dir() { (CDPATH= cd -- "$1" && pwd); }
+# abs_path PATH: PATH made absolute, through its nearest existing ancestor, so a
+# directory a dry run did not create still resolves
+abs_path() {
+    if [[ -d "$1" ]]; then abs_dir "$1"; return; fi
+    local parent
+    parent=$(abs_path "$(dirname -- "$1")") || return 1
+    printf '%s/%s\n' "${parent%/}" "$(basename -- "$1")"
+}
 
 # The globalPackagesFolder value in a NuGet.Config's <config> section, like an XML
 # parser would read it: ignores comments; attributes in any order, with either quote.
@@ -546,8 +554,10 @@ fi
 runtime=$(ci_detect_runtime "$runtime") || exit 1
 
 # Give the Apple container runtime enough memory for the agent to work with
+container_args_print=""
 if [[ "$runtime" == "container" ]]; then
     container_args="--memory 3g"
+    container_args_print=" --memory 3g"
 fi
 echo "    Using container runtime: $runtime"
 if [[ "$no_agent" == true ]]; then
@@ -650,22 +660,31 @@ container_work_dir=$(ci_work_mount_path "$work_dir_to_mount")
 # pre-created so the runtime does not make a directory in their place.
 # An agent whose state would clash with another's, or that has always kept it in
 # a subdirectory (opencode, under opencode-v2/), keeps it under AGENT_SAVE_SUBDIR.
+# A dry run only says what it would create.
 agent_save_dir="$save_dir${AGENT_SAVE_SUBDIR:+/$AGENT_SAVE_SUBDIR}"
-mkdir -p "$agent_save_dir"
+save_mkdir() {
+    [[ -d "$1" ]] && return 0
+    if [[ "$dry_run" == true ]]; then echo "    (dry run: would create $1)"; else mkdir -p "$1"; fi
+}
+save_mkdir "$agent_save_dir"
 agent_state_dirs=()
 if [[ -n "${AGENT_STATE_DIRS:-}" ]]; then
     IFS=':' read -r -a agent_state_dirs <<< "$AGENT_STATE_DIRS"
 fi
 for d in ${agent_state_dirs[@]+"${agent_state_dirs[@]}"}; do
-    [[ -n "$d" ]] && mkdir -p "$agent_save_dir/$d"
+    [[ -n "$d" ]] && save_mkdir "$agent_save_dir/$d"
 done
 agent_state_files=()
 if [[ -n "${AGENT_STATE_FILES:-}" ]]; then
     IFS=':' read -r -a agent_state_files <<< "$AGENT_STATE_FILES"
 fi
 for f in ${agent_state_files[@]+"${agent_state_files[@]}"}; do
-    [[ -n "$f" ]] || continue
-    [[ -e "$agent_save_dir/$f" ]] || echo '{}' > "$agent_save_dir/$f"
+    [[ -n "$f" && ! -e "$agent_save_dir/$f" ]] || continue
+    if [[ "$dry_run" == true ]]; then
+        echo "    (dry run: would create $agent_save_dir/$f)"
+    else
+        echo '{}' > "$agent_save_dir/$f"
+    fi
 done
 
 # Write the agent's default configuration file(s) on first run, preserving layout.
@@ -675,22 +694,36 @@ if [[ "$no_agent" == false && -d "$default_config_dir" ]]; then
         rel=${src#"$default_config_dir"/}
         dest="$agent_save_dir/$rel"
         if [[ ! -e "$dest" ]]; then
-            mkdir -p "$(dirname "$dest")"
-            cp "$src" "$dest"
-            echo "    Created $AGENT_CONFIG_LABEL: $dest"
+            if [[ "$dry_run" == true ]]; then
+                echo "    (dry run: would create $AGENT_CONFIG_LABEL: $dest)"
+            else
+                mkdir -p "$(dirname "$dest")"
+                cp "$src" "$dest"
+                echo "    Created $AGENT_CONFIG_LABEL: $dest"
+            fi
         fi
     done < <(find "$default_config_dir" -type f | sort)
 fi
-save_dir=$(abs_dir "$save_dir")
-agent_save_dir=$(abs_dir "$agent_save_dir")
+save_dir=$(abs_path "$save_dir")
+agent_save_dir=$(abs_path "$agent_save_dir")
 history_file="$save_dir/image-history"
 run_args_file="$save_dir/run-args"
 
 echo "    Checking $image ..."
 
+# Match IMAGE literally against the runtime's image list, because toolchain names
+# such as g++ contain regex metacharacters.
+image_exists_in_list() {
+    local list="$1" target="$2" line
+    while IFS= read -r line; do
+        [[ "$line" == "$target" || "$line" == "$target:"* || "$line" == "$target "* ]] && return 0
+    done <<< "$list"
+    return 1
+}
+
 # If the exact image is missing and the user did not name one, use the most-recently
 # built existing image whose recorded toolchains contain every requested chain.
-if ! echo "$valid_images" | grep -qE "^${image}([: ]|$)"; then
+if ! image_exists_in_list "$valid_images" "$image"; then
     if [[ "$image_explicit" == true ]]; then
         echo "Warning: $runtime image '$image' does not exist." >&2
         echo "Build it, or set --image to an image that exists." >&2
@@ -911,7 +944,7 @@ if [[ "$no_agent" == true ]]; then
 else
     agent_env=(-e "CODE_AGENT=$code_agent" ${headless_env[@]+"${headless_env[@]}"})
     agent_env_print="
-                -e CODE_AGENT=\"$code_agent\"\\$headless_env_print"
+                -e CODE_AGENT=\"$code_agent\" \\$headless_env_print"
 fi
 # --trust-work-dir: the agent's own way to skip its "do you trust this folder?" prompt
 if [[ "$trust_work_dir" == yes && -n "$AGENT_TRUST_ENV" ]]; then
@@ -1063,7 +1096,7 @@ done
 
 # Print the command
 cat <<EOF
-    $runtime run ${tty_args[*]} --rm \\$container_args \\$agent_env_print
+    $runtime run ${tty_args[*]} --rm${container_args_print} \\$agent_env_print
                 -e CODE_IT_WORK_DIR="$container_work_dir" \\
                 -e LANG="$container_locale" \\
                 -e GIT_AUTHOR_NAME="$git_author_name" \\

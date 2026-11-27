@@ -344,7 +344,9 @@ foreach ($f in @('Code-It-Add-Agent.ps1','Code-It-Add-Toolchain.ps1')) {
 "2. Default dry-run: opencode agent, only its state mounted"
 $r = Invoke-Scenario $codeIt $commonArgs $stubPath
 Assert "dry-run exit code 0" ($r.code -eq 0)
-Assert-Contains "reports OpenCode config creation" $r.out 'Created OpenCode configuration'
+Assert-Contains "dry run says it would create the OpenCode configuration" $r.out "(dry run: would create OpenCode configuration: $save"
+Assert "dry run reports no creation" (-not $r.out.Contains('    Created '))
+Assert "dry run creates no agent state" (-not (Test-Path "$save/opencode-v2"))
 Assert-Contains "uses docker runtime" $r.out 'Using container runtime: docker'
 Assert-Contains "defaults to opencode" $r.out 'CODE_AGENT="opencode"'
 Assert-Contains "docker run command" $r.out 'docker run -it'
@@ -359,14 +361,38 @@ Assert "no port is mapped by default" (-not $r.out.Contains(' -p '))
 
 # ---------------------------------------------------------------------------
 "3. Save dir structure is created for first run"
-# The default agent is opencode: its state lives under save/opencode-v2/
-# (AGENT_SAVE_SUBDIR), where it has always lived
+# A real run (stub docker), in its own save dir so its image history does not
+# steer later dry runs. The default agent is opencode: its state lives under
+# save/opencode-v2/ (AGENT_SAVE_SUBDIR), where it has always lived
+$saveDry = $save
+$save = Join-Path $tmp 'save-real'
+$null = New-Item -ItemType Directory -Force -Path $save
+$realArgs = @('-WorkDirToMount', $scriptDir, '-saveDir', $save)
+$r = Invoke-Scenario $codeIt $realArgs $stubPath
+Assert "real run exit code 0" ($r.code -eq 0)
+Assert-Contains "reports OpenCode config creation" $r.out 'Created OpenCode configuration'
 Assert "save/opencode-v2/.config/opencode created" (Test-Path "$save/opencode-v2/.config/opencode" -PathType Container)
 Assert "save/opencode-v2/.local/share/opencode created" (Test-Path "$save/opencode-v2/.local/share/opencode" -PathType Container)
 Assert "save/opencode-v2/.local/state/opencode created" (Test-Path "$save/opencode-v2/.local/state/opencode" -PathType Container)
 $opencodeV2Config = Get-Content "$save/opencode-v2/.config/opencode/opencode.json" -Raw | ConvertFrom-Json
 Assert "OpenCode default config permits all actions" ($opencodeV2Config.permissions[0].action -eq '*' -and $opencodeV2Config.permissions[0].effect -eq 'allow')
 Assert "opencode run creates no claude state" (-not (Test-Path "$save/.claude"))
+$r = Invoke-Scenario $codeIt (@('-agent','claude') + $realArgs) $stubPath
+Assert-Contains "reports Claude settings creation" $r.out 'Created Claude Code settings'
+$claudeSettings = Get-Content "$save/.claude/settings.json" -Raw | ConvertFrom-Json
+Assert "Claude settings bypass permissions" ($claudeSettings.permissions.defaultMode -eq 'bypassPermissions')
+Assert "Claude settings skip dangerous-mode prompt" ($claudeSettings.skipDangerousModePermissionPrompt -eq $true)
+Assert "save/.claude.json pre-created as a file" (Test-Path "$save/.claude.json" -PathType Leaf)
+$r = Invoke-Scenario $codeIt (@('-agent','codex') + $realArgs) $stubPath
+Assert-Contains "reports Codex config creation" $r.out 'Created Codex configuration'
+Assert "Codex config works free of permissions interruption" ((Get-Content "$save/.codex/config.toml" -Raw).Contains('approval_policy = "never"'))
+Assert "Codex config treats the container as its sandbox" ((Get-Content "$save/.codex/config.toml" -Raw).Contains('sandbox_mode = "danger-full-access"'))
+$r = Invoke-Scenario $codeIt (@('-agent','antigravity-cli') + $realArgs) $stubPath
+Assert-Contains "reports Antigravity CLI settings creation" $r.out 'Created Antigravity CLI settings'
+$agySettings = Get-Content "$save/.gemini/antigravity-cli/settings.json" -Raw | ConvertFrom-Json
+Assert "Antigravity CLI config works free of permissions interruption" ($agySettings.toolPermission -eq 'always-proceed')
+Assert "Antigravity CLI default config leaves Google login usable without an API key" (-not $agySettings.PSObject.Properties['modelProvider'])
+$save = $saveDry
 
 # ---------------------------------------------------------------------------
 "4. Agent selection switches"
@@ -376,14 +402,9 @@ $r = Invoke-Scenario $codeIt (@('-o') + $commonArgs) $stubPath
 Assert-Contains "-o selects opencode" $r.out 'CODE_AGENT="opencode"'
 $r = Invoke-Scenario $codeIt (@('-claude') + $commonArgs) $stubPath
 Assert-Contains "-claude selects claude" $r.out 'CODE_AGENT="claude"'
-Assert-Contains "reports Claude settings creation" $r.out 'Created Claude Code settings'
 Assert-Contains "claude dir mount" $r.out '/.claude:/home/agent1/.claude'
 Assert-Contains "claude.json mount" $r.out '/.claude.json:/home/agent1/.claude.json'
 Assert "claude run mounts no opencode state" (-not $r.out.Contains('/home/agent1/.config/opencode'))
-$claudeSettings = Get-Content "$save/.claude/settings.json" -Raw | ConvertFrom-Json
-Assert "Claude settings bypass permissions" ($claudeSettings.permissions.defaultMode -eq 'bypassPermissions')
-Assert "Claude settings skip dangerous-mode prompt" ($claudeSettings.skipDangerousModePermissionPrompt -eq $true)
-Assert "save/.claude.json pre-created as a file" (Test-Path "$save/.claude.json" -PathType Leaf)
 $r = Invoke-Scenario $codeIt (@('-c') + $commonArgs) $stubPath
 Assert-Contains "-c selects claude" $r.out 'CODE_AGENT="claude"'
 $r = Invoke-Scenario $codeIt (@('-agent','claude') + $commonArgs) $stubPath
@@ -392,17 +413,10 @@ $r = Invoke-Scenario $codeIt (@('-agent','opencode') + $commonArgs) $stubPath
 Assert-Contains "-agent opencode selects opencode" $r.out 'CODE_AGENT="opencode"'
 $r = Invoke-Scenario $codeIt (@('-agent','codex') + $commonArgs) $stubPath
 Assert-Contains "-agent codex selects codex" $r.out 'CODE_AGENT="codex"'
-Assert-Contains "reports Codex config creation" $r.out 'Created Codex configuration'
-Assert "Codex config works free of permissions interruption" ((Get-Content "$save/.codex/config.toml" -Raw).Contains('approval_policy = "never"'))
-Assert "Codex config treats the container as its sandbox" ((Get-Content "$save/.codex/config.toml" -Raw).Contains('sandbox_mode = "danger-full-access"'))
 Assert-Contains "codex mounts its state" $r.out "$save/.codex:/home/agent1/.codex"
 Assert "codex mounts no other agent's state" (-not ($r.out.Contains('/home/agent1/.claude') -or $r.out.Contains('/home/agent1/.config/opencode')))
 $r = Invoke-Scenario $codeIt (@('-agent','antigravity-cli') + $commonArgs) $stubPath
 Assert-Contains "-agent antigravity-cli selects antigravity-cli" $r.out 'CODE_AGENT="antigravity-cli"'
-Assert-Contains "reports Antigravity CLI settings creation" $r.out 'Created Antigravity CLI settings'
-$agySettings = Get-Content "$save/.gemini/antigravity-cli/settings.json" -Raw | ConvertFrom-Json
-Assert "Antigravity CLI config works free of permissions interruption" ($agySettings.toolPermission -eq 'always-proceed')
-Assert "Antigravity CLI default config leaves Google login usable without an API key" (-not $agySettings.PSObject.Properties['modelProvider'])
 Assert-Contains "antigravity-cli mounts its CLI state" $r.out "$save/.gemini/antigravity-cli:/home/agent1/.gemini/antigravity-cli"
 Assert-Contains "antigravity-cli mounts the shared harness state" $r.out "$save/.gemini/antigravity:/home/agent1/.gemini/antigravity"
 Assert-Contains "antigravity-cli mounts the shared config" $r.out "$save/.gemini/config:/home/agent1/.gemini/config"
@@ -576,6 +590,21 @@ Invoke-Capture $codeItBuild @('-toolchain', 'clang', '-dockerfileDir', $scriptDi
 Assert-InCapture "build assembles clang" 'apk add --no-cache clang'
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'llvm') $stubPath
 Assert-Contains "llvm aliases clang and derives its image name" $r.out '-t code-it-alpine-clang:latest'
+
+# Toolchain names with '+' (g++) work in Get-CodeItImageToolchain on custom-named images
+$gppDocker = Join-Path $tmp 'gpp-docker'; $null = New-Item -ItemType Directory -Force -Path $gppDocker
+if ($onWindows) {
+    Set-Content -Path (Join-Path $gppDocker 'docker.cmd') -Value "@echo off`r`nif `"%~1`"==`"images`" echo my-custom-cpp:latest& goto :eof`r`nif `"%~1`"==`"image`" echo g++& goto :eof"
+} else {
+    Set-Content -Path (Join-Path $gppDocker 'docker') -Value "#!/bin/sh`ncase `"`$1`" in images) echo my-custom-cpp:latest;; image) echo g++;; esac"
+    chmod +x (Join-Path $gppDocker 'docker')
+}
+$env:PATH = "$gppDocker$sep$origPath"
+try {
+    Assert "Get-CodeItImageToolchain accepts '+' in code-it.toolchains label" ((Get-CodeItImageToolchain 'docker' 'my-custom-cpp:latest') -eq 'g++')
+} finally {
+    $env:PATH = $origPath
+}
 
 # -tech is the kept alias of -toolchain
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-tech', 'bun') $stubPath

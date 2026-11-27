@@ -225,7 +225,7 @@ ci_image_toolchain() {
     # A runtime that does not know the format prints its own error text to stdout; keep
     # only a plausible comma-separated toolchain list.
     case "$chains" in
-        *[!a-z,]*|"") chains="" ;;
+        *[!a-z0-9+,-]*|"") chains="" ;;
     esac
     if [[ -z "$chains" && "$image" == code-it-alpine-* ]]; then
         chains="${image#code-it-alpine-}"

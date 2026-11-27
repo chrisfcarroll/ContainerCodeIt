@@ -105,7 +105,7 @@
     parameters (`-p` matches several of this script's own parameters, like -prompt and
     -packageCaches) is rejected before the script
     runs: spell it in full, `--print`, or pass it as `-agentArgs '-p','...'`.
-    See https://code.claude.com/docs/en/cli-reference and https://opencode.ai/docs/cli/
+    See https://code.claude.com/docs/en/cli-reference and https://opencode.ai/v2/docs/cli/
 
 .PARAMETER locale
     The container's locale (its LANG), e.g. en_GB.UTF-8 or en-GB. Passed to the
@@ -146,7 +146,7 @@
     on Alpine Linux.
 
 .PARAMETER dryRun
-    Print the run command without executing it.
+    Print the run command without executing it or writing to the save dir.
 
 .EXAMPLE
     .\Code-It.ps1 -claude -WorkDirToMount ~/my-repos
@@ -563,16 +563,23 @@ $containerWorkDir = Get-CodeItWorkMountPath $WorkDirToMount
 # pre-created so the runtime does not make a directory in their place.
 # An agent whose state would clash with another's, or that has always kept it in
 # a subdirectory (opencode, under opencode-v2/), keeps it under AGENT_SAVE_SUBDIR.
+# A dry run only says what it would create.
 $agentSaveDir = if ($agentSaveSubdir) { "$saveDir/$agentSaveSubdir" } else { $saveDir }
-$null = New-Item -ItemType Directory -Force -Path $agentSaveDir
+function New-SaveDirectory([string]$path) {
+    if (Test-Path -Path $path -PathType Container) { return }
+    if ($dryRun) { "    (dry run: would create $path)" }
+    else { $null = New-Item -ItemType Directory -Force -Path $path }
+}
+New-SaveDirectory $agentSaveDir
 $agentStateDirList   = Split-CodeItList ($agentStateDirs -replace ':', ',')
 $agentStateFileList  = Split-CodeItList ($agentStateFiles -replace ':', ',')
 foreach ($d in $agentStateDirList) {
-    $null = New-Item -ItemType Directory -Force -Path "$agentSaveDir/$d"
+    New-SaveDirectory "$agentSaveDir/$d"
 }
 foreach ($f in $agentStateFileList) {
     if (-not (Test-Path -Path "$agentSaveDir/$f")) {
-        Set-Content -Path "$agentSaveDir/$f" -Value '{}'
+        if ($dryRun) { "    (dry run: would create $agentSaveDir/$f)" }
+        else { Set-Content -Path "$agentSaveDir/$f" -Value '{}' }
     }
 }
 
@@ -585,14 +592,19 @@ if ($defaultConfigDir -and (Test-Path -Path $defaultConfigDir -PathType Containe
         $rel = $src.FullName.Substring($defaultConfigDir.Length).TrimStart('/', '\')
         $dest = Join-Path $agentSaveDir $rel
         if (-not (Test-Path -Path $dest)) {
-            $null = New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent)
-            Copy-Item -Path $src.FullName -Destination $dest
-            "    Created $agentConfigLabel`: $dest"
+            if ($dryRun) {
+                "    (dry run: would create $agentConfigLabel`: $dest)"
+            } else {
+                $null = New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent)
+                Copy-Item -Path $src.FullName -Destination $dest
+                "    Created $agentConfigLabel`: $dest"
+            }
         }
     }
 }
-$saveDir = (Resolve-Path $saveDir).Path
-$agentSaveDir = (Resolve-Path $agentSaveDir).Path
+# Absolute paths, for directories a dry run did not create as well
+$saveDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($saveDir)
+$agentSaveDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($agentSaveDir)
 $historyFile = Join-Path $saveDir 'image-history'
 $runArgsFile = Join-Path $saveDir 'run-args'
 

@@ -63,8 +63,8 @@ if (-not $Name) {
     Write-Warning "Usage: Code-It-Add-Toolchain.ps1 NAME [-url URL] [-dryRun]"
     exit 1
 }
-if ($Name -notmatch '^[a-z][a-z0-9-]*$') {
-    Write-Warning "'$Name' is not a valid toolchain name; use lowercase letters, digits and dashes."
+if ($Name -notmatch '^[a-z][a-z0-9+-]*$') {
+    Write-Warning "'$Name' is not a valid toolchain name; use lowercase letters, digits, + and dashes."
     exit 1
 }
 if (-not $branch) { $branch = "add-toolchain/$Name" }
@@ -93,8 +93,8 @@ Otherwise stop, write the reason to stdout, make no changes, and exit non-zero.
 
 If it passes the gate, follow how the existing toolchains are defined as data:
 1. Add a toolchains/<name>/ definition, exactly like the existing ones. Do not edit
-   the Dockerfile, code-it-build or the shared library: definitions are discovered
-   from the directory.
+   the Dockerfile, code-it-build or the shared library (definitions are discovered
+   from the directory), unless adding a new host package cache in step 3.
    - toolchains/<name>/install.dockerfile: a root-run, self-contained install layer
      with a "# last changed YYYY-MM-DD" cache-bust line, plus its own passwordless
      doas permit appended to /etc/doas.d/doas.conf.

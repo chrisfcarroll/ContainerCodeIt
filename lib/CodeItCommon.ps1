@@ -231,7 +231,7 @@ function Get-CodeItImageLabel([string]$runtime, [string]$image, [string]$label) 
 # IMAGE (its code-it.toolchains label, or the code-it-alpine-<chains> name), or "".
 function Get-CodeItImageToolchain([string]$runtime, [string]$image) {
     $chains = Get-CodeItImageLabel $runtime $image 'code-it.toolchains'
-    if ($chains -notmatch '^[a-z,]*$') { $chains = "" }
+    if ($chains -notmatch '^[a-z0-9+,-]*$') { $chains = "" }
     if (-not $chains -and $image -like 'code-it-alpine-*') {
         $chains = ($image.Substring('code-it-alpine-'.Length)) -replace ':.*$', ''
         $chains = $chains -replace '-', ','
