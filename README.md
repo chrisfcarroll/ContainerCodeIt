@@ -2,79 +2,60 @@
 
 Sandbox your agentic AI properly: in a container, with access to a single working directory, where it can work free of permissions interruption.
 
-Your agents get work done by having a _single mounted directory_, typically one containing a git repo or repos, so they can work and commit.
+Your agents get work done by having only a mounted directory, typically one containing a git repo or repos, where they can work and commit. Agents are configured to skip permissions. That's the point of having them inside a container.
 
 ## Prerequisites
 
-- Docker, Apple Containers, or on Windows WSL's own `wslc`
-- bash or PowerShell/pwsh.
-- Git, with `user.name` and `user.email` set, so the agent can commit.
+- Docker, Apple Containers, or Windows WSL containers
+- bash or PowerShell or pwsh
+- Git
 
-On a new Windows machine, Windows PowerShell 5.1 (`powershell.exe`) is enough;
-PowerShell 7 (`winget install Microsoft.PowerShell`) is better. See also
-[Prerequisites for Windows](#prerequisites-for-windows).
+See also [Prerequisites for Windows](#prerequisites-for-windows).
 
 ## Quick start
 
-```bash
+```shell
 ./code-it.sh # bash
 ./Code-It.ps1 # powershell/pwsh
 ```
 
 ### Exiting a container
 
-In Claude or OpenCode, press `Ctrl-C` twice in succession. Other agents may vary. Exit a shell with `Ctrl-D`.
+`Ctrl-C` or `Ctrl-D` twice in succession works in most agents. Otherwise exit a container with `Ctrl-D`.
 
 If the agent fails, its error stays on screen until you press Enter, unless you pass `--no-wait` (`-noWait`).
 
-When an interactive agent exits, code-it reprints its final screen after tmux closes,
-so any instructions for resuming the session remain visible. Rebuild an existing image
-with `code-it-build --rebuild` (`Code-It-Build.ps1 -rebuild`) to pick up this change.
-
 ### The XS Version
 
-If you are appropriately paranoid and also comfortable with editing your own 
+If you are not only appropriately paranoid but also comfortable editing your own 
 Dockerfile, you will prefer [the XS version](XS/README.md), which is a much smaller, 
-human-verifiable codebase that also containerises your agents. It leaves you to 
-manage the Dockerfile yourself if you need more things in it.
+human-verifiable codebase for containerising your agents. It leaves you to 
+manage the Dockerfile yourself.
+
+If you are not comfortable with editing Dockerfiles, you can ask your agent to review 
+this repo for exfiltration or other cyberattacks.
 
 ## First run
 
-`code-it` first run checks for Git, asks which container runtime to use (showing which
-of the runtimes your platform can have it found — Docker everywhere, Apple Containers on
-macOS, `wslc` on Windows — and offering the platform's own: `container` on macOS, `wslc`
-on Windows, `docker` elsewhere) and saves that as your default, asks you about
+`code-it` first run checks for Git, asks your preferences for container runtime,
 toolchains and agents, and then builds a Dockerfile image. Existing state and login can
 be copied over for the contained agent to use. Copied or not, first run then sets Claude
-Code to `bypassPermissions`, OpenCode to auto-accept and Antigravity CLI to
-`always-proceed`, in their configuration under the save dir: the container is the
-sandbox.
+Code to `bypassPermissions`, OpenCode to `auto-accept`, Antigravity CLI to
+`always-proceed`, etc.
 
 Use `code-it-defaults` and `code-it-build` to change your setup. 
 
 See help with `--help` (bash) or `-help` (PowerShell).
 
-Initial agents are opencode (alias `oc`), claude, codex and antigravity-cli (alias
-`agy`). Initial toolchains are dotnet, node, bun, python, powershell, rust, go, gcc, g++ and clang.
+If your desired toolchain or agent is missing, add it with `code-it-add-agent` or `code-it-add-toolchain`.
 
 ### Prerequisites for Windows
 
 - **Script blocking**: Windows blocks PowerShell scripts by default. Allow local ones
   once, for your user: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
-- **Docker Desktop**: install it with WSL2
-  (https://docs.docker.com/desktop/setup/install/windows-install/), and start it before
-  the first run, which builds the image. `Code-It-Doctor.ps1` checks that Docker is running.
-- **Or wslc**, the container CLI built into WSL 2.9.3 and later, with no Docker Desktop:
-  `wsl --update`, then check with `wslc version`
-  (https://learn.microsoft.com/windows/wsl/tutorials/wsl-containers). code-it uses it
-  when you choose it at first run (it is offered first when found), save it with
-  `code-it-defaults --runtime wslc` (`Code-It-Defaults.ps1 -runtime wslc`), pass
-  `--runtime wslc` (`-runtime wslc`), or Docker is not installed.
-  It keeps its own image store, so build the image again with it. Mount Windows
-  directories (`C:\...`), not ones inside a WSL distro, which wslc cannot mount. Its
-  CPUs and memory are WSL container settings
-  (https://learn.microsoft.com/windows/wsl/wsl-container-settings), not `--memory`.
-
+- **To use wslc** WSL 2.9.3 and later. `wsl --update`, then check with `wslc version`
+  (https://learn.microsoft.com/windows/wsl/tutorials/wsl-containers).
+  
 ## Add new agents
 
 `code-it-add-agent NAME [--url URL]` will use code-it to attempt to add agent NAME 
@@ -82,9 +63,6 @@ to your setup. The agent doing the install is prompted to first check, “is NAM
 well-known, maintained agent with official docs and an official install channel?”.
 If it passes, it will read its docs, adds the definition, add tests, extend the README, 
 add completions, run the tests, then commit.
-
-It will refuse to run on a dirty repository, and works on a new branch
-`add-agent/NAME`. It will print the branch and a diff summary when it finishes.
 
 ```bash
 ./code-it-add-agent.sh cursor --url https://docs.cursor.com/cli
@@ -111,15 +89,29 @@ README, tests, and a commit.
 .\Code-It-Add-Toolchain.ps1 java -url https://openjdk.org/install/
 ```
 
-## tmux, zsh, --no-agent, -noAgent
+### What does the script do?
 
-The container includes tmux and starts a shell as well as your agent inside the container.
-Press `Ctrl-B S` then use the up/down arrow keys to switch between the agent session and the shell.
-Press `Ctrl-B S` again to switch back.
+Something like this:
 
-The shell is zsh, with some common abbreviations for git (`gco`, `glog`, `gs`, …)
+```bash
+# docker build . -t code-it-alpine-toolchainname:latest
 
-Start a container without an agent with --no-agent / -noAgent
+docker run -it --rm \
+    -e CODE_AGENT=opencode \
+    -e CODE_IT_WORK_DIR=/work/dev/my-repos \
+    -e LANG=en_GB.UTF-8 \
+    -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
+    -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
+    -e GIT_COMMITTER_NAME="Agent1 for $(git config --get user.name)" \
+    -e GIT_COMMITTER_EMAIL="$(git config --get user.email)" \
+    -v ~/dev/my-repos:/work/dev/my-repos \
+    -v ~/.config/code-it/opencode-v2/.config/opencode:/home/agent1/.config/opencode \
+    -v ~/.config/code-it/opencode-v2/.local/share/opencode:/home/agent1/.local/share/opencode \
+    -v ~/.config/code-it/opencode-v2/.local/state/opencode:/home/agent1/.local/state/opencode \
+    code-it-alpine-toolchainname:latest
+```
+
+`--dry-run` prints the exact command.
 
 ## Code-It options
 
@@ -162,6 +154,16 @@ Otherwise `code-it` runs images; it does not rebuild them. Rebuild with `code-it
 or let first run build the first one. (The old `--build-image`, `--rebuild-image` and
 `--dockerfile-dir` options are gone: `code-it` chooses one agent to run, while an image
 holds a set, so rebuilding from `code-it` lost the image's other agents.)
+
+## tmux, zsh, --no-agent, -noAgent
+
+The container includes tmux and starts a shell as well as your agent inside the container.
+Press `Ctrl-B S` then use the up/down arrow keys to switch between the agent session and the shell.
+Press `Ctrl-B S` again to switch back.
+
+The shell is zsh, with some common git abbreviations defined (`gco`, `glog`, `gs`, …)
+
+Start a container without an agent with --no-agent / -noAgent
 
 ## code-it-build options
 
@@ -289,7 +291,7 @@ collation.
 
 ## Toolchains
 
-Toolchains, package caches and agents are **data, not branches**. Each toolchain is
+Toolchains, package caches and agents are data, not branches. Each toolchain is
 one directory, `toolchains/<name>/`:
 
 | File | Purpose |
@@ -330,12 +332,9 @@ Adding a toolchain means adding one `toolchains/<name>/` directory (and optional
 `package-caches/<name>/` one): no script edits. Versioned variants (`dotnet8`,
 `node22`, ...) can be added the same way later.
 
-**Swift is not among them, and cannot be**: there is no Swift apk package for Alpine,
-and no native musl build of the toolchain is published. The official toolchains are
-glibc-only, and need glibc 2.38+ symbols (`__isoc23_strtol`, …) that Alpine's
-`gcompat` does not provide, so it does not run in the container either (verified).
-The supported way to build Swift for Alpine is cross-compilation from a glibc host
-(Ubuntu, Fedora, macOS) with Swift's official
+**Swift is harder**: there is no Swift apk package for Alpine, and no native musl build of 
+the toolchain is published. The supported way to build Swift for Alpine is cross-compilation 
+from a glibc host (Ubuntu, Fedora, macOS) with Swift's official
 [Static Linux SDK](https://www.swift.org/documentation/articles/static-linux-getting-started.html),
 which produces fully-static musl binaries that run in the container as-is: build
 them outside, run them here.
@@ -359,17 +358,6 @@ Subsequent calls to `code-it` with no --toolchain specified will reuse your most
 .\Code-It-Build.ps1 -toolchain 'node,bun' -packageCaches npm
 .\Code-It.ps1 -toolchain 'node,bun'
 ```
-
-### Included toolchains
-
-`--toolchain dotnet` installs dotnet10 and dotnet8 SDKs and Mono from Alpine repos.
-`--toolchain node` installs Node.js from Alpine repos, and npm when `npm` is a package cache.
-`--toolchain bun` installs Bun with its official installer.
-`--toolchain python` adds Python 3, uv and uvx from Alpine's repos.
-`--toolchain powershell` adds PowerShell 7 (`pwsh`): on x86_64 from Microsoft's musl
-build; on aarch64 as a dotnet tool, since Microsoft ships no musl build for it, so it
-also installs the .NET 10 SDK if `dotnet` is not selected.
-
 
 ## Agents
 
@@ -559,33 +547,6 @@ autoload -Uz compinit && compinit
 # names of -agent / AGENT= prefixes of -model in Code-It-Defaults.ps1.
 . /path/to/ContainerCodeIt/completions/CodeItCompletion.ps1
 ```
-
-### What does the script do?
-
-Something like this:
-
-```bash
-# docker build . -t code-it-alpine-dotnet-node:latest
-
-docker run -it --rm \
-    -e CODE_AGENT=opencode \
-    -e CODE_IT_WORK_DIR=/work/dev/my-repos \
-    -e LANG=en_GB.UTF-8 \
-    -e GIT_AUTHOR_NAME="Agent1 for $(git config --get user.name)" \
-    -e GIT_AUTHOR_EMAIL="$(git config --get user.email)" \
-    -e GIT_COMMITTER_NAME="Agent1 for $(git config --get user.name)" \
-    -e GIT_COMMITTER_EMAIL="$(git config --get user.email)" \
-    -v ~/dev/my-repos:/work/dev/my-repos \
-    -v ~/.config/code-it/opencode-v2/.config/opencode:/home/agent1/.config/opencode \
-    -v ~/.config/code-it/opencode-v2/.local/share/opencode:/home/agent1/.local/share/opencode \
-    -v ~/.config/code-it/opencode-v2/.local/state/opencode:/home/agent1/.local/state/opencode \
-    -v ~/.nuget/packages:/home/agent1/.nuget/packages-host:ro \
-    -v ~/.npm:/home/agent1/.npm-host:ro \
-    code-it-alpine-dotnet-node:latest
-```
-
-`--dry-run` prints the exact command.
-
 ## News
 
 `news/` holds generated summary pages, pwsh-only. `news/opencode/opencode-go-models-2026-10.html`
