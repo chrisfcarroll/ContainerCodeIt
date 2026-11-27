@@ -10,7 +10,17 @@
 $ErrorActionPreference = 'Continue'
 
 $codeIt = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'XS/Code-It.ps1'
-$pwshExe = (Get-Process -Id $PID).Path
+# Find a pwsh that actually runs (as Test-CodeIt.ps1 does): this suite may run
+# under a pwsh whose process image is the shared dotnet host (a wrapper install),
+# which cannot take pwsh's own arguments, so the PATH command is preferred and
+# every candidate is verified by running it.
+function Test-PwshWorks([string]$exe) {
+    if (-not $exe -or -not (Test-Path $exe)) { return $false }
+    try { $null = & $exe -NoProfile -Command 'exit 0' 2>$null; return ($LASTEXITCODE -eq 0) } catch { return $false }
+}
+$pwshExe = @($env:CODE_IT_TEST_PWSH, (Get-Command pwsh -EA Ignore).Source, "$HOME/.local/bin/pwsh", "$HOME/.dotnet/tools/pwsh", (Get-Process -Id $PID).Path) |
+    Where-Object { Test-PwshWorks $_ } | Select-Object -First 1
+if (-not $pwshExe) { throw "No working pwsh found" }
 $onWindows = ($env:OS -eq 'Windows_NT')
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "code-it-xs-tests-$PID"
