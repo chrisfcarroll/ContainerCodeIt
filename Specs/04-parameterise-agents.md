@@ -16,7 +16,7 @@ One definition per agent, readable from bash and PowerShell (e.g. a simple `key=
 - short flag (`-c`, `-o`) if any
 - aliases (`AGENT_ALIASES`, space-separated) if any: other names every agent-taking
   option resolves to the agent's own name, as `agy` for antigravity-cli and `oc` for
-  opencode (added later; `--list-agents` shows them)
+  opencode; `--list-agents` shows them
 
 ## Changes
 - `code-it-build --agent NAME[,NAME...]`, default `opencode,claude`.
