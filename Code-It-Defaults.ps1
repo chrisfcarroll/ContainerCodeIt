@@ -342,7 +342,8 @@ function Show-Defaults {
 }
 
 # Read-Choice LABEL DEFAULT DETECTED CURRENT ITEMS: print a numbered list and read a
-# choice from the console, echoing the answer ('none' clears, blank keeps DEFAULT)
+# choice from the console, echoing the answer ('none' clears, blank keeps DEFAULT,
+# which may be empty, and then is shown as none)
 # Set-Runtime NAME: save the default container runtime; none clears it. A runtime
 # not installed here is saved anyway, with a warning, so it can be set up first; one
 # this platform cannot have (Apple's container off macOS) is refused: $false.
@@ -382,7 +383,8 @@ function Read-Choice([string]$label, [string]$default, [string]$detected, [strin
         Write-Host ("  {0}) {1}{2}" -f ($i + 1), $items[$i], $flag)
     }
     $shown = if ($default) { $default } else { 'none' }
-    $answer = Read-Host "Choose $label [$shown, or none]"
+    Write-Host "  'none' for no $label."
+    $answer = Read-Host "Choose $label [$shown]"
     if (-not $answer) { $answer = $default }
     return $answer
 }
@@ -434,8 +436,11 @@ function Invoke-Interactive {
         $target = AgentSavePath $a $path
         $live = Get-JsonKey $target ($spec.Substring($spec.IndexOf(':') + 1))
         Write-Host ""
-        Write-Host "Default model for $a [current: $(if ($live) { $live } else { 'none' })]. The catalog below is best"
-        Write-Host "effort and always incomplete: any model string is accepted."
+        # The default is the model chosen for the agent, in its own config, and is
+        # none until one is chosen
+        Write-Host "Default model for $a. The list is best effort and always incomplete: any"
+        Write-Host "model string is accepted."
+        Write-Host "Edit the model for $a in $target."
         $models = @()
         $own = Join-Path (Join-Path $agentsDir $a) 'models.txt'
         if (Test-Path -Path $own -PathType Leaf) {
@@ -471,7 +476,8 @@ function Invoke-Interactive {
             $flag = if ($models[$i] -eq $live) { ' (current)' } else { '' }
             Write-Host ("  {0}) {1}{2}" -f ($i + 1), $models[$i], $flag)
         }
-        $answer = Read-Host "Choose model for $a [$(if ($live) { $live } else { 'none' }), 'none' clears]"
+        Write-Host "  'none' for no default model for $a."
+        $answer = Read-Host "Choose model for $a [$(if ($live) { $live } else { 'none' })]"
         if (-not $answer) { continue }
         if ($answer -eq 'none') {
             $null = Set-Model $a ""

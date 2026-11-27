@@ -224,6 +224,20 @@ grep -q '"model": "Gemini 4 Neon (Medium)"' "$save_agy/.gemini/antigravity-cli/s
 assert "an antigravity-cli model picked by number is saved by its label in its settings" "$?"
 grep -q '^model.antigravity-cli=Gemini 4 Neon (Medium)$' "$save_agy/defaults"
 assert "the antigravity-cli label is recorded in the defaults" "$?"
+# The prompts' brackets hold only the default; 'none' is offered on the line above,
+# a model's default is none until one is chosen, and each says where to edit it
+save_ui="$tmp/save-ui"; mkdir -p "$save_ui"
+out=$(printf '\n\nsonnet\n\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_ui" 2>&1)
+assert_contains "the agent prompt's brackets hold only its default" "$out" "Choose default agent [claude]: "
+assert_contains "the agent prompt offers 'none' on the line above" "$out" "'none' for no default agent."
+assert_contains "a model not yet chosen defaults to none" "$out" "Choose model for claude [none]: "
+assert_contains "the model prompt offers 'none' on the line above" "$out" "'none' for no default model for claude."
+assert_contains "each model question says where to edit it" "$out" "Edit the model for claude in $save_ui/.claude/settings.json."
+assert_contains "the edit line names the agent's own subdir" "$out" "Edit the model for opencode in $save_ui/opencode-v2/.config/opencode/opencode.json."
+[[ "$out" != *", or none]"* && "$out" != *"'none' clears]"* ]]
+assert "no prompt lists none inside its brackets" "$?"
+out=$(printf '\n\n\n\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_ui" 2>&1)
+assert_contains "a chosen model is the default" "$out" "Choose model for claude [sonnet]: "
 out=$(printf '9\n\nsonnet\nnone\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "third interactive run exit code" "$?"
 grep -q '^default-agent=opencode$' "$save_i/defaults"; assert "out-of-range number keeps the saved agent" "$?"

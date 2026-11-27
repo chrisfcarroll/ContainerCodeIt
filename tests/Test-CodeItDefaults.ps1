@@ -230,6 +230,17 @@ Assert "an antigravity-cli model picked by number is saved by its label in its s
     ((Get-Content "$saveAgy/.gemini/antigravity-cli/settings.json" -Raw | ConvertFrom-Json).model -eq 'Gemini 4 Neon (Medium)')
 Assert "the antigravity-cli label is recorded in the defaults" `
     ((Get-Content "$saveAgy/defaults") -contains 'model.antigravity-cli=Gemini 4 Neon (Medium)')
+# The prompts' brackets hold only the default; 'none' is offered on the line above,
+# a model's default is none until one is chosen, and each says where to edit it
+$saveUi = Join-Path $tmp 'interactive-ui'; $null = New-Item -ItemType Directory -Force -Path $saveUi
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveUi'" $stubPath @('', '', 'sonnet', '', 'node')
+Assert-Contains "the agent prompt offers 'none' on the line above" $r.out "'none' for no default agent."
+Assert-Contains "a model not yet chosen defaults to none" $r.out "Choose model for claude [none]"
+Assert-Contains "the model prompt offers 'none' on the line above" $r.out "'none' for no default model for claude."
+Assert-Contains "each model question says where to edit it" $r.out "Edit the model for claude in $(Join-Path $saveUi '.claude/settings.json')."
+Assert "no prompt lists none inside its brackets" (-not $r.out.Contains(', or none]') -and -not $r.out.Contains("'none' clears]"))
+$r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveUi'" $stubPath @('', '', '', '', 'node')
+Assert-Contains "a chosen model is the default" $r.out "Choose model for claude [sonnet]"
 # Model questions follow the agent list (codex has none, so it is skipped):
 # antigravity-cli, then claude, then opencode
 $r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('9', '', 'sonnet', 'none', 'none')

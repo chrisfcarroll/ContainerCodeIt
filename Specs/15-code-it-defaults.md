@@ -84,10 +84,15 @@ the current value:
 2. **Default model, for each agent** (skipped when the agent has no
    `AGENT_MODEL_FILE`) — the catalog grouped by provider and numbered, current model
    marked; pick a number, type any `provider/model` (or, for claude, an alias), or
-   `none` to clear.
+   `none` to clear. The default is the model already chosen in the agent's own
+   config, and is `none` until one is chosen. Each question says where to edit the
+   model by hand: `Edit the model for AGENT in FILE.`, FILE being the host path.
 3. **Default toolchain** — as `code-it-build`'s interactive selection: known
    toolchains, detected marked `*`, multi-select by number or name, detected
    preselected (powershell too on Windows); `none` clears.
+
+Each prompt's brackets hold only its default, as `Choose default agent [claude]: `;
+the `none` answer is offered on the line above it, not inside the brackets.
 
 With any of `--agent`/`--model`/`--toolchain`, nothing is asked: exactly those values
 are set, the rest are left alone.

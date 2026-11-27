@@ -494,8 +494,8 @@ parse_multi() {
 }
 
 # choose_from LABEL DEFAULT DETECTED CURRENT items...: print a numbered list and read
-# a choice from stdin; echoes the chosen item. CLEAR ("none") clears, blank keeps
-# DEFAULT, which may be empty.
+# a choice from stdin; echoes the chosen item. "none" clears, blank keeps DEFAULT,
+# which may be empty, and then is shown as none.
 choose_from() {
     local label="$1" default="$2" detected="$3" current="$4"; shift 4
     local items=("$@") i=1 item flag answer
@@ -507,7 +507,8 @@ choose_from() {
         printf '  %d) %s%s\n' "$i" "$item" "$flag" >&2
         i=$((i + 1))
     done
-    printf 'Choose %s [%s, or none]: ' "$label" "$(ci_join , "${default:-none}")" >&2
+    printf "  'none' for no %s.\n" "$label" >&2
+    printf 'Choose %s [%s]: ' "$label" "$(ci_join , "${default:-none}")" >&2
     read -r answer || answer=""
     [[ -z "$answer" ]] && answer="$default"
     printf '%s' "$answer"
@@ -563,8 +564,11 @@ interactive() {
         target=$(agent_save_path "$a" "$path")
         live=$(json_get "$target" "${spec##*:}")
         echo
-        echo "Default model for $a [current: ${live:-none}]. The catalog below is best effort"
-        echo "and always incomplete: any model string is accepted."
+        # The default is the model chosen for the agent, in its own config, and is
+        # none until one is chosen
+        echo "Default model for $a. The list is best effort and always incomplete: any"
+        echo "model string is accepted."
+        echo "Edit the model for $a in $target."
         models=()
         own="$agents_dir/$a/models.txt"
         if [[ -f "$own" ]]; then
@@ -617,7 +621,8 @@ interactive() {
             printf '  %d) %s%s\n' "$i" "$entry" "$flag"
             i=$((i + 1))
         done
-        printf "Choose model for %s [%s, 'none' clears]: " "$a" "${live:-none}"
+        printf "  'none' for no default model for %s.\n" "$a"
+        printf 'Choose model for %s [%s]: ' "$a" "${live:-none}"
         read -r answer || answer=""
         if [[ -z "$answer" ]]; then
             continue
