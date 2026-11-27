@@ -46,7 +46,8 @@ accepted. Sources, in order:
 `code-it-defaults --refresh-models` rebuilds the cache from
 `https://models.dev/api.json` (the registry OpenCode itself uses), extracting
 `provider/model` ids. Needs `curl` and `jq` (bash) or `Invoke-RestMethod` (PowerShell);
-on failure it says so and changes nothing. Claude's list also offers Claude Code's
+on failure it says so and changes nothing. On its own it asks nothing: it refreshes
+and exits, like `--show`; with settings it refreshes, then sets them. Claude's list also offers Claude Code's
 aliases (`opus`, `sonnet`, `haiku`) and Anthropic models without the provider prefix.
 
 For an agent whose models are `provider/model` ids, the picker offers a model as

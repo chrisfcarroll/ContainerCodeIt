@@ -41,7 +41,8 @@
 #   --refresh-models        Refresh SAVE-DIR/model-catalog.txt, the model list offered
 #                           by the interactive picker, from https://models.dev/api.json
 #                           (needs curl and jq). The bundled list in lib/models.txt is
-#                           used until then. An agent whose models are not
+#                           used until then. On its own it asks nothing: it refreshes
+#                           and exits. An agent whose models are not
 #                           provider/model ids lists its own in agents/NAME/models.txt,
 #                           which the picker offers instead.
 #   --save-dir, -s DIR      Where the defaults and agent state live.
@@ -697,13 +698,21 @@ interactive() {
 if [[ "$refresh" == true ]]; then
     refresh_models || exit 1
 fi
+settings_given=false
+if [[ -n "$agent_arg" || "$toolchain_set" == true || -n "$trust_arg" || -n "$runtime_arg" || ${#model_args[@]} -gt 0 ]]; then
+    settings_given=true
+fi
+# A refresh on its own is done: it asks nothing
+if [[ "$refresh" == true && "$settings_given" == false ]]; then
+    exit 0
+fi
 
 if [[ "$show" == true ]]; then
     do_show
     exit 0
 fi
 
-if [[ -z "$agent_arg" && "$toolchain_set" == false && -z "$trust_arg" && -z "$runtime_arg" && ${#model_args[@]} -eq 0 ]]; then
+if [[ "$settings_given" == false ]]; then
     interactive
     exit 0
 fi

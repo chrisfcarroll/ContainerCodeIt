@@ -98,6 +98,13 @@ Assert-Contains "-help documents -model" $r.out '-model <String[]>'
 Assert-Contains "-help documents -toolchain" $r.out '-toolchain <String>'
 Assert-Contains "-help documents -show" $r.out '-show'
 Assert-Contains "-help documents -refreshModels" $r.out '-refreshModels'
+
+# A refresh on its own asks nothing (-dryRun, so nothing is fetched)
+$saveRefresh = Join-Path $tmp 'refresh-alone'; $null = New-Item -ItemType Directory -Force -Path $saveRefresh
+$rRefresh = Invoke-Scenario "& '$defaults' -saveDir '$saveRefresh' -refreshModels -dryRun" $stubPath
+Assert "-refreshModels -dryRun exit code 0" ($rRefresh.code -eq 0)
+Assert-Contains "-refreshModels -dryRun says what it would fetch" $rRefresh.out 'would fetch'
+Assert "-refreshModels on its own asks nothing" (-not $rRefresh.out.Contains('Choose '))
 Assert-Contains "-help documents -dryRun" $r.out '-dryRun'
 
 # ---------------------------------------------------------------------------

@@ -92,6 +92,11 @@ assert_contains "--help documents --model AGENT=MODEL" "$out" "--model AGENT=MOD
 assert_contains "--help documents --toolchain" "$out" "--toolchain, -t LIST"
 assert_contains "--help documents --show" "$out" "--show"
 assert_contains "--help documents --refresh-models" "$out" "--refresh-models"
+# A refresh on its own asks nothing (--dry-run, so nothing is fetched)
+refresh_out=$(PATH="$cleanbin:$PATH" "$defaults" -s "$tmp/save-refresh-alone" --refresh-models --dry-run 2>&1)
+assert "--refresh-models --dry-run exit code" "$?"
+assert_contains "--refresh-models --dry-run says what it would fetch" "$refresh_out" "would fetch"
+[[ "$refresh_out" != *"Choose "* ]]; assert "--refresh-models --dry-run on its own asks nothing" "$?"
 assert_contains "--help documents --dry-run" "$out" "--dry-run, -d"
 
 # ---------------------------------------------------------------------------
@@ -271,6 +276,7 @@ chmod +x "$stubbin/curl" "$stubbin/jq"
 out=$(PATH="$stubbin:$cleanbin:$PATH" "$defaults" -s "$save_r" --refresh-models 2>&1)
 assert "--refresh-models exit code" "$?"
 assert_contains "--refresh-models reports it" "$out" "Refreshed"
+[[ "$out" != *"Choose "* ]]; assert "--refresh-models on its own asks nothing" "$?"
 grep -q '^prov1/m-one$' "$save_r/model-catalog.txt"; assert "cache has the fetched models, sorted" "$?"
 grep -qv '^#' "$save_r/model-catalog.txt"; assert "cache has more than the header" "$?"
 out=$(printf '1\n99\n\n\nnode\n' | PATH="$stubbin:$cleanbin:$PATH" "$defaults" -s "$save_r" 2>&1)

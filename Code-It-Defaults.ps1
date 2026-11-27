@@ -53,7 +53,8 @@
 
 .PARAMETER refreshModels
     Refresh <saveDir>/model-catalog.txt, the model list offered by the interactive
-    picker, from https://models.dev/api.json.
+    picker, from https://models.dev/api.json. On its own it asks nothing: it
+    refreshes and exits.
 
 .PARAMETER saveDir
     Where the defaults and agent state live. Default: ~/.config/code-it
@@ -547,13 +548,18 @@ function Invoke-Interactive {
 if ($refreshModels) {
     if (-not (Update-ModelCatalog)) { exit 1 }
 }
+$settingsGiven = $agent -or $toolchain -or $trustWorkDir -or $runtime -or $model.Count -gt 0
+# A refresh on its own is done: it asks nothing
+if ($refreshModels -and -not $settingsGiven) {
+    exit 0
+}
 
 if ($show) {
     Show-Defaults
     exit 0
 }
 
-if (-not $agent -and -not $toolchain -and -not $trustWorkDir -and -not $runtime -and $model.Count -eq 0) {
+if (-not $settingsGiven) {
     Invoke-Interactive
     exit 0
 }
