@@ -661,7 +661,7 @@ if [[ ! -d "$work_dir_to_mount" ]]; then
 fi
 work_dir_to_mount=$(abs_dir "$work_dir_to_mount")
 # The container path the work dir is mounted at, /work/<parent>/<name>: directory
-# names matter for agents' per-directory memory, so no fixed /work. go.sh cds to
+# names matter for agents' per-directory memory, so no fixed /work. go.zsh cds to
 # it (CODE_IT_WORK_DIR), because the image's own WORKDIR /work is only a default.
 container_work_dir=$(ci_work_mount_path "$work_dir_to_mount")
 
@@ -779,7 +779,7 @@ elif [[ -n "$image_toolchain" && "$image_toolchain" != "$(ci_join , "$enabled_to
     echo "    Note: image '$image' also contains ${extras// /,}."
 fi
 
-# The image must contain the chosen agent: go.sh cannot run one it lacks. Check here,
+# The image must contain the chosen agent: go.zsh cannot run one it lacks. Check here,
 # where the error is readable, rather than in the container. --no-agent runs no agent,
 # so neither check applies.
 if [[ "$no_agent" == false ]]; then
@@ -909,7 +909,7 @@ fi
 agent_cmd=()
 if [[ "$no_agent" == true ]]; then
     # A plain zsh: nothing is appended after the image, and CODE_AGENT_SHELL=1
-    # (below) tells go.sh to run the shell instead of an agent.
+    # (below) tells go.zsh to run the shell instead of an agent.
     :
 else
     if [[ "$headless" == true ]]; then
@@ -945,7 +945,7 @@ else
     headless_env_print=""
 fi
 
-# The agent selector environment: CODE_AGENT names the agent for go.sh; --no-agent
+# The agent selector environment: CODE_AGENT names the agent for go.zsh; --no-agent
 # replaces it with CODE_AGENT_SHELL, which runs a plain interactive zsh.
 if [[ "$no_agent" == true ]]; then
     agent_env=(-e CODE_AGENT_SHELL=1)
@@ -963,7 +963,7 @@ if [[ "$trust_work_dir" == yes && -n "$AGENT_TRUST_ENV" ]]; then
                 -e $AGENT_TRUST_ENV \\"
 fi
 
-# --no-wait: go.sh closes at once if the agent fails, instead of waiting for Enter
+# --no-wait: go.zsh closes at once if the agent fails, instead of waiting for Enter
 if [[ "$no_wait" == true ]]; then
     agent_env+=(-e CODE_IT_NO_WAIT=1)
     agent_env_print+="

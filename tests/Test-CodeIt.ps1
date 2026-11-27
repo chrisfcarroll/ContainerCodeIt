@@ -260,6 +260,7 @@ if "%~1"=="build" (
     for %%a in (%*) do set "ctx=%%~a"
     copy /Y "%ctx%\Dockerfile" "%CAPTURE%" >nul 2>nul
     dir /b "%ctx%\ca-certificates" > "%CAPTURE%.ca" 2>nul
+    dir /b "%ctx%\image-sources" > "%CAPTURE%.img" 2>nul
     echo STUB-DOCKER-BUILD %*
     goto :eof
 )
@@ -277,6 +278,8 @@ case "$1" in
         cp "$last/Dockerfile" "$CAPTURE"
         ls "$last/ca-certificates" > "$CAPTURE.ca" 2>&1
         echo "$last" > "$CAPTURE.ctx"
+        LC_ALL=C ls "$last/image-sources" | LC_ALL=C sort > "$CAPTURE.img" 2>&1
+        [ ! -L "$last/image-sources" ] && [ -d "$last/image-sources" ] && echo "real-dir" > "$CAPTURE.img-type" || echo "not-dir" > "$CAPTURE.img-type"
         echo "STUB-DOCKER-BUILD $*" ;;
     images) echo "code-it-alpine-dotnet-node:latest" ;;
     image)  echo dotnet,node ;;
@@ -354,7 +357,7 @@ Assert-Contains "docker run command" $r.out 'docker run -it'
 Assert-Contains "image name" $r.out 'code-it-alpine-dotnet-node:latest'
 $expectedWork = Get-CodeItWorkMountPath $scriptDir
 Assert-Contains "work dir mount" $r.out "$scriptDir`:$expectedWork"
-Assert-Contains "work dir env tells go.sh where to cd" $r.out "CODE_IT_WORK_DIR=`"$expectedWork`""
+Assert-Contains "work dir env tells go.zsh where to cd" $r.out "CODE_IT_WORK_DIR=`"$expectedWork`""
 Assert-Contains "opencode config mount" $r.out '/.config/opencode:/home/agent1/.config/opencode'
 Assert-Contains "opencode mount" $r.out '/.local/share/opencode:/home/agent1/.local/share/opencode'
 Assert "opencode run mounts no claude state" (-not $r.out.Contains('/home/agent1/.claude'))
@@ -783,6 +786,23 @@ if (-not $onWindows) {
     $ctx = if (Test-Path "$capture.ctx") { ([IO.File]::ReadAllText("$capture.ctx")).Trim() } else { '' }
     Assert "Code-It-Build names the build context by its physical path" ($ctx.StartsWith("$realTmp/"))
 }
+# image-sources/ (go.zsh, zshrc, tmux.conf) reaches the context, from next to this
+# script when the Dockerfile's directory has none
+$imgCapture = "$capture.img"
+$imgListed = if (Test-Path $imgCapture) { @(Get-Content $imgCapture | Where-Object { $_ } | Sort-Object) -join ' ' } else { '' }
+Assert "Code-It-Build copies image-sources/ into the build context" ($imgListed -eq 'go.zsh tmux.conf zshrc')
+Assert-InCapture "assembled Dockerfile copies image-sources/" 'COPY image-sources/ /tmp/image-sources/'
+Assert-InCapture "go.zsh is the entrypoint" 'ENTRYPOINT ["/home/agent1/go.zsh"]'
+if (-not $onWindows) {
+    $bDfImgLink = Join-Path $bDfDir 'image-sources'
+    $null = New-Item -ItemType SymbolicLink -Path $bDfImgLink -Target (Join-Path $scriptDir 'image-sources')
+    Remove-Item $imgCapture, "$capture.img-type" -Force -EA Silent
+    $null = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $bDfDir, '-runtime', 'docker') $capturePath
+    $imgType = if (Test-Path "$capture.img-type") { ([IO.File]::ReadAllText("$capture.img-type")).Trim() } else { '' }
+    $imgListed = if (Test-Path $imgCapture) { @(Get-Content $imgCapture | Where-Object { $_ } | Sort-Object) -join ' ' } else { '' }
+    Assert "Code-It-Build dereferences a symlinked image-sources/ into the context" ($imgType -eq 'real-dir' -and $imgListed -eq 'go.zsh tmux.conf zshrc')
+    Remove-Item $bDfImgLink -Force
+}
 $bDfCa = Join-Path $bDfDir 'ca-certificates'
 $null = New-Item -ItemType Directory -Force -Path $bDfCa
 [IO.File]::WriteAllText((Join-Path $bDfCa 'test-proxy-ca.crt'), "-----BEGIN CERTIFICATE-----`nTEST`n-----END CERTIFICATE-----`n")
@@ -1010,14 +1030,15 @@ $stripTest = @"
 `$text = [IO.File]::ReadAllText('$scriptDir/Dockerfile')
 `$out = Remove-CodeItDockerfileComments `$text
 "STRIPLEN:" + `$out.Length
-"HEREDOC:" + ([regex]::Matches(`$out, 'Arguments given to the container').Count)
+`$h = Remove-CodeItDockerfileComments ("FROM x`n# gone`nRUN cat <<'EOF' > f`n# kept`nEOF`n")
+"HEREDOC:" + ([regex]::Matches(`$h, '# kept').Count) + ([regex]::Matches(`$h, '# gone').Count)
 "RUNLINE:" + ([regex]::Matches(`$out, 'apk add --no-cache git').Count)
 "@
 $r = Invoke-ScenarioCommand $stripTest $stubPath
 Assert "stripping script ran" ($r.code -eq 0 -or $null -eq $r.code)
 if ($r.out -match 'STRIPLEN:(\d+)') { $stripLen = [int]$Matches[1] } else { $stripLen = 999999 }
 Assert "stripped Dockerfile is under Apple's 16KB limit ($stripLen bytes)" ($stripLen -lt 16384)
-Assert-Contains "stripping preserves heredoc bodies" $r.out 'HEREDOC:1'
+Assert-Contains "stripping preserves heredoc bodies" $r.out 'HEREDOC:10'
 Assert-Contains "stripping keeps RUN lines" $r.out 'RUNLINE:1'
 
 # ---------------------------------------------------------------------------
@@ -1268,7 +1289,7 @@ Assert-Contains "interactive runs allocate a TTY" $r.out 'docker run -it'
 Assert "interactive runs are not headless" (-not $r.out.Contains('CODE_AGENT_HEADLESS'))
 Assert "a failing agent waits for Enter by default" (-not $r.out.Contains('CODE_IT_NO_WAIT'))
 
-# -noWait: go.sh closes at once if the agent fails
+# -noWait: go.zsh closes at once if the agent fails
 $r = Invoke-Scenario $codeIt (@('-c','-noWait') + $commonArgs) $stubPath
 Assert-Contains "-noWait passes CODE_IT_NO_WAIT" $r.out '-e CODE_IT_NO_WAIT=1'
 $r = Invoke-Scenario $codeIt (@('-c','-noWait','-headless','fix it') + $commonArgs) $stubPath
@@ -2078,7 +2099,7 @@ $null = New-Item -ItemType Directory -Force -Path $nested
 $r = Invoke-Scenario $codeIt (@('-dryRun','-WorkDirToMount',$nested,'-saveDir',$save)) $stubPath
 Assert "dry-run with a nested work dir exit code 0" ($r.code -eq 0)
 Assert-Contains "nested work dir mounts at /work/<parent>/<name>" $r.out "work-parent${sep}work-dir:/work/work-parent/work-dir"
-Assert-Contains "nested work dir env tells go.sh where to cd" $r.out 'CODE_IT_WORK_DIR="/work/work-parent/work-dir"'
+Assert-Contains "nested work dir env tells go.zsh where to cd" $r.out 'CODE_IT_WORK_DIR="/work/work-parent/work-dir"'
 
 # ---------------------------------------------------------------------------
 "24. Windows PowerShell 5.1, all a new Windows machine has"

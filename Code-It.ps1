@@ -562,7 +562,7 @@ if (-not $WorkDirToMount -or -not (Test-Path -Path $WorkDirToMount -PathType Con
 $WorkDirToMount = (Resolve-Path $WorkDirToMount).Path
 
 # The container path the work dir is mounted at, /work/<parent>/<name>: directory
-# names matter for agents' per-directory memory, so no fixed /work. go.sh cds to
+# names matter for agents' per-directory memory, so no fixed /work. go.zsh cds to
 # it (CODE_IT_WORK_DIR), because the image's own WORKDIR /work is only a default.
 $containerWorkDir = Get-CodeItWorkMountPath $WorkDirToMount
 
@@ -672,7 +672,7 @@ if ($imageToolchain -and -not (Test-CodeItToolchainInclude $imageToolchain $enab
     "    Note: image '$image' also contains $($extras -join ',')"
 }
 
-# The image must contain the chosen agent: go.sh cannot run one it lacks. Check here,
+# The image must contain the chosen agent: go.zsh cannot run one it lacks. Check here,
 # where the error is readable, rather than in the container. -noAgent runs no agent,
 # so neither check applies.
 if (-not $noAgent) {
@@ -790,7 +790,7 @@ if ($enabledPackageCaches -contains 'bun') {
 $agentCmd = @()
 if (-not $noAgent) {
     # A plain zsh (-noAgent): nothing is appended after the image, and
-    # CODE_AGENT_SHELL=1 (below) tells go.sh to run the shell instead of an agent.
+    # CODE_AGENT_SHELL=1 (below) tells go.zsh to run the shell instead of an agent.
     if ($headless) {
         $template = if ($promptSet) { $agentCmdHeadlessPrompt } else { $agentCmdHeadlessNoPrompt }
     } else {
@@ -876,7 +876,7 @@ $ttyArgs     = if ($headless) { @('-i') }                        else { @('-it')
 $headlessEnv = if ($headless) { @('-e', 'CODE_AGENT_HEADLESS=1') } else { @() }
 $headlessEnvPrint = if ($headless) { "`n                -e CODE_AGENT_HEADLESS=1" } else { "" }
 
-# The agent selector environment: CODE_AGENT names the agent for go.sh; -noAgent
+# The agent selector environment: CODE_AGENT names the agent for go.zsh; -noAgent
 # replaces it with CODE_AGENT_SHELL, which runs a plain interactive zsh.
 if ($noAgent) {
     $agentEnvArgs = @('-e', 'CODE_AGENT_SHELL=1')
@@ -891,7 +891,7 @@ if ($trustWorkDir -and $agentTrustEnv) {
     $agentEnvPrint += "`n                -e $agentTrustEnv"
 }
 
-# -noWait: go.sh closes at once if the agent fails, instead of waiting for Enter
+# -noWait: go.zsh closes at once if the agent fails, instead of waiting for Enter
 if ($noWait) {
     $agentEnvArgs += @('-e', 'CODE_IT_NO_WAIT=1')
     $agentEnvPrint += "`n                -e CODE_IT_NO_WAIT=1"

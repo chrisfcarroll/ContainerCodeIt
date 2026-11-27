@@ -16,7 +16,7 @@
     and an install fragment. This script assembles only the selected fragments into
     the Dockerfile (replacing the markers), so unselected ones cost nothing in the
     size-limited buildable file. It also writes /etc/code-it-agents, the name=binary
-    map go.sh reads.
+    map go.zsh reads.
 
 .PARAMETER toolchain
     Comma-separated toolchains to build. Known: dotnet, node (aliases js-node,
@@ -413,7 +413,7 @@ foreach ($line in ($base -split "`n")) {
 }
 $assembled = ($assembled -join "`n")
 # Keep the buildable Dockerfile small (Apple's builder fails above ~16 KB), without
-# touching heredoc bodies such as go.sh.
+# touching heredoc bodies.
 $assembled = Remove-CodeItDockerfileComments $assembled
 
 $buildContext = Join-Path ([IO.Path]::GetTempPath()) ("code-it-build-" + [Guid]::NewGuid().ToString('N'))
@@ -429,6 +429,17 @@ $caSource = Join-Path $dockerfileDir 'ca-certificates'
 if (Test-Path -Path $caSource -PathType Container) {
     Copy-Item -Path (Join-Path $caSource '*') -Destination $caContext -Recurse -Force
 }
+# The container's shell setup and entrypoint (go.zsh), next to the Dockerfile when it
+# ships them, else next to this script
+$imageSources = Join-Path $dockerfileDir 'image-sources'
+if (-not (Test-Path -Path $imageSources -PathType Container)) { $imageSources = Join-Path $PSScriptRoot 'image-sources' }
+if (-not (Test-Path -Path $imageSources -PathType Container)) {
+    Write-Warning "image-sources/ not found next to Dockerfile or $PSScriptRoot."
+    exit 1
+}
+$imageSourcesContext = Join-Path $buildContext 'image-sources'
+$null = New-Item -ItemType Directory -Force -Path $imageSourcesContext
+Copy-Item -Path (Join-Path $imageSources '*') -Destination $imageSourcesContext -Recurse -Force
 $caFiles = @(Get-ChildItem -Path $caContext -File | Where-Object Extension -in '.crt', '.cer', '.pem' | ForEach-Object Name)
 if ($caFiles) {
     "    Adding certificate trust from ca-certificates/: $($caFiles -join ' ')"

@@ -305,7 +305,10 @@ only the selected fragments into the Dockerfile, replacing the
 `@@CODE_IT_TOOLCHAIN_INSTALLS@@` / `@@CODE_IT_PACKAGE_CACHE_INSTALLS@@` markers.
 Unselected toolchains cost **nothing** in the assembled Dockerfile, which matters
 because Apple's `container` builder sends it in a gRPC header and fails above ~16 KB
-(`apple/container#735`): adding a toolchain does not grow every build.
+(`apple/container#735`): adding a toolchain does not grow every build. For the same
+reason the container's entrypoint (`go.zsh`) and its `zshrc` and `tmux.conf` live in
+`image-sources/` and are copied in, rather than written as heredocs; they are not
+executable in the repo, so a host `PATH` that includes it cannot run them.
 `code-it-build --list-toolchains` shows the toolchains in the default image and in
 each other code-it image, then those defined; `--list-package-caches` shows the
 package caches defined.
@@ -719,7 +722,7 @@ If you use NuGet, the launcher scripts mounts your NuGet package cache at `/home
 ### npm
 
 `npm` (in `--package-caches`, implied by `--toolchain node`) mounts your npm cache read-only at
-`/home/agent1/.npm-host`. The container's `go.sh` seeds its own writable `~/.npm` from
+`/home/agent1/.npm-host`. The container's `go.zsh` seeds its own writable `~/.npm` from
 that mount at startup, so packages already downloaded on the host are reused and the
 host cache is never written to.
 

@@ -7,6 +7,8 @@ Dockerfile.* text eol=lf
 *.dockerfile text eol=lf
 *.env text eol=lf
 *.sh text eol=lf
+# Copied into the image: zsh and tmux would see a trailing \r on every line
+image-sources/* text eol=lf
 *.bash text eol=lf
 completions/_code-it* text eol=lf
 *.json text eol=lf

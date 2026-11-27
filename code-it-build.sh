@@ -7,7 +7,7 @@
 # with a config and an install fragment, and this script assembles only the selected
 # fragments into the Dockerfile (replacing the markers), so unselected ones cost
 # nothing in the size-limited buildable file. It also writes /etc/code-it-agents, the
-# name=binary map the container's go.sh reads.
+# name=binary map the container's go.zsh reads.
 #
 # Usage:
 #   ./code-it-build.sh [OPTIONS]
@@ -490,7 +490,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$dockerfile_dir/Dockerfile" > "$build_context/Dockerfile"
 
 # Keep the buildable Dockerfile small (Apple's builder fails above ~16 KB), without
-# touching heredoc bodies such as go.sh.
+# touching heredoc bodies.
 ci_strip_dockerfile_comments < "$build_context/Dockerfile" > "$build_context/Dockerfile.stripped" \
     && mv "$build_context/Dockerfile.stripped" "$build_context/Dockerfile"
 
@@ -501,6 +501,17 @@ mkdir -p "$build_context/ca-certificates"
 if [[ -d "$dockerfile_dir/ca-certificates" ]]; then
     cp -R "$dockerfile_dir/ca-certificates/." "$build_context/ca-certificates/"
 fi
+# The container's shell setup and entrypoint (go.zsh), next to the Dockerfile when it
+# ships them, else next to this script. Copy /. into a real directory so a symlinked
+# image-sources/ copies its contents rather than the symlink itself on BSD/macOS.
+image_sources_dir="$dockerfile_dir/image-sources"
+[[ -d "$image_sources_dir" ]] || image_sources_dir="$script_dir/image-sources"
+if [[ ! -d "$image_sources_dir" ]]; then
+    echo "Warning: image-sources/ not found next to Dockerfile or $script_dir." >&2
+    exit 1
+fi
+mkdir -p "$build_context/image-sources"
+cp -R "$image_sources_dir/." "$build_context/image-sources/"
 # A pattern that matches nothing stays literal, so test each name rather than
 # passing them to ls, which would fail and, under pipefail, end the script.
 ca_files=""

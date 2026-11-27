@@ -108,7 +108,7 @@ If it passes the gate, follow how the existing toolchains are defined as data:
    package-caches/<name>/ definition: find the host cache (environment variable,
    then config, then default path, as NuGet does), mount it read-only at
    ~/.<name>-host, and either seed the container's writable cache from it (as npm
-   and bun do in go.sh) or register it as a read-only fallback (as NuGet does).
+   and bun do in go.zsh) or register it as a read-only fallback (as NuGet does).
    Never let the container write to the host cache.
 4. Add tests to tests/test-code-it.sh and tests/Test-CodeIt.ps1 mirroring the bun
    ones. Build the image and run the toolchain's --version headlessly.

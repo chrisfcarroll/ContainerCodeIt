@@ -497,7 +497,7 @@ $prompt += @'
 Investigate:
 - Read HumansAndAgents.md, README.md and specs/ to see how code-it is meant to work.
 - You run in a code-it container like the user's: inspect it (tmux and its options,
-  the environment, ~/.tmux.conf, ~/go.sh, /etc/code-it-agents, the mounted state)
+  the environment, ~/.tmux.conf, ~/go.zsh, /etc/code-it-agents, the mounted state)
   to reproduce the problem where you can.
 - Decide whether the cause is in this repository (scripts, Dockerfile, definitions)
   or on the host (terminal, container runtime, save dir, settings).

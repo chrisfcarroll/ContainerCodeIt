@@ -214,7 +214,7 @@ assert_contains "dry-run separates CODE_AGENT from trailing backslash" "$out" '-
 assert_contains "image name" "$out" "code-it-alpine-dotnet-node:latest"
 expected_work=$(ci_work_mount_path "$script_dir")
 assert_contains "work dir mount" "$out" "$script_dir:$expected_work"
-assert_contains "work dir env tells go.sh where to cd" "$out" "CODE_IT_WORK_DIR=\"$expected_work\""
+assert_contains "work dir env tells go.zsh where to cd" "$out" "CODE_IT_WORK_DIR=\"$expected_work\""
 assert_contains "opencode config mount" "$out" "/.config/opencode:/home/agent1/.config/opencode"
 assert_contains "opencode data mount" "$out" "/.local/share/opencode:/home/agent1/.local/share/opencode"
 case "$out" in
@@ -422,6 +422,8 @@ case "\$1" in
         cp "\$last/Dockerfile" "$capture"
         ls "\$last/ca-certificates" > "$capture.ca" 2>&1
         echo "\$last" > "$capture.ctx"
+        LC_ALL=C ls "\$last/image-sources" | LC_ALL=C sort > "$capture.img" 2>&1
+        [ ! -L "\$last/image-sources" ] && [ -d "\$last/image-sources" ] && echo "real-dir" > "$capture.img-type" || echo "not-dir" > "$capture.img-type"
         echo "STUB-DOCKER-BUILD \$*" ;;
     images) echo "code-it-alpine-dotnet-node:latest" ;;
     image)  echo dotnet,node ;;
@@ -617,6 +619,24 @@ real_tmp=$(cd "$tmp/real-tmp" && pwd -P)
 TMPDIR="$tmp/link-tmp" PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker >/dev/null 2>&1
 [[ "$(cat "$capture.ctx" 2>/dev/null)" == "$real_tmp"/* ]]
 assert "code-it-build names the build context by its physical path" "$?"
+# image-sources/ (go.zsh, zshrc, tmux.conf) reaches the context, from next to this
+# script when the Dockerfile's directory has none
+[[ "$(tr '\n' ' ' < "$capture.img")" == "go.zsh tmux.conf zshrc " ]]
+assert "code-it-build copies image-sources/ into the build context" "$?"
+assert_in_df "assembled Dockerfile copies image-sources/" "COPY image-sources/ /tmp/image-sources/"
+assert_in_df "go.zsh is the entrypoint" 'ENTRYPOINT \["/home/agent1/go.zsh"\]'
+[[ "$(awk '/^USER /{u=$2} /COPY image-sources\/ \/tmp\/image-sources\//{print u; exit}' "$capture")" == "root" ]]
+assert "Dockerfile copies and cleans up image-sources/ as root" "$?"
+[[ "$(awk '/COPY image-sources\/ \/tmp\/image-sources\//{found=1; next} found && /^USER /{print $2; exit}' "$capture")" == "agent1" ]]
+assert "Dockerfile returns to agent1 after installing image-sources/" "$?"
+# A symlinked image-sources/ next to the Dockerfile copies its contents into a real
+# directory in the context, rather than copying the symlink itself
+ln -sfn "$script_dir/image-sources" "$bdfdir/image-sources"
+rm -f "$capture.img" "$capture.img-type"
+PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker >/dev/null 2>&1
+[[ "$(cat "$capture.img-type" 2>/dev/null)" == "real-dir" && "$(tr '\n' ' ' < "$capture.img")" == "go.zsh tmux.conf zshrc " ]]
+assert "code-it-build dereferences a symlinked image-sources/ into the context" "$?"
+rm -f "$bdfdir/image-sources"
 mkdir -p "$bdfdir/ca-certificates"
 printf -- '-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n' > "$bdfdir/ca-certificates/test-proxy-ca.crt"
 out=$(PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker 2>&1)
@@ -941,8 +961,22 @@ stripped_df="$tmp/stripped.Dockerfile"
 ci_strip_dockerfile_comments < "$script_dir/Dockerfile" > "$stripped_df"
 stripped_size=$(wc -c < "$stripped_df")
 [[ "$stripped_size" -lt 16384 ]]; assert "stripped Dockerfile is under Apple's 16KB limit ($stripped_size bytes)" "$?"
-grep -q "# Arguments given to the container" "$stripped_df"
+heredoc_out=$(printf "FROM x\n# gone\nRUN cat <<'EOF' > f\n# kept\nEOF\n" | ci_strip_dockerfile_comments)
+[[ "$heredoc_out" == *"# kept"* && "$heredoc_out" != *"# gone"* ]]
 assert "stripping preserves heredoc bodies" "$?"
+! grep -q '<<' "$script_dir/Dockerfile"
+assert "the Dockerfile has no heredocs: their bodies live in image-sources/" "$?"
+# go.zsh, zshrc and tmux.conf are not executable on the host, even with the repo on PATH
+if git -C "$script_dir" rev-parse --git-dir &>/dev/null; then
+    for f in go.zsh zshrc tmux.conf; do
+        [[ "$(git -C "$script_dir" ls-files -s "image-sources/$f" | cut -d' ' -f1)" == 100644 ]]
+        assert "image-sources/$f is tracked, not executable" "$?"
+        [[ "$(git -C "$script_dir" check-attr eol -- "image-sources/$f")" == *": eol: lf" ]]
+        assert "checks out LF: image-sources/$f" "$?"
+    done
+else
+    echo "  skip: image-sources modes (not a git checkout)"
+fi
 grep -q "apk add --no-cache git" "$stripped_df"
 assert "stripping keeps RUN lines" "$?"
 # The base file builds, with no args, into zsh/vim/tmux/git plus the default agent
@@ -1191,7 +1225,7 @@ assert_contains "interactive runs allocate a TTY" "$out" "docker run -it"
 [[ "$out" != *CODE_AGENT_HEADLESS* ]]; assert "interactive runs are not headless" "$?"
 [[ "$out" != *CODE_IT_NO_WAIT* ]]; assert "a failing agent waits for Enter by default" "$?"
 
-# --no-wait: go.sh closes at once if the agent fails
+# --no-wait: go.zsh closes at once if the agent fails
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --no-wait "${common_args[@]}")
 assert_contains "--no-wait passes CODE_IT_NO_WAIT" "$out" "-e CODE_IT_NO_WAIT=1"
 out=$(PATH="$stub_docker:$PATH" "$code_it" -c --no-wait --headless "fix it" "${common_args[@]}" 2>&1); rc=$?
@@ -1309,21 +1343,19 @@ assert_contains "--agent agy completes antigravity-cli's flags after --" "$compl
 assert_contains "-a oc completes opencode's flags after --" "$completions_out" "OCALIAS:--server"
 
 # ---------------------------------------------------------------------------
-echo "15. Container entrypoint (go.sh) passes its arguments to the agent"
+echo "15. Container entrypoint (go.zsh) passes its arguments to the agent"
 if command -v zsh &>/dev/null; then
-    # Lift go.sh out of the Dockerfile and point it at stubs instead of the image's
-    # own paths, so the entrypoint's argument handling can be tested on the host.
-    # Inside a code-it container the launcher has set CODE_IT_WORK_DIR, which would
-    # send the extracted go.sh to the real work dir instead of $gowork.
+    # Point a copy of go.zsh at stubs instead of the image's own paths, so the
+    # entrypoint's argument handling can be tested on the host. Inside a code-it
+    # container the launcher has set CODE_IT_WORK_DIR, which would send the copy
+    # to the real work dir instead of $gowork.
     unset CODE_IT_WORK_DIR
     gowork="$tmp/gowork"; gobin="$tmp/gobin"
     mkdir -p "$gowork/repo" "$gobin"
-    sed -n "/^RUN cat <<'EOF' >> ~\/go.sh$/,/^EOF$/p" "$script_dir/Dockerfile" \
-        | sed '1d;$d' \
-        | sed -e "s#/etc/code-it-agents#$gobin/agents#" \
-              -e "s#/work#$gowork#g" > "$tmp/go.sh"
-    chmod +x "$tmp/go.sh"
-    [[ -s "$tmp/go.sh" ]]; assert "go.sh extracted from the Dockerfile" "$?"
+    sed -e "s#/etc/code-it-agents#$gobin/agents#" \
+        -e "s#/work#$gowork#g" "$script_dir/image-sources/go.zsh" > "$tmp/go.zsh"
+    chmod +x "$tmp/go.zsh"
+    [[ -s "$tmp/go.zsh" ]]; assert "go.zsh copied from image-sources/" "$?"
 
     for agent in claude opencode codex; do
         cat > "$gobin/$agent" <<EOF
@@ -1334,7 +1366,7 @@ echo
 EOF
         chmod +x "$gobin/$agent"
     done
-    # go.sh resolves the agent binary from the build-time name=binary map
+    # go.zsh resolves the agent binary from the build-time name=binary map
     printf 'opencode=%s/opencode\nclaude=%s/claude\ncodex=%s/codex\n' "$gobin" "$gobin" "$gobin" > "$gobin/agents"
     # tmux takes the command as one string: run it, so what the agent receives is visible
     cat > "$gobin/tmux" <<'EOF'
@@ -1359,30 +1391,30 @@ EOF
 
     git_calls="$tmp/git-calls"
     : > "$git_calls"
-    out=$(PATH="$gobin:$PATH" GIT_CALLS="$git_calls" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
-    assert_contains "go.sh upgrades mounted repo indexes to version 4" "$(<"$git_calls")" "-C $gowork/repo/ update-index --index-version 4"
-    assert_contains "go.sh runs the chosen agent in tmux" "$out" "AGENT-claude"
-    assert_contains "go.sh reprints the agent's final screen after tmux exits" "$out" "Resume this session with --continue"
-    # The stub agent ends its output with a newline; go.sh then adds two more, so
+    out=$(PATH="$gobin:$PATH" GIT_CALLS="$git_calls" CODE_AGENT=claude zsh "$tmp/go.zsh" 2>&1)
+    assert_contains "go.zsh upgrades mounted repo indexes to version 4" "$(<"$git_calls")" "-C $gowork/repo/ update-index --index-version 4"
+    assert_contains "go.zsh runs the chosen agent in tmux" "$out" "AGENT-claude"
+    assert_contains "go.zsh reprints the agent's final screen after tmux exits" "$out" "Resume this session with --continue"
+    # The stub agent ends its output with a newline; go.zsh then adds two more, so
     # a blank line still separates the header from wherever the agent left the cursor.
-    assert_contains "go.sh puts a blank line between the agent's output and its reprinted screen" "$out" $'\n\n\n--- Agent screen at exit ---\n'
-    # The launcher mounts the work dir at /work/<parent>/<name>, so go.sh must trust
+    assert_contains "go.zsh puts a blank line between the agent's output and its reprinted screen" "$out" $'\n\n\n--- Agent screen at exit ---\n'
+    # The launcher mounts the work dir at /work/<parent>/<name>, so go.zsh must trust
     # that path, not just /work and its immediate children. A work dir with no
-    # subdirectories must not make zsh abort go.sh on an empty glob.
+    # subdirectories must not make zsh abort go.zsh on an empty glob.
     mkdir -p "$gowork/parent/leaf"
     : > "$git_calls"
-    out=$(PATH="$gobin:$PATH" GIT_CALLS="$git_calls" CODE_IT_WORK_DIR="$gowork/parent/leaf" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
-    assert_contains "go.sh marks the nested mounted work dir as a git safe.directory" "$(<"$git_calls")" "config --global --add safe.directory $gowork/parent/leaf"
-    assert_contains "go.sh starts the agent in a work dir with no subdirectories" "$out" "AGENT-claude"
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "explain this repo" 2>&1)
-    assert_contains "go.sh forwards arguments through tmux, unsplit" "$out" "AGENT-opencode[--prompt][explain this repo]"
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" run --standalone "fix the build" 2>&1)
-    assert_contains "go.sh runs opencode (v2) with translated arguments" "$out" "AGENT-opencode[run][--standalone][fix the build]"
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=codex zsh "$tmp/go.sh" "explain this repo" 2>&1)
-    assert_contains "go.sh runs codex with its arguments" "$out" "AGENT-codex[explain this repo]"
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude CODE_AGENT_HEADLESS=1 zsh "$tmp/go.sh" -p "fix it; rm -rf /" 2>&1)
-    assert_contains "headless go.sh runs the agent directly" "$out" "AGENT-claude[-p][fix it; rm -rf /]"
-    [[ "$out" != *AGENT-claude*AGENT-claude* ]]; assert "headless go.sh does not also start tmux" "$?"
+    out=$(PATH="$gobin:$PATH" GIT_CALLS="$git_calls" CODE_IT_WORK_DIR="$gowork/parent/leaf" CODE_AGENT=claude zsh "$tmp/go.zsh" 2>&1)
+    assert_contains "go.zsh marks the nested mounted work dir as a git safe.directory" "$(<"$git_calls")" "config --global --add safe.directory $gowork/parent/leaf"
+    assert_contains "go.zsh starts the agent in a work dir with no subdirectories" "$out" "AGENT-claude"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.zsh" --prompt "explain this repo" 2>&1)
+    assert_contains "go.zsh forwards arguments through tmux, unsplit" "$out" "AGENT-opencode[--prompt][explain this repo]"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode CODE_AGENT_HEADLESS=1 zsh "$tmp/go.zsh" run --standalone "fix the build" 2>&1)
+    assert_contains "go.zsh runs opencode (v2) with translated arguments" "$out" "AGENT-opencode[run][--standalone][fix the build]"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=codex zsh "$tmp/go.zsh" "explain this repo" 2>&1)
+    assert_contains "go.zsh runs codex with its arguments" "$out" "AGENT-codex[explain this repo]"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude CODE_AGENT_HEADLESS=1 zsh "$tmp/go.zsh" -p "fix it; rm -rf /" 2>&1)
+    assert_contains "headless go.zsh runs the agent directly" "$out" "AGENT-claude[-p][fix it; rm -rf /]"
+    [[ "$out" != *AGENT-claude*AGENT-claude* ]]; assert "headless go.zsh does not also start tmux" "$?"
     # CODE_AGENT_SHELL=1 (code-it --no-agent) runs a plain zsh, never an installed agent.
     # This tmux stub prints the shell command instead of running it.
     shellstub="$tmp/goshell"; mkdir -p "$shellstub"
@@ -1392,10 +1424,10 @@ for a in "$@"; do last="$a"; done
 printf 'TMUX-CMD:%s\n' "$last"
 EOF
     chmod +x "$shellstub/tmux"
-    out=$(PATH="$shellstub:$gobin:$PATH" CODE_AGENT_SHELL=1 zsh "$tmp/go.sh" 2>&1)
-    assert_contains "go.sh --no-agent runs zsh in tmux" "$out" "TMUX-CMD:zsh"
-    [[ "$out" != *AGENT-* ]]; assert "go.sh --no-agent runs no agent" "$?"
-    [[ "$out" != *"Press Enter"* ]]; assert "go.sh --no-agent zsh never waits for Enter" "$?"
+    out=$(PATH="$shellstub:$gobin:$PATH" CODE_AGENT_SHELL=1 zsh "$tmp/go.zsh" 2>&1)
+    assert_contains "go.zsh --no-agent runs zsh in tmux" "$out" "TMUX-CMD:zsh"
+    [[ "$out" != *AGENT-* ]]; assert "go.zsh --no-agent runs no agent" "$?"
+    [[ "$out" != *"Press Enter"* ]]; assert "go.zsh --no-agent zsh never waits for Enter" "$?"
     # A failing agent's error stays on screen until Enter, unless CODE_IT_NO_WAIT
     cat > "$gobin/failing" <<'EOF'
 #!/bin/sh
@@ -1403,26 +1435,26 @@ echo agent error; exit 3
 EOF
     chmod +x "$gobin/failing"
     printf 'claude=%s/claude\nfailing=%s/failing\n' "$gobin" "$gobin" > "$gobin/agents"
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=failing zsh "$tmp/go.sh" </dev/null 2>&1)
-    assert_contains "go.sh keeps a failing agent's error on screen" "$out" "agent error"
-    assert_contains "go.sh shows a failing agent's status, waiting for Enter" "$out" "failing exited with status 3. Press Enter to close."
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude zsh "$tmp/go.sh" </dev/null 2>&1)
-    [[ "$out" != *"Press Enter"* ]]; assert "go.sh closes at once when the agent succeeds" "$?"
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=failing CODE_IT_NO_WAIT=1 zsh "$tmp/go.sh" </dev/null 2>&1)
-    assert_contains "go.sh with CODE_IT_NO_WAIT still shows the agent's error" "$out" "agent error"
-    [[ "$out" != *"Press Enter"* ]]; assert "go.sh with CODE_IT_NO_WAIT closes at once" "$?"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=failing zsh "$tmp/go.zsh" </dev/null 2>&1)
+    assert_contains "go.zsh keeps a failing agent's error on screen" "$out" "agent error"
+    assert_contains "go.zsh shows a failing agent's status, waiting for Enter" "$out" "failing exited with status 3. Press Enter to close."
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude zsh "$tmp/go.zsh" </dev/null 2>&1)
+    [[ "$out" != *"Press Enter"* ]]; assert "go.zsh closes at once when the agent succeeds" "$?"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=failing CODE_IT_NO_WAIT=1 zsh "$tmp/go.zsh" </dev/null 2>&1)
+    assert_contains "go.zsh with CODE_IT_NO_WAIT still shows the agent's error" "$out" "agent error"
+    [[ "$out" != *"Press Enter"* ]]; assert "go.zsh with CODE_IT_NO_WAIT closes at once" "$?"
     # an agent missing from the image is an error, never another agent given its arguments
     printf 'claude=%s/claude\n' "$gobin" > "$gobin/agents"
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.sh" --prompt "hi" 2>&1)
-    [[ "$?" != "0" ]]; assert "go.sh fails for an agent the image lacks" "$?"
-    assert_contains "go.sh names the missing agent" "$out" "Agent 'opencode' is not installed in this image. It has: claude"
-    [[ "$out" != *AGENT-claude* ]]; assert "go.sh does not fall back to another agent" "$?"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=opencode zsh "$tmp/go.zsh" --prompt "hi" 2>&1)
+    [[ "$?" != "0" ]]; assert "go.zsh fails for an agent the image lacks" "$?"
+    assert_contains "go.zsh names the missing agent" "$out" "Agent 'opencode' is not installed in this image. It has: claude"
+    [[ "$out" != *AGENT-claude* ]]; assert "go.zsh does not fall back to another agent" "$?"
     printf 'claude=%s/no-such-claude\n' "$gobin" > "$gobin/agents"
-    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude zsh "$tmp/go.sh" 2>&1)
-    [[ "$?" != "0" ]]; assert "go.sh fails when the agent binary is missing" "$?"
-    assert_contains "go.sh reports the missing binary" "$out" "no-such-claude is missing from this image"
+    out=$(PATH="$gobin:$PATH" CODE_AGENT=claude zsh "$tmp/go.zsh" 2>&1)
+    [[ "$?" != "0" ]]; assert "go.zsh fails when the agent binary is missing" "$?"
+    assert_contains "go.zsh reports the missing binary" "$out" "no-such-claude is missing from this image"
 else
-    echo "  skip: go.sh tests (no zsh)"
+    echo "  skip: go.zsh tests (no zsh)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -2082,7 +2114,7 @@ mkdir -p "$tmp/work-parent/work-dir"
 out=$(PATH="$stub_docker:$PATH" "$code_it" --dry-run --work-dir "$tmp/work-parent/work-dir" --save-dir "$save")
 assert "dry-run with a nested work dir exit code" "$?"
 assert_contains "nested work dir mounts at /work/<parent>/<name>" "$out" "work-parent/work-dir:/work/work-parent/work-dir"
-assert_contains "nested work dir env tells go.sh where to cd" "$out" 'CODE_IT_WORK_DIR="/work/work-parent/work-dir"'
+assert_contains "nested work dir env tells go.zsh where to cd" "$out" 'CODE_IT_WORK_DIR="/work/work-parent/work-dir"'
 
 # ---------------------------------------------------------------------------
 echo "24. wslc, WSL's own container CLI, as a runtime"
