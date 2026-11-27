@@ -120,7 +120,8 @@ docker run -it --rm \
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
 | `--agent`, `-a` | `-agent`, `-a` | `opencode`, or the saved default agent (`code-it-defaults`) | Run the agent defined in `agents/NAME`, or one of its aliases: `agy` for `antigravity-cli`, `oc` for `opencode`; only its state is mounted |
-| `--list-agents` | `-listAgents` | - | List the available agents, with their shortcut flags and aliases, and exit |
+| `--list-agents` | `-listAgents` | - | List the agents in the default image and in the other code-it images, then those available to build, with their shortcut flags and aliases, and exit (`code-it-build --list-agents`) |
+| `--list-toolchains` | `-listToolchains` | - | The same for toolchains (`code-it-build --list-toolchains`) |
 | `--claude`, `-c` | `-claude`, `-c` | off | Shortcut for `--agent claude` |
 | `--opencode`, `-o` | `-opencode`, `-o` | on (default) | Shortcut for `--agent opencode` |
 | `--no-agent`, `--zsh` | `-noAgent`, `-zsh` | off | Run a plain interactive zsh in the container instead of a coding agent: no agent state is mounted and no login is needed. A prompt, `--headless`, or combining it with an agent selection is an error |
@@ -175,8 +176,8 @@ toolchains and package caches). They accept the same logical parameters:
 | `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none | Toolchains to build (aliases as above). With none, the container has no toolchain; `--interactive` detects host toolchains and asks which to include |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Package repos to support; an explicit empty list means none |
 | `--agent`, `--agents`, `-a LIST` | `-agent`, `-agents LIST` | `opencode,claude` for parameterized builds | Agents to install, by name or alias (`agy`, `oc`); interactive setup preselects detected agents |
-| `--list-agents` | `-listAgents` | - | List the available agents and exit |
-| `--list-toolchains` | `-listToolchains` | - | List the available toolchains and their aliases, then exit |
+| `--list-agents` | `-listAgents` | - | List the agents in the default image (the one `code-it` runs without `--toolchain` or `--image`) and in each other code-it image, then those available for a new build, and exit |
+| `--list-toolchains` | `-listToolchains` | - | The same for toolchains and their aliases |
 | `--list-package-caches` | `-listPackageCaches` | - | List the available package caches and exit |
 | `--rebuild` | `-rebuild` | off | Bump the Dockerfile's `# last changed` dates to today, to force the agent and toolchain install layers to refresh. |
 | `--locale`, `-l` | `-locale` | `like-host` | The image's locale (`LANG`). See [Locale](#locale) |
@@ -305,7 +306,9 @@ only the selected fragments into the Dockerfile, replacing the
 Unselected toolchains cost **nothing** in the assembled Dockerfile, which matters
 because Apple's `container` builder sends it in a gRPC header and fails above ~16 KB
 (`apple/container#735`): adding a toolchain does not grow every build.
-`code-it-build --list-toolchains` and `--list-package-caches` show what is defined.
+`code-it-build --list-toolchains` shows the toolchains in the default image and in
+each other code-it image, then those defined; `--list-package-caches` shows the
+package caches defined.
 
 The launchers expose them as two comma-separated lists:
 

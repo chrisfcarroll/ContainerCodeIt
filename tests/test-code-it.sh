@@ -137,7 +137,7 @@ chmod +x "$stub_darwin/uname"
 # where docker is installed.
 cleanbin="$tmp/cleanbin"
 mkdir -p "$cleanbin"
-for cmd in bash sh sed grep tr uname realpath dirname mkdir cat git touch echo; do
+for cmd in bash sh sed grep tr uname realpath dirname basename mkdir cat git touch echo; do
     src=$(command -v "$cmd" 2>/dev/null) && ln -s "$src" "$cleanbin/$cmd"
 done
 
@@ -703,6 +703,66 @@ assert_contains "code-it-build --list-toolchains shows the pwsh alias" "$out" "a
 out=$(PATH="$stub_docker:$PATH" "$build_it" --list-package-caches)
 assert "--list-package-caches exit code" "$?"
 assert_contains "code-it-build --list-package-caches lists nuget" "$out" "nuget"
+
+# --list-toolchains / --list-agents show the default image, then the other code-it
+# images, then what a new build can include
+inv_docker="$tmp/inv-docker"; mkdir -p "$inv_docker"
+cat > "$inv_docker/docker" <<'EOF'
+#!/bin/sh
+case "$1" in
+    images) printf 'code-it-alpine-rust:latest\ncode-it-alpine-dotnet-node:latest\nubuntu:24.04\ncode-it-alpine:latest\n' ;;
+    image)  [ "$2" = inspect ] || exit 0
+            for last; do :; done
+            case "$*" in
+                *code-it.toolchains*) case "$last" in
+                    code-it-alpine-rust:*) echo rust ;;
+                    code-it-alpine-dotnet-node:*) echo dotnet,node ;;
+                    code-it-alpine:*) echo ;;
+                esac ;;
+                *code-it.agents*) case "$last" in
+                    code-it-alpine-rust:*) echo opencode,claude ;;
+                    code-it-alpine-dotnet-node:*) echo opencode,claude,codex ;;
+                esac ;;
+                *) case "$last" in
+                    code-it-alpine-rust:*|code-it-alpine-dotnet-node:*|code-it-alpine:*) ;;
+                    *) exit 1 ;;
+                esac ;;
+            esac ;;
+esac
+EOF
+chmod +x "$inv_docker/docker"
+inv_save="$tmp/inv-save"; mkdir -p "$inv_save"
+out=$(PATH="$inv_docker:$PATH" "$build_it" --list-toolchains --save-dir "$inv_save" --runtime docker)
+assert "inventory --list-toolchains exit code" "$?"
+assert_contains "the newest code-it image is the default with no saved setup" "$out" $'Toolchains in the default image, code-it-alpine-rust:latest (docker):\n  rust\n'
+assert_contains "other code-it images are listed, aligned, with their toolchains" "$out" $'Toolchains in other code-it images:\n  code-it-alpine-dotnet-node:latest  dotnet, node\n  code-it-alpine:latest              none\n'
+[[ "$out" != *ubuntu* ]]; assert "images that are not code-it's are not listed" "$?"
+assert_contains "the toolchains for a new build come last" "$out" $'\n\nToolchains available for a new build (code-it-build --toolchain LIST):\n  bun '
+printf 'default-toolchain=node,dotnet\n' > "$inv_save/defaults"
+out=$(PATH="$inv_docker:$PATH" "$build_it" --list-toolchains --save-dir "$inv_save" --runtime docker)
+assert_contains "the saved default toolchain's image, or one containing it, is the default" "$out" "Toolchains in the default image, code-it-alpine-dotnet-node:latest (docker):"
+assert_contains "the newest image is then among the others" "$out" "  code-it-alpine-rust:latest  rust"
+rm -f "$inv_save/defaults"
+out=$(PATH="$inv_docker:$PATH" "$build_it" --list-agents --save-dir "$inv_save" --runtime docker)
+assert_contains "--list-agents shows the default image's agents" "$out" $'Agents in the default image, code-it-alpine-rust:latest (docker):\n  opencode, claude\n'
+assert_contains "--list-agents shows each other image's agents" "$out" "  code-it-alpine-dotnet-node:latest  opencode, claude, codex"
+assert_contains "an image with no agents label is unknown" "$out" "  code-it-alpine:latest              unknown (not labelled)"
+assert_contains "--list-agents ends with the agents for a new build" "$out" $'Agents available for a new build (code-it-build --agent LIST):\n  antigravity-cli  (aliases: agy)'
+out=$(PATH="$cleanbin" "$build_it" --list-toolchains --save-dir "$inv_save")
+assert "--list-toolchains with no runtime exit code" "$?"
+assert_contains "with no runtime, no images are listed" "$out" "No container runtime found, so no images are listed."
+assert_contains "with no runtime, the toolchains for a new build are still listed" "$out" "  dotnet"
+empty_docker="$tmp/empty-docker"; mkdir -p "$empty_docker"
+printf '#!/bin/sh\nexit 0\n' > "$empty_docker/docker"; chmod +x "$empty_docker/docker"
+out=$(PATH="$empty_docker:$PATH" "$build_it" --list-toolchains --save-dir "$inv_save" --runtime docker)
+assert_contains "with no code-it image there is no default yet" "$out" "Default image: none yet (docker). code-it-first-run sets one up."
+assert_contains "with no code-it image there are no others" "$out" "No other code-it images."
+# code-it hands its --list-toolchains / --list-agents to code-it-build
+out=$(PATH="$inv_docker:$PATH" "$code_it" --list-toolchains --save-dir "$inv_save" --runtime docker)
+assert "code-it --list-toolchains exit code" "$?"
+assert_contains "code-it --list-toolchains is code-it-build's inventory" "$out" "Toolchains in the default image, code-it-alpine-rust:latest (docker):"
+out=$(PATH="$inv_docker:$PATH" "$code_it" --list-agents --save-dir "$inv_save" -r docker)
+assert_contains "code-it --list-agents is code-it-build's inventory" "$out" "Agents in other code-it images:"
 PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent nosuch >/dev/null 2>&1
 [[ "$?" != "0" ]]; assert "code-it-build unknown agent fails" "$?"
 

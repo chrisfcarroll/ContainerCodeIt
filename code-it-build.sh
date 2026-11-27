@@ -27,8 +27,9 @@
 #   --agent, -a LIST         Comma-separated agents to install, by name or alias (agy,
 #                            oc). Default: opencode,claude. --agents is an alias. Interactive mode preselects detected
 #                            agents instead.
-#   --list-agents            List the available agents and exit.
-#   --list-toolchains        List the available toolchains (and their aliases) and exit.
+#   --list-agents            List the agents in the default image and in the other
+#                            code-it images, then those available to build, and exit.
+#   --list-toolchains        The same for toolchains (and their aliases).
 #   --list-package-caches    List the available package caches and exit.
 #   --rebuild                Bump the "# last changed" dates in the Dockerfile and the
 #                            selected fragments to today first, so those layers rerun
@@ -187,11 +188,11 @@ toolchains_dir="$dockerfile_dir/toolchains"
 package_caches_dir="$dockerfile_dir/package-caches"
 [[ -d "$package_caches_dir" ]] || package_caches_dir="$script_dir/package-caches"
 
-if [[ "$list_agents" == true ]]; then
-    ci_print_agents "$agents_dir"
-    exit 0
-fi
-if [[ "$list_toolchains" == true ]]; then
+# --list-agents / --list-toolchains: what the default image (the one code-it runs
+# given neither --toolchain nor --image) has, then each other code-it image, then
+# what a new build can include. Images are listed only if a runtime is found.
+print_toolchains_available() {
+    local name aliases
     while IFS= read -r name; do
         aliases=$(ci_agent_config "$toolchains_dir" "$name" TOOLCHAIN_ALIASES) || aliases=""
         if [[ -n "$aliases" ]]; then
@@ -200,6 +201,60 @@ if [[ "$list_toolchains" == true ]]; then
             printf '  %s\n' "$name"
         fi
     done < <(ci_list_definitions "$toolchains_dir")
+}
+# image_contents KIND IMAGE: IMAGE's toolchains or agents, comma-separated, or why not
+image_contents() {
+    local found
+    if [[ "$1" == toolchains ]]; then
+        found=$(ci_image_toolchain "$list_runtime" "$2")
+        printf '%s' "${found:-none}"
+    else
+        found=$(ci_image_agents "$list_runtime" "$2" "$agents_dir")
+        printf '%s' "${found:-unknown (not labelled)}"
+    fi
+}
+print_inventory() {
+    local kind="$1" what="$2" default_image="" image width=0 others=()
+    list_runtime="$runtime"
+    [[ -n "$list_runtime" ]] || list_runtime=$(ci_config_value "$save_dir/defaults" default-runtime) || list_runtime=""
+    [[ -n "$list_runtime" ]] || list_runtime=$(ci_detect_runtime "" 2>/dev/null) || list_runtime=""
+    if [[ -z "$list_runtime" ]]; then
+        echo "No container runtime found, so no images are listed."
+    else
+        default_image=$(ci_run_default_image "$list_runtime" "$save_dir" "$toolchains_dir")
+        [[ -z "$default_image" || "$default_image" == *:* ]] || default_image="$default_image:latest"
+        if [[ -n "$default_image" ]]; then
+            echo "$what in the default image, $default_image ($list_runtime):"
+            echo "  $(image_contents "$kind" "$default_image" | sed 's/,/, /g')"
+        else
+            echo "Default image: none yet ($list_runtime). code-it-first-run sets one up."
+        fi
+        while IFS= read -r image; do
+            [[ "$image" == code-it-* && "$image" != "$default_image" ]] || continue
+            others+=("$image")
+            (( ${#image} > width )) && width=${#image}
+        done < <(ci_image_list "$list_runtime")
+        echo
+        if (( ${#others[@]} == 0 )); then
+            echo "No other code-it images."
+        else
+            echo "$what in other code-it images:"
+            for image in "${others[@]}"; do
+                printf "  %-${width}s  %s\n" "$image" "$(image_contents "$kind" "$image" | sed 's/,/, /g')"
+            done
+        fi
+    fi
+    echo
+    echo "$what available for a new build (code-it-build --$3 LIST):"
+}
+if [[ "$list_agents" == true ]]; then
+    print_inventory agents Agents agent
+    ci_print_agents "$agents_dir"
+    exit 0
+fi
+if [[ "$list_toolchains" == true ]]; then
+    print_inventory toolchains Toolchains toolchain
+    print_toolchains_available
     exit 0
 fi
 if [[ "$list_package_caches" == true ]]; then

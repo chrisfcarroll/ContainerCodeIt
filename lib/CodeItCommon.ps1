@@ -10,6 +10,7 @@
         Select-CodeItKnownToolchain LABEL DIR  -> canonical array of the known chains only
         Resolve-CodeItPackageCaches RAW CHAINS TC_DIR PC_DIR -> array, or $null on error
         CodeIt-ImageName CHAINS                -> code-it-alpine-<chains>
+        Get-CodeItRunDefaultImage RUNTIME SAVEDIR TC_DIR -> the image Code-It runs by default
         Detect-CodeItRuntime REQUESTED         -> docker|container, or $null on error
         Bool-Arg BOOL                          -> 'true'|'false'
         Resolve-CodeItLocale RAW               -> e.g. en_GB.UTF-8, or $null on error
@@ -433,6 +434,25 @@ function Get-CodeItDefaultImage([string]$runtime, [string]$file) {
         }
     }
     return $existing[0]
+}
+
+# Get-CodeItRunDefaultImage RUNTIME SAVEDIR TC_DIR: the repo name of the image Code-It
+# runs given neither -toolchain nor -image, or "" if there is none yet: that of the
+# saved default toolchain (or the newest image containing it), else the remembered
+# image (Spec 09), else the most recent code-it image (Spec 10).
+function Get-CodeItRunDefaultImage([string]$runtime, [string]$saveDir, [string]$tcDir) {
+    $saved = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-toolchain'
+    if ($saved) {
+        $chains = Resolve-CodeItToolchain $saved $tcDir 3>$null
+        if (-not $chains -or $chains.Count -eq 0) { return "" }
+        $image = CodeIt-ImageName $chains
+        if (Test-CodeItImageExists $runtime "$image`:latest") { return $image }
+        return (Find-CodeItSupersetImage $runtime $chains)
+    }
+    $history = Join-Path $saveDir 'image-history'
+    $image = Get-CodeItHistoryImage $runtime $history $tcDir
+    if (-not $image) { $image = Get-CodeItDefaultImage $runtime $history }
+    return $image
 }
 
 # Get-CodeItToolchainCommands DIR NAME: the host commands that reveal NAME is

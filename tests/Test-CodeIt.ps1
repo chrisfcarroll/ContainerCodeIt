@@ -632,6 +632,99 @@ Assert-Contains "Code-It-Build -listToolchains shows the pwsh alias" $r.out 'ali
 $r = Invoke-ScenarioCommand "& '$codeItBuild' -listPackageCaches" $stubPath
 Assert-Contains "Code-It-Build -listPackageCaches lists nuget" $r.out 'nuget'
 
+# -listToolchains / -listAgents show the default image, then the other code-it images,
+# then what a new build can include
+$invDocker = Join-Path $tmp 'inv-docker'; $null = New-Item -ItemType Directory -Force -Path $invDocker
+if ($onWindows) {
+    Set-Content -Path (Join-Path $invDocker 'docker.cmd') -Value @'
+@echo off
+setlocal
+if "%~1"=="images" (
+    echo code-it-alpine-rust:latest
+    echo code-it-alpine-dotnet-node:latest
+    echo ubuntu:24.04
+    echo code-it-alpine:latest
+    exit /b 0
+)
+if not "%~1"=="image" exit /b 0
+set "LAST="
+for %%a in (%*) do set "LAST=%%~a"
+set "KIND=exists"
+echo.%*| findstr /c:"code-it.toolchains" >nul && set "KIND=toolchains"
+echo.%*| findstr /c:"code-it.agents" >nul && set "KIND=agents"
+if "%KIND%"=="toolchains" (
+    if "%LAST%"=="code-it-alpine-rust:latest" echo rust
+    if "%LAST%"=="code-it-alpine-dotnet-node:latest" echo dotnet,node
+    exit /b 0
+)
+if "%KIND%"=="agents" (
+    if "%LAST%"=="code-it-alpine-rust:latest" echo opencode,claude
+    if "%LAST%"=="code-it-alpine-dotnet-node:latest" echo opencode,claude,codex
+    exit /b 0
+)
+if "%LAST%"=="code-it-alpine-rust:latest" exit /b 0
+if "%LAST%"=="code-it-alpine-dotnet-node:latest" exit /b 0
+if "%LAST%"=="code-it-alpine:latest" exit /b 0
+exit /b 1
+'@
+} else {
+    Set-Content -Path (Join-Path $invDocker 'docker') -Value @'
+#!/bin/sh
+case "$1" in
+    images) printf 'code-it-alpine-rust:latest\ncode-it-alpine-dotnet-node:latest\nubuntu:24.04\ncode-it-alpine:latest\n' ;;
+    image)  [ "$2" = inspect ] || exit 0
+            for last; do :; done
+            case "$*" in
+                *code-it.toolchains*) case "$last" in
+                    code-it-alpine-rust:*) echo rust ;;
+                    code-it-alpine-dotnet-node:*) echo dotnet,node ;;
+                    code-it-alpine:*) echo ;;
+                esac ;;
+                *code-it.agents*) case "$last" in
+                    code-it-alpine-rust:*) echo opencode,claude ;;
+                    code-it-alpine-dotnet-node:*) echo opencode,claude,codex ;;
+                esac ;;
+                *) case "$last" in
+                    code-it-alpine-rust:*|code-it-alpine-dotnet-node:*|code-it-alpine:*) ;;
+                    *) exit 1 ;;
+                esac ;;
+            esac ;;
+esac
+'@
+    chmod +x (Join-Path $invDocker 'docker')
+}
+$invPath = "$invDocker$sep$origPath"
+$invSave = Join-Path $tmp 'inv-save'; $null = New-Item -ItemType Directory -Force -Path $invSave
+$invArgs = @('-saveDir', $invSave, '-runtime', 'docker')
+$r = Invoke-Scenario $codeItBuild (@('-listToolchains') + $invArgs) $invPath
+Assert "inventory -listToolchains exit code 0" ($r.code -eq 0)
+Assert-Contains "the newest code-it image is the default with no saved setup" $r.out 'Toolchains in the default image, code-it-alpine-rust:latest (docker):'
+Assert-Contains "other code-it images are listed, aligned, with their toolchains" $r.out '  code-it-alpine-dotnet-node:latest  dotnet, node'
+Assert-Contains "an image with no toolchains shows none" $r.out '  code-it-alpine:latest              none'
+Assert "images that are not code-it's are not listed" (-not $r.out.Contains('ubuntu'))
+Assert-Contains "the toolchains for a new build come last" $r.out 'Toolchains available for a new build (Code-It-Build.ps1 -toolchain LIST):'
+Set-Content -Path (Join-Path $invSave 'defaults') -Value 'default-toolchain=node,dotnet'
+$r = Invoke-Scenario $codeItBuild (@('-listToolchains') + $invArgs) $invPath
+Assert-Contains "the saved default toolchain's image, or one containing it, is the default" $r.out 'Toolchains in the default image, code-it-alpine-dotnet-node:latest (docker):'
+Assert-Contains "the newest image is then among the others" $r.out '  code-it-alpine-rust:latest  rust'
+Remove-Item -Force (Join-Path $invSave 'defaults')
+$r = Invoke-Scenario $codeItBuild (@('-listAgents') + $invArgs) $invPath
+Assert-Contains "-listAgents shows the default image" $r.out 'Agents in the default image, code-it-alpine-rust:latest (docker):'
+Assert-Contains "-listAgents shows the default image's agents" $r.out '  opencode, claude'
+Assert-Contains "-listAgents shows each other image's agents" $r.out '  code-it-alpine-dotnet-node:latest  opencode, claude, codex'
+Assert-Contains "an image with no agents label is unknown" $r.out '  code-it-alpine:latest              unknown (not labelled)'
+Assert-Contains "-listAgents ends with the agents for a new build" $r.out 'antigravity-cli  (aliases: agy)'
+$r = Invoke-Scenario $codeItBuild @('-listToolchains', '-saveDir', $invSave) $cleanBin
+Assert "-listToolchains with no runtime exit code 0" ($r.code -eq 0)
+Assert-Contains "with no runtime, no images are listed" $r.out 'No container runtime found, so no images are listed.'
+Assert-Contains "with no runtime, the toolchains for a new build are still listed" $r.out '  dotnet'
+# Code-It hands its -listToolchains / -listAgents to Code-It-Build.ps1
+$r = Invoke-Scenario $codeIt (@('-listToolchains') + $invArgs) $invPath
+Assert "Code-It -listToolchains exit code 0" ($r.code -eq 0)
+Assert-Contains "Code-It -listToolchains is Code-It-Build's inventory" $r.out 'Toolchains in the default image, code-it-alpine-rust:latest (docker):'
+$r = Invoke-Scenario $codeIt (@('-listAgents') + $invArgs) $invPath
+Assert-Contains "Code-It -listAgents is Code-It-Build's inventory" $r.out 'Agents in other code-it images:'
+
 # Unknown names are hard errors
 $r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', 'cobol') $stubPath
 Assert "Code-It-Build unknown toolchain fails" ($r.code -ne 0)

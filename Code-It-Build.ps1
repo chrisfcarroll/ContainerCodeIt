@@ -36,10 +36,11 @@
     Interactive setup preselects detected agents. Alias: -agents
 
 .PARAMETER listAgents
-    List the available agents and exit.
+    List the agents in the default image and in the other code-it images, then
+    those available to build, and exit.
 
 .PARAMETER listToolchains
-    List the available toolchains (and their aliases) and exit.
+    The same for toolchains (and their aliases).
 
 .PARAMETER listPackageCaches
     List the available package caches and exit.
@@ -133,11 +134,54 @@ if (-not (Test-Path -Path $toolchainsDir -PathType Container)) { $toolchainsDir 
 $packageCachesDir = Join-Path $dockerfileDir 'package-caches'
 if (-not (Test-Path -Path $packageCachesDir -PathType Container)) { $packageCachesDir = Join-Path $PSScriptRoot 'package-caches' }
 
+# -listAgents / -listToolchains: what the default image (the one Code-It runs given
+# neither -toolchain nor -image) has, then each other code-it image, then what a new
+# build can include. Images are listed only if a runtime is found.
+function Get-ImageContents([string]$kind, [string]$listRuntime, [string]$img) {
+    if ($kind -eq 'toolchains') {
+        $found = Get-CodeItImageToolchain $listRuntime $img
+        if ($found) { return ($found -replace ',', ', ') } else { return 'none' }
+    }
+    $found = Get-CodeItImageAgents $listRuntime $img $agentsDir
+    if ($found) { return ($found -replace ',', ', ') } else { return 'unknown (not labelled)' }
+}
+function Write-Inventory([string]$kind, [string]$what, [string]$option) {
+    $listRuntime = $runtime
+    if (-not $listRuntime) { $listRuntime = Get-CodeItDefault (Join-Path $saveDir 'defaults') 'default-runtime' }
+    if (-not $listRuntime) { $listRuntime = Detect-CodeItRuntime '' 3>$null 6>$null }
+    if (-not $listRuntime) {
+        'No container runtime found, so no images are listed.'
+    } else {
+        $defaultImage = Get-CodeItRunDefaultImage $listRuntime $saveDir $toolchainsDir
+        if ($defaultImage -and $defaultImage -notmatch ':') { $defaultImage = "$defaultImage`:latest" }
+        if ($defaultImage) {
+            "$what in the default image, $defaultImage ($listRuntime):"
+            "  $(Get-ImageContents $kind $listRuntime $defaultImage)"
+        } else {
+            "Default image: none yet ($listRuntime). Code-It-FirstRun sets one up."
+        }
+        $others = @(Get-CodeItImageList $listRuntime | Where-Object { $_ -like 'code-it-*' -and $_ -ne $defaultImage })
+        ''
+        if ($others.Count -eq 0) {
+            'No other code-it images.'
+        } else {
+            "$what in other code-it images:"
+            $width = ($others | Measure-Object -Property Length -Maximum).Maximum
+            foreach ($img in $others) {
+                "  {0}  {1}" -f $img.PadRight($width), (Get-ImageContents $kind $listRuntime $img)
+            }
+        }
+    }
+    ''
+    "$what available for a new build (Code-It-Build.ps1 -$option LIST):"
+}
 if ($listAgents) {
+    Write-Inventory 'agents' 'Agents' 'agent'
     Get-CodeItPrintAgents $agentsDir
     exit 0
 }
 if ($listToolchains) {
+    Write-Inventory 'toolchains' 'Toolchains' 'toolchain'
     foreach ($name in (Get-CodeItListToolchains $toolchainsDir)) {
         $aliases = Get-CodeItAgentConfig $toolchainsDir $name 'TOOLCHAIN_ALIASES'
         if ($aliases) { "  {0,-12} (aliases: {1})" -f $name, ($aliases -replace ' ', ', ') } else { "  $name" }

@@ -35,7 +35,9 @@
 #                            no agent state is mounted and no login is needed. A
 #                            prompt or --headless would have no agent to run it,
 #                            and is an error.
-#   --list-agents            List the available agents and exit.
+#   --list-agents            List the agents in the default image and in the other
+#                            code-it images, then those available to build, and exit.
+#   --list-toolchains        The same for toolchains. Both are code-it-build's.
 #   --prompt, -p TEXT        Open the agent with TEXT as its first prompt. A single bare
 #                            argument means the same thing, so these are equivalent:
 #                              ./code-it.sh -c --prompt "explain this repo"
@@ -278,6 +280,7 @@ headless=false
 no_wait=false
 agent_args=()
 list_agents=false
+list_toolchains=false
 # --env, --env-file and --run-arg, in command-line order, as container run arguments
 cli_run_args=()
 
@@ -313,6 +316,10 @@ while [[ $# -gt 0 ]]; do
             code_agent="$2"
             agent_explicit=true
             shift 2
+            ;;
+        --list-toolchains)
+            list_toolchains=true
+            shift
             ;;
         --list-agents)
             list_agents=true
@@ -452,10 +459,13 @@ if [[ "$no_wait" == true && ( "$headless" == true || "$no_agent" == true ) ]]; t
     exit 1
 fi
 
-# --list-agents lists the available agent definitions and exits.
-if [[ "$list_agents" == true ]]; then
-    ci_print_agents "$agents_dir"
-    exit 0
+# --list-agents / --list-toolchains are code-it-build's, which knows the images
+if [[ "$list_agents" == true || "$list_toolchains" == true ]]; then
+    list_args=(--save-dir "$save_dir")
+    [[ -n "$runtime" ]] && list_args+=(--runtime "$runtime")
+    [[ "$list_agents" == true ]] && list_args+=(--list-agents)
+    [[ "$list_toolchains" == true ]] && list_args+=(--list-toolchains)
+    exec "${CODE_IT_BUILD:-$script_dir/code-it-build.sh}" "${list_args[@]}"
 fi
 
 # Defaults saved by code-it-defaults (Spec 15) fill in whatever the command line

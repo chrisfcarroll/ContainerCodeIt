@@ -54,7 +54,11 @@
     Alias: -a
 
 .PARAMETER listAgents
-    List the available agents and exit.
+    List the agents in the default image and in the other code-it images, then
+    those available to build, and exit.
+
+.PARAMETER listToolchains
+    The same for toolchains. Both are Code-It-Build.ps1's.
 
 .PARAMETER opencode
     Shortcut for -agent opencode (the default). Alias: -o
@@ -254,6 +258,7 @@ param (
     [Alias('a')]
     [string]$agent          = "",
     [switch]$listAgents     = $false,
+    [switch]$listToolchains = $false,
     [string]$saveDir        = "$HOME/.config/code-it",
     [string]$image          = "",
     [ArgumentCompleter({ param($c, $p, $wordToComplete) @('docker', 'container', 'wslc') | Where-Object { $_ -like "$wordToComplete*" } })]
@@ -293,10 +298,13 @@ $agentsDir = Join-Path $PSScriptRoot 'agents'
 $toolchainsDir = Join-Path $PSScriptRoot 'toolchains'
 $packageCachesDir = Join-Path $PSScriptRoot 'package-caches'
 
-# -listAgents lists the available agent definitions and exits.
-if ($listAgents) {
-    Get-CodeItPrintAgents $agentsDir
-    exit 0
+# -listAgents / -listToolchains are Code-It-Build.ps1's, which knows the images
+if ($listAgents -or $listToolchains) {
+    $build = if ($env:CODE_IT_BUILD) { $env:CODE_IT_BUILD } else { Join-Path $PSScriptRoot 'Code-It-Build.ps1' }
+    $listArgs = @{ saveDir = $saveDir; listAgents = [bool]$listAgents; listToolchains = [bool]$listToolchains }
+    if ($runtime) { $listArgs.runtime = $runtime }
+    & $build @listArgs
+    exit $LASTEXITCODE
 }
 
 # Resolve which agent to run: -c / -o are shortcuts, else -agent NAME, else the agent

@@ -13,6 +13,7 @@
 #   ci_known_toolchain LABEL DIR                      -> the known chains only, space-separated
 #   ci_resolve_package_caches RAW TOOLCHAINS TC_DIR PC_DIR -> space-separated list
 #   ci_default_image_name TOOLCHAINS                 -> code-it-alpine-<chains>
+#   ci_run_default_image RUNTIME SAVE_DIR TC_DIR      -> the image code-it runs by default
 #   ci_has LIST ITEM                                  return 0 if ITEM is in LIST
 #   ci_agent_state_mkdir_paths AGENTS_DIR AGENTS      home paths to pre-create for mounts
 #   ci_detect_runtime REQUESTED                       -> docker|container|wslc, or return 1
@@ -429,6 +430,27 @@ ci_choose_default_image() {
     fi
     printf '%s' "${existing[0]}"
     return 0
+}
+
+# ci_run_default_image RUNTIME SAVE_DIR TOOLCHAINS_DIR: echo the repo name of the image
+# code-it runs given neither --toolchain nor --image, or nothing if there is none
+# yet: that of the saved default toolchain (or the newest image containing it),
+# else the remembered image (Spec 09), else the most recent code-it image (Spec 10).
+ci_run_default_image() {
+    local runtime="$1" save_dir="$2" tc_dir="$3" saved chains image=""
+    saved=$(ci_config_value "$save_dir/defaults" default-toolchain) || saved=""
+    if [[ -n "$saved" ]]; then
+        chains=$(ci_resolve_toolchain "$saved" "$tc_dir" 2>/dev/null) || chains=""
+        [[ -n "$chains" ]] || return 0
+        image=$(ci_default_image_name "$chains")
+        ci_image_exists "$runtime" "$image:latest" \
+            || image=$(ci_find_superset_image "$runtime" "$chains") || image=""
+        printf '%s' "$image"
+        return 0
+    fi
+    image=$(ci_history_choose_image "$runtime" "$save_dir/image-history" "$tc_dir") || image=""
+    [[ -n "$image" ]] || image=$(ci_choose_default_image "$runtime" "$save_dir/image-history") || image=""
+    printf '%s' "$image"
 }
 
 # ci_config_value FILE KEY: the (unquoted) value of KEY in a KEY=value FILE, or
