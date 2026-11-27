@@ -567,6 +567,40 @@ options and the link to the source of the data.
 
 ## Rough Edges
 
+### I can't Copy and Paste
+
+The agent runs inside tmux in the container, with `mouse on`, so tmux takes the mouse
+from your terminal. A drag selects in tmux, not in your terminal, and tmux sends the
+selection to your clipboard as an OSC 52 escape sequence when you let go. If your
+terminal ignores OSC 52, the selection vanishes and nothing is copied. Pasting is
+just typing, so ⌘V, Ctrl-Shift-V or a right-click paste normally works; it is copying
+that goes wrong. See [Copying to the clipboard](#copying-to-the-clipboard) for the
+whole path, and run `code-it-doctor` to check yours.
+
+- **macOS Terminal.app** does not support OSC 52 at all. To copy, turn **View > Allow
+  Mouse Reporting** (⌘R) off, drag to select, ⌘C, then turn Allow Mouse Reporting on
+  again, so that tmux and the agent get the mouse back for scrolling and clicking.
+- **iTerm2** ignores OSC 52 until you allow it in Settings > General > Selection.
+  Holding ⌥ while you drag selects in iTerm2 itself, bypassing tmux.
+- **Windows**: Windows Terminal and the VS Code terminal accept OSC 52. The old console
+  window (conhost) and mintty (Git Bash, unless `AllowSetSelection=yes`) do not; in those,
+  Shift-drag selects in the terminal itself.
+- **Linux**: most terminals accept OSC 52, and Shift-drag selects in the terminal itself.
+  Over ssh, the copy lands on the clipboard of the machine whose terminal you are looking
+  at, which is usually what you want.
+- **tmux or screen on the host**: a host tmux drops OSC 52 unless it has
+  `set -s set-clipboard on`; screen drops it.
+- **A selection is cut at the edge of the pane**, and a wrapped line copies as several
+  lines. Use the agent's own copy (Claude Code's `/copy`) for long answers.
+- **Pasting images** does not work: the agent looks for an image on a clipboard it
+  cannot reach from the container. Save the image into the work dir and give the agent
+  its path.
+- To keep the mouse in your terminal for the whole session, `Ctrl-B :set mouse off` in
+  the container. Your terminal then selects and copies as usual, but the mouse wheel
+  no longer scrolls the agent's history.
+
+### Other Rough Edges
+
 - Tested mostly on MacOs and Win11.
 - To update the agent harnesses you must rebuild the image (`code-it-build --toolchain <chains> --rebuild` / `Code-It-Build.ps1 -toolchain <chains> -rebuild`)
 - Putting .sh on the bash scripts is surely a dubious design choice.
@@ -598,7 +632,7 @@ With neither, they choose a container runtime automatically:
 
 1. On **macOS**, they use the **Apple container CLI** (`container`) if installed
 2. Otherwise they use **Docker** if installed
-3. Otherwise, on **Windows**, they use WSL's own container CLI (`wslc`) if installed
+3. Otherwise, on **Windows**, they use WSL Containers if installed
 4. Otherwise they exit with a suggestion for the best runtime to install on your platform
 
 Or specify `--runtime docker`, `--runtime container` (macOS) or `--runtime wslc`
