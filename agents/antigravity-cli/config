@@ -20,9 +20,11 @@ AGENT_PERMISSIONS='.gemini/antigravity-cli/settings.json:toolPermission=always-p
 # transcripts), and the shared configuration (skills, workflows, MCP servers)
 AGENT_STATE_DIRS='.gemini/antigravity-cli:.gemini/antigravity:.gemini/config'
 AGENT_STATE_FILES=''
-# Several containers get on fine: the state is plain files (no database), and the
-# login lives in the OS keyring, which a container does not have — headless use
-# there is via GEMINI_API_KEY with the modelProvider the default-config sets.
+# Several containers get on fine: the state is plain files (no database). With no
+# OS keyring (no D-Bus) agy keeps its Google login in files, so sign in by pasting
+# the code its login URL gives you. For a Gemini API key instead, pass
+# --env GEMINI_API_KEY -- --settings '{"modelProvider":"gemini"}': agy refuses to
+# start with that modelProvider and no key, so the default-config leaves it unset.
 # Prompt translation: {args} is the agent arguments, {prompt} the opening prompt.
 # The prompt always ends the command line: Go's flag parsing stops at it, so agent
 # flags must come first. -i runs an initial prompt interactively; -p (--print) runs

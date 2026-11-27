@@ -294,7 +294,7 @@ done
 assert_contains "the agy snippet verifies its download" "$agy_snippet" 'sha512sum -c -'
 assert_contains "the agy snippet installs agy onto the XS PATH" "$agy_snippet" 'mv /tmp/antigravity ~/.local/bin/agy'
 assert_not_contains "the agy snippet runs as the Agents section's agent1" "$agy_snippet" 'USER '
-assert_contains "the agy snippet says how to skip its permission prompts" "$agy_snippet" '--agent agy -D:-e -D:GEMINI_API_KEY -- --dangerously-skip-permissions'
+assert_contains "the agy snippet says how to skip its permission prompts" "$agy_snippet" '--agent agy -- --dangerously-skip-permissions'
 for f in "$snippets"/*.dockerfile; do
     [[ "$f" == */ca-certificates.dockerfile ]] && continue
     grep -q '# last changed [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}' "$f"

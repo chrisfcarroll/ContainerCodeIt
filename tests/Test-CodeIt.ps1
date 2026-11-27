@@ -402,7 +402,7 @@ Assert-Contains "-agent antigravity-cli selects antigravity-cli" $r.out 'CODE_AG
 Assert-Contains "reports Antigravity CLI settings creation" $r.out 'Created Antigravity CLI settings'
 $agySettings = Get-Content "$save/.gemini/antigravity-cli/settings.json" -Raw | ConvertFrom-Json
 Assert "Antigravity CLI config works free of permissions interruption" ($agySettings.toolPermission -eq 'always-proceed')
-Assert "Antigravity CLI default config keeps its API-key provider" ($agySettings.modelProvider -eq 'gemini')
+Assert "Antigravity CLI default config leaves Google login usable without an API key" (-not $agySettings.PSObject.Properties['modelProvider'])
 Assert-Contains "antigravity-cli mounts its CLI state" $r.out "$save/.gemini/antigravity-cli:/home/agent1/.gemini/antigravity-cli"
 Assert-Contains "antigravity-cli mounts the shared harness state" $r.out "$save/.gemini/antigravity:/home/agent1/.gemini/antigravity"
 Assert-Contains "antigravity-cli mounts the shared config" $r.out "$save/.gemini/config:/home/agent1/.gemini/config"

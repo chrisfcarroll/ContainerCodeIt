@@ -83,9 +83,8 @@ then run with `--build`. A new agent also needs a line in the scripts saying whi
 of its state directories to mount; `codex` and `agy` already have one.
 
 Each agent snippet says, in its comments, how to run that agent without permission
-prompts: the container is the sandbox. Antigravity CLI has no login in a container
-(it keeps its login in the OS keyring), so its snippet also says how to use a Gemini
-API key instead.
+prompts: the container is the sandbox. Antigravity CLI's snippet also says how to use
+a Gemini API key instead of a Google login.
 
 For a TLS-intercepting proxy, paste `snippets/ca-certificates.dockerfile` immediately
 after `FROM`. Put the CA certificate files in the repository's top-level

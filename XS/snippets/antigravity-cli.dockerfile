@@ -2,10 +2,11 @@
 # Dockerfile at "--- Agents", which runs as agent1, then rebuild with code-it --build.
 # The download is pinned and checked against the SHA-512 in Google's release manifest,
 # as the official installer (https://antigravity.google/cli/install.sh) checks it.
-# Its login lives in the OS keyring, which a container does not have, so use a Gemini
-# API key: put {"modelProvider": "gemini"} in the save dir's
-# .gemini/antigravity-cli/settings.json, then run it with:
-#   code-it --agent agy -D:-e -D:GEMINI_API_KEY -- --dangerously-skip-permissions
+# With no OS keyring in a container it keeps its Google login in files: sign in by
+# pasting the code its login URL gives you. Run it without permission prompts with:
+#   code-it --agent agy -- --dangerously-skip-permissions
+# For a Gemini API key instead, add -D:-e -D:GEMINI_API_KEY and, after the --,
+# --settings '{"modelProvider":"gemini"}' (agy will not start with it and no key).
 RUN case "$(uname -m)" in \
         x86_64)  url="https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.18-6386224290725888/linux-x64-musl/cli_linux_x64_musl.tar.gz" \
                  sha=938cc71c609ecaaa53588db9ebe93720591ed977f8d3c9e862a302c266ff0068dc1992722aac01fe5b45ce23f772265980e6df2b193048b93bbd947a433bae2b ;; \

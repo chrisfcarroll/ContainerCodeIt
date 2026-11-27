@@ -382,9 +382,8 @@ We try to not make you log in again. Each agent's definition says which of its
 directories this applies to, in `AGENT_EXCLUSIVE_DIRS` (below).
 
 Multiple Claude agents get on fine, and multiple Antigravity CLI agents too: their
-state is plain files (the Antigravity CLI's login lives in the OS keyring, which a
-container does not have, so in there it authenticates with `GEMINI_API_KEY` and the
-`modelProvider` its default-config sets).
+state is plain files (with no OS keyring in the container, the Antigravity CLI
+keeps its Google login in files under its save dir).
 
 ### Agent definitions
 
@@ -624,7 +623,9 @@ The launcher scripts keep the chosen agent's state under one save dir (default `
 | `/home/agent1/.bun-host` | **Read-only.** Host Bun cache, if `bun` is enabled and a cache is found; seeded into `~/.bun/install/cache` at startup |
 
 Alternatively, pass `--env ANTHROPIC_API_KEY` (claude), a provider API key env var
-(opencode), or `--env GEMINI_API_KEY` (antigravity-cli) instead of mounting state.
+(opencode), or `--env GEMINI_API_KEY -- --settings '{"modelProvider":"gemini"}'`
+(antigravity-cli: agy uses the key only with that `modelProvider`, and refuses to start
+with it and no key) instead of mounting state.
 
 # Isolating your agent from upstream origin repos.
 

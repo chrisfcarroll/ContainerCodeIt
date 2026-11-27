@@ -273,8 +273,8 @@ assert_contains "--agent antigravity-cli selects antigravity-cli" "$out" 'CODE_A
 assert_contains "reports Antigravity CLI settings creation" "$out" "Created Antigravity CLI settings"
 tr -d '[:space:]' < "$save/.gemini/antigravity-cli/settings.json" | grep -q '"toolPermission":"always-proceed"'
 assert "Antigravity CLI config works free of permissions interruption" "$?"
-tr -d '[:space:]' < "$save/.gemini/antigravity-cli/settings.json" | grep -q '"modelProvider":"gemini"'
-assert "Antigravity CLI default config keeps its API-key provider" "$?"
+! grep -q 'modelProvider' "$save/.gemini/antigravity-cli/settings.json"
+assert "Antigravity CLI default config leaves Google login usable without an API key" "$?"
 assert_contains "antigravity-cli mounts its CLI state" "$out" "$save/.gemini/antigravity-cli:/home/agent1/.gemini/antigravity-cli"
 assert_contains "antigravity-cli mounts the shared harness state" "$out" "$save/.gemini/antigravity:/home/agent1/.gemini/antigravity"
 assert_contains "antigravity-cli mounts the shared config" "$out" "$save/.gemini/config:/home/agent1/.gemini/config"
