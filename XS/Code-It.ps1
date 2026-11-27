@@ -139,6 +139,16 @@ if (-not $dryRun) {
     }
 }
 
+# Get-XSPhysicalPath DIR: DIR named by its physical path, with every symlink on
+# it resolved, as pwd -P does. Apple's container builder before 1.5.0 sends a
+# COPY'd directory empty when the context path runs through a symlink, as macOS's
+# /var/folders does (/var is /private/var). Windows has no such temp folder.
+function Get-XSPhysicalPath([string]$dir) {
+    if (-not ($IsMacOS -or $IsLinux)) { return $dir }
+    Push-Location -LiteralPath $dir
+    try { return (& /bin/pwd -P) } finally { Pop-Location }
+}
+
 # Invoke-Run COMMAND...: print it, then run it unless -dryRun
 function Invoke-Run {
     '    ' + (($args | ForEach-Object { if ($_ -match '[\s"''$]') { "'$($_ -replace "'", "''")'" } else { $_ } }) -join ' ')
@@ -154,6 +164,7 @@ if ($build -or $LASTEXITCODE -ne 0) {
     # inputs while keeping unrelated repository files out of the build context.
     $buildContext = Join-Path ([IO.Path]::GetTempPath()) ("code-it-xs-build-" + [Guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Force -Path $buildContext
+    $buildContext = Get-XSPhysicalPath $buildContext
     try {
         Get-ChildItem -LiteralPath $PSScriptRoot -Force | Copy-Item -Destination $buildContext -Recurse -Force
         $caContext = Join-Path $buildContext 'ca-certificates'

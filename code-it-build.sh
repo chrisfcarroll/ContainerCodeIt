@@ -471,8 +471,12 @@ require_marker() {
 [[ -n "$enabled_package_caches" ]] && require_marker "$package_cache_marker" "package caches"
 require_marker "$agents_begin" "agents"
 
+# Apple's container builder before 1.5.0 sends a COPY'd directory empty when the
+# context path runs through a symlink, as macOS's /var/folders does (/var is
+# /private/var), so the context is named by its physical path.
 build_context=$(mktemp -d)
 trap 'rm -rf "$build_context"' EXIT
+build_context=$(cd "$build_context" && pwd -P)
 in_agents=false
 while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in

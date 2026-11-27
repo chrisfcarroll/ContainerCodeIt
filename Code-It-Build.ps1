@@ -418,6 +418,7 @@ $assembled = Remove-CodeItDockerfileComments $assembled
 
 $buildContext = Join-Path ([IO.Path]::GetTempPath()) ("code-it-build-" + [Guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Force -Path $buildContext
+$buildContext = Get-CodeItPhysicalPath $buildContext
 [IO.File]::WriteAllText((Join-Path $buildContext 'Dockerfile'), $assembled, [System.Text.UTF8Encoding]::new($false))
 # Extra CA certificates (ca-certificates/ next to the Dockerfile) go into the
 # context, so a corporate TLS proxy's CA is trusted from the first apk fetch. The

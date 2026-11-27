@@ -63,6 +63,7 @@ if [ "\$1" = build ]; then
   [ -f "\$context/Dockerfile" ] && echo STUB_HAS_DOCKERFILE
   [ -f "\$context/snippets/ca-certificates.dockerfile" ] && echo STUB_HAS_XS_FILES
   [ -f "\$context/ca-certificates/README.md" ] && echo STUB_HAS_TOP_LEVEL_CA_README
+  [ "\$(cd "\$context" && pwd -P)" = "\$context" ] && echo STUB_CONTEXT_PHYSICAL
 fi
 printf 'STUB-$rt'; printf ' [%s]' "\$@"; echo
 EOF
@@ -223,6 +224,12 @@ assert_contains "a missing image is built from the staged XS context" "$out" "[b
 assert_contains "the staged XS context contains its Dockerfile" "$out" "STUB_HAS_DOCKERFILE"
 assert_contains "the staged XS context preserves the XS files" "$out" "STUB_HAS_XS_FILES"
 assert_contains "the staged XS context includes the top-level CA folder" "$out" "STUB_HAS_TOP_LEVEL_CA_README"
+# Named by its physical path even when TMPDIR runs through a symlink, as macOS's
+# /var/folders does: Apple's container builder before 1.5.0 sends a COPY'd
+# directory empty otherwise.
+mkdir -p "$tmp/real-tmp" && ln -sfn "$tmp/real-tmp" "$tmp/link-tmp"
+out=$(STUB_NO_IMAGE=1 TMPDIR="$tmp/link-tmp" run_xs)
+assert_contains "the staged XS context is named by its physical path" "$out" "STUB_CONTEXT_PHYSICAL"
 out=$(run_xs -b -i my-image)
 assert_contains "--build rebuilds, with --image's name" "$out" "[build] [-t] [my-image]"
 assert_contains "--image is run" "$out" "[my-image]"

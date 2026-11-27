@@ -23,6 +23,7 @@
         Get-CodeItPowerShellExe                -> the running pwsh or powershell.exe
         Get-CodeItImageLabel RUNTIME IMAGE LABEL -> the image's LABEL, trimmed
         ConvertTo-CodeItNativeArgs ARGS        -> ARGS escaped for a native command
+        Get-CodeItPhysicalPath DIR             -> DIR with its symlinks resolved (pwd -P)
 
     Toolchains, package caches and agents are data: each is a directory with a config
     and an install fragment. Known names come from the directory listing; aliases and
@@ -380,6 +381,16 @@ function Get-CodeItHistoryImage([string]$runtime, [string]$file, [string]$tcDir)
         }
     }
     return ""
+}
+
+# Get-CodeItPhysicalPath DIR: DIR named by its physical path, with every symlink on
+# it resolved, as pwd -P does. Apple's container builder before 1.5.0 sends a
+# COPY'd directory empty when the context path runs through a symlink, as macOS's
+# /var/folders does (/var is /private/var). Windows has no such temp folder.
+function Get-CodeItPhysicalPath([string]$dir) {
+    if (-not ($IsMacOS -or $IsLinux)) { return $dir }
+    Push-Location -LiteralPath $dir
+    try { return (& /bin/pwd -P) } finally { Pop-Location }
 }
 
 # Remove-CodeItDockerfileComments TEXT: drop Dockerfile-level comment and blank lines,

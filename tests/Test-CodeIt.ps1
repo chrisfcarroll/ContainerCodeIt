@@ -276,6 +276,7 @@ case "$1" in
         for a in "$@"; do last="$a"; done
         cp "$last/Dockerfile" "$CAPTURE"
         ls "$last/ca-certificates" > "$CAPTURE.ca" 2>&1
+        echo "$last" > "$CAPTURE.ctx"
         echo "STUB-DOCKER-BUILD $*" ;;
     images) echo "code-it-alpine-dotnet-node:latest" ;;
     image)  echo dotnet,node ;;
@@ -766,6 +767,22 @@ Remove-Item $caCapture -Force -EA Silent
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $bDfDir, '-runtime', 'docker') $capturePath
 Assert "Code-It-Build without ca-certificates/ gives the context an empty one" ((Test-Path $caCapture) -and -not ([IO.File]::ReadAllText($caCapture).Trim()))
 Assert-Contains "Code-It-Build says when no certificate trust was requested" $r.out 'No additional certificate trust was requested'
+# The context is named by its physical path even when TMPDIR runs through a
+# symlink, as macOS's /var/folders does: Apple's container builder before 1.5.0
+# sends a COPY'd directory empty otherwise. Windows has no such temp folder.
+if (-not $onWindows) {
+    $realTmp = Join-Path $tmp 'real-tmp'
+    $null = New-Item -ItemType Directory -Force -Path $realTmp
+    $linkTmp = Join-Path $tmp 'link-tmp'
+    if (-not (Test-Path $linkTmp)) { $null = New-Item -ItemType SymbolicLink -Path $linkTmp -Target $realTmp }
+    Push-Location -LiteralPath $realTmp; try { $realTmp = (& /bin/pwd -P) } finally { Pop-Location }
+    $savedTmpDir = $env:TMPDIR
+    $env:TMPDIR = $linkTmp
+    try { $null = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet', '-dockerfileDir', $bDfDir, '-runtime', 'docker') $capturePath }
+    finally { $env:TMPDIR = $savedTmpDir }
+    $ctx = if (Test-Path "$capture.ctx") { ([IO.File]::ReadAllText("$capture.ctx")).Trim() } else { '' }
+    Assert "Code-It-Build names the build context by its physical path" ($ctx.StartsWith("$realTmp/"))
+}
 $bDfCa = Join-Path $bDfDir 'ca-certificates'
 $null = New-Item -ItemType Directory -Force -Path $bDfCa
 [IO.File]::WriteAllText((Join-Path $bDfCa 'test-proxy-ca.crt'), "-----BEGIN CERTIFICATE-----`nTEST`n-----END CERTIFICATE-----`n")

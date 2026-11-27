@@ -421,6 +421,7 @@ case "\$1" in
         for a in "\$@"; do last="\$a"; done
         cp "\$last/Dockerfile" "$capture"
         ls "\$last/ca-certificates" > "$capture.ca" 2>&1
+        echo "\$last" > "$capture.ctx"
         echo "STUB-DOCKER-BUILD \$*" ;;
     images) echo "code-it-alpine-dotnet-node:latest" ;;
     image)  echo dotnet,node ;;
@@ -608,6 +609,14 @@ out=$(PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "
 [[ -f "$capture.ca" && ! -s "$capture.ca" ]]
 assert "code-it-build without ca-certificates/ gives the context an empty one" "$?"
 assert_contains "code-it-build says when no certificate trust was requested" "$out" "No additional certificate trust was requested"
+# The context is named by its physical path even when TMPDIR runs through a
+# symlink, as macOS's /var/folders does: Apple's container builder before 1.5.0
+# sends a COPY'd directory empty otherwise.
+mkdir -p "$tmp/real-tmp" && ln -sfn "$tmp/real-tmp" "$tmp/link-tmp"
+real_tmp=$(cd "$tmp/real-tmp" && pwd -P)
+TMPDIR="$tmp/link-tmp" PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker >/dev/null 2>&1
+[[ "$(cat "$capture.ctx" 2>/dev/null)" == "$real_tmp"/* ]]
+assert "code-it-build names the build context by its physical path" "$?"
 mkdir -p "$bdfdir/ca-certificates"
 printf -- '-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n' > "$bdfdir/ca-certificates/test-proxy-ca.crt"
 out=$(PATH="$capturebin:$PATH" "$build_it" --toolchain dotnet --dockerfile-dir "$bdfdir" --runtime docker 2>&1)

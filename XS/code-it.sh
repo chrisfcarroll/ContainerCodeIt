@@ -157,8 +157,12 @@ run() {
 if [[ "$build" == true ]] || ! "$runtime" image inspect "$image" >/dev/null 2>&1; then
     # Stage XS and the shared top-level CA directory. This preserves local XS COPY
     # inputs while keeping unrelated repository files out of the build context.
+    # Apple's container builder before 1.5.0 sends a COPY'd directory empty when the
+    # context path runs through a symlink, as macOS's /var/folders does (/var is
+    # /private/var), so the context is named by its physical path.
     build_context=$(mktemp -d "${TMPDIR:-/tmp}/code-it-xs-build.XXXXXX")
     trap 'rm -rf "$build_context"' EXIT
+    build_context=$(cd "$build_context" && pwd -P)
     cp -R "$script_dir/." "$build_context/"
     mkdir -p "$build_context/ca-certificates"
     if [[ -d "$repo_dir/ca-certificates" ]]; then
