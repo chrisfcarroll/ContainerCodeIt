@@ -38,3 +38,6 @@ Passing all of `code-it-build`'s parameters through `code-it` would duplicate it
 
 ## Amendment (2026-10-17)
 `code-it-build` is interactive when no toolchain is supplied. First-run delegates runtime detection, toolchain/agent selection, build confirmation, and image building to it. First-run remains responsible for offering to copy host agent configuration into the save directory without overwriting existing files, then printing the run command.
+
+## Amendment (2026-11-27)
+`code-it-build` defaults to no toolchain, and a container with no toolchain is valid. With no `--toolchain` (or an explicitly empty one, `,`) it builds the plain base image `code-it-alpine` — no chain slug — with the default agents and no package caches, without prompting. Supersedes this spec's earlier "with none, enter interactive setup" and "an explicitly empty list remains an error": `--interactive` (which first-run passes) still asks which detected toolchains and agents to include, and an empty interactive answer is now accepted too.

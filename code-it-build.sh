@@ -13,8 +13,9 @@
 #   ./code-it-build.sh [OPTIONS]
 #
 # Options:
-#   --toolchain, -t LIST     Comma-separated toolchains to build. With none,
-#                            interactive selection is used.
+#   --toolchain, -t LIST     Comma-separated toolchains to build. Default: none,
+#                            which is valid: a container with no toolchain.
+#                            --interactive asks.
 #                            Known names and aliases come from toolchains/*/config
 #                            (today: dotnet, node/js-node/ts-node, bun/js-bun/ts-bun,
 #                            python/uv, powershell/pwsh, rust, go, gcc, g++, clang/
@@ -213,9 +214,8 @@ if [[ "$list_package_caches" == true ]]; then
     exit 0
 fi
 
-# With no toolchain, build is an interactive setup command. First-run also asks
-# build to prompt for whichever of its selections were not supplied.
-[[ -z "$toolchain" ]] && interactive=true
+# --interactive asks about any omitted selection (first-run passes it). Without it,
+# no --toolchain builds no toolchain, which is a valid container.
 
 parse_selection() {
     local answer="$1"; shift
@@ -278,16 +278,12 @@ if [[ "$interactive" == true ]]; then
     fi
 fi
 
-# There is no default toolchain: building one nobody asked for wastes a long build.
-# The empty-list check also catches --toolchain ','.
+# The default toolchain list is empty, and empty is valid: a container with no
+# toolchain. Unknown names still fail. An explicitly empty --toolchain (',') is the
+# same as omitting it.
 # An explicit, empty --package-caches means "no package caches", not "use the implied ones".
 enabled_toolchain=""
 [[ -n "$toolchain" ]] && { enabled_toolchain=$(ci_resolve_toolchain "$toolchain" "$toolchains_dir") || exit 1; }
-if [[ -z "$enabled_toolchain" ]]; then
-    echo "Warning: no toolchains selected. Choose at least one, or pass --toolchain." >&2
-    show_help
-    exit 1
-fi
 if [[ "$package_caches_set" == true && -z "$package_caches" ]]; then
     enabled_package_caches=""
 elif [[ "$package_caches_set" == true ]]; then
@@ -485,7 +481,12 @@ for a in $enabled_agents; do
 done
 build_args+=(--label "code-it.agent-binaries=$(ci_join , "$agent_binaries")")
 
-echo "    Building with toolchains ${enabled_toolchain// /,}; package repos ${enabled_package_caches// /,}; agents ${enabled_agents// /,}; locale $container_locale"
+# "none" reads better than an empty slot when nothing is selected.
+toolchains_label=${enabled_toolchain// /,}
+[[ -n "$toolchains_label" ]] || toolchains_label=none
+caches_label=${enabled_package_caches// /,}
+[[ -n "$caches_label" ]] || caches_label=none
+echo "    Building with toolchains $toolchains_label; package repos $caches_label; agents ${enabled_agents// /,}; locale $container_locale"
 
 # Print the command
 echo "    $runtime build ${build_args[*]} -t ${image}:latest $build_context"

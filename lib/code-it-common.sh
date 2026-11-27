@@ -172,9 +172,12 @@ ci_resolve_package_caches() {
     printf '%s' "$out"
 }
 
-# ci_default_image_name TOOLCHAINS: e.g. code-it-alpine-dotnet or code-it-alpine-node-bun
+# ci_default_image_name TOOLCHAINS: e.g. code-it-alpine-dotnet or code-it-alpine-node-bun.
+# With no toolchains, the plain code-it-alpine (no trailing separator).
 ci_default_image_name() {
-    printf 'code-it-alpine-%s' "$(ci_join - "$1")"
+    local slug
+    slug=$(ci_join - "$1")
+    if [[ -n "$slug" ]]; then printf 'code-it-alpine-%s' "$slug"; else printf 'code-it-alpine'; fi
 }
 
 # ci_toolchain_include IMAGE_CHAINS_COMMA REQUESTED_SPACE: true if every requested

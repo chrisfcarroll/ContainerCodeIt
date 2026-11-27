@@ -168,7 +168,7 @@ toolchains and package caches). They accept the same logical parameters:
 
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
-| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | interactive if omitted | Toolchains to build (aliases as above). With none, `code-it-build` detects host toolchains and asks which to include |
+| `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none | Toolchains to build (aliases as above). With none, the container has no toolchain; `--interactive` detects host toolchains and asks which to include |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Package repos to support; an explicit empty list means none |
 | `--agent`, `--agents`, `-a LIST` | `-agent`, `-agents LIST` | `opencode,claude` for parameterized builds | Agents to install; interactive setup preselects detected agents |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
@@ -184,7 +184,11 @@ toolchains and package caches). They accept the same logical parameters:
 | `--yes`, `-y` | `-yes` | off | Accept detected/default interactive selections and build without asking |
 | `--interactive` | `-interactive` | off | Prompt for any omitted selections; used by first-run |
 
-With no parameters, `code-it-build` runs the same toolchain and agent selection used by first-run, confirms, and builds the image. `--yes` accepts the detected toolchains and agents without prompting. `code-it-build --toolchain node --dry-run` remains a non-interactive build.
+With no parameters, `code-it-build` builds the plain base image (`code-it-alpine`) with
+no toolchain and the default agents — a toolchain-free container is valid. `--interactive`
+runs the same toolchain and agent selection used by first-run; `--yes` accepts the
+detected toolchains and agents without prompting. `code-it-build --toolchain node --dry-run`
+remains a non-interactive build.
 
 The image is labelled `code-it.toolchains=<chains>` and
 `code-it.package-caches=<caches>`; `code-it` reads that label to warn if the image was
@@ -301,7 +305,8 @@ The launchers expose them as two comma-separated lists:
   `dotnet`, `node`, `bun`, `python`, `powershell`, `rust`, `go`, `gcc`, `g++`, `clang`.
   There is no default list: without it,
   `code-it` uses those of `--image`, else of the remembered image, else of an existing
-  code-it image, else runs the first-run setup (see below), and `code-it-build` stops.
+  code-it image, else runs the first-run setup (see below), and `code-it-build` builds
+  with none (a container with no toolchain is valid).
   `js-node` and `ts-node` are aliases for `node`; `js-bun` and `ts-bun` are aliases for
   `bun`; `uv` is an alias for `python`; `pwsh` is an alias for `powershell`; `llvm` is an
   alias for `clang`. Aliases resolve to the canonical name, so

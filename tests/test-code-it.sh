@@ -195,7 +195,7 @@ assert_contains "--help documents --locale" "$out" "--locale, -l LOCALE"
 [[ "$out" != *--build-image* && "$out" != *--dockerfile-dir* ]]; assert "--help no longer offers building" "$?"
 assert_contains "--help documents the remembered toolchain default" "$out" "SAVE-DIR/image-history"
 out=$(PATH="$stub_docker:$PATH" "$script_dir/code-it-build.sh" --help)
-assert_contains "code-it-build --help describes interactive selection" "$out" "interactive selection is used"
+assert_contains "code-it-build --help documents the no-toolchain default" "$out" "a container with no toolchain"
 
 # ---------------------------------------------------------------------------
 echo "3. Default dry-run with docker: opencode agent, only its state mounted"
@@ -417,17 +417,31 @@ assert_not_in_df() {
     if grep -q -- "$needle" "$capture" 2>/dev/null; then assert "$desc (found: $needle)" 1; else assert "$desc" 0; fi
 }
 
-# With no toolchain, build asks interactively; menu items select by name or number.
-# The names, not the numbers, so the scenario does not depend on the menu's order.
-out=$(printf 'dotnet\nclaude\ny\n' | PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
-assert "code-it-build without parameters offers interactive selection" "$?"
+# With no toolchain, build defaults to no toolchain: a valid, toolchain-free container.
+out=$(PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" 2>&1)
+assert "code-it-build without parameters builds with no toolchain" "$?"
+assert_contains "no-toolchain build installs the default agents" "$out" "agents opencode,claude"
+assert_contains "no-toolchain build names the plain base image" "$out" "-t code-it-alpine:latest"
+assert_contains "no-toolchain build labels no toolchains" "$out" "--label code-it.toolchains="
+case "$out" in
+    *STUB-DOCKER-BUILD*) assert "no-toolchain dry-run does not build" 1 ;;
+    *)                   assert "no-toolchain dry-run does not build" 0 ;;
+esac
+
+# An explicitly empty --toolchain list is the same as omitting it.
+PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain , >/dev/null 2>&1
+[[ "$?" == "0" ]]; assert "code-it-build with an empty --toolchain list builds with none" "$?"
+
+# --interactive still asks which toolchains and agents to build; menu items select
+# by name or number. The names, not the numbers, so the scenario does not depend
+# on the menu's order.
+out=$(printf 'dotnet\nclaude\ny\n' | PATH="$stub_docker:$PATH" "$build_it" --dry-run --interactive --dockerfile-dir "$script_dir" 2>&1)
+assert "code-it-build --interactive offers selection" "$?"
 assert_contains "interactive build asks about toolchains" "$out" "Toolchains to build"
 assert_contains "interactive build asks about agents" "$out" "Agents to install"
 assert_contains "interactive build selects the named toolchain" "$out" "toolchains dotnet"
 assert_contains "interactive build selects the named agent" "$out" "agents claude"
 [[ "$out" != *STUB-DOCKER-BUILD* ]]; assert "interactive build dry-run does not build" "$?"
-PATH="$stub_docker:$PATH" "$build_it" --dry-run --dockerfile-dir "$script_dir" --toolchain , >/dev/null 2>&1
-[[ "$?" == "1" ]]; assert "code-it-build with an empty --toolchain list exits 1" "$?"
 do_capture --toolchain dotnet --dockerfile-dir "$script_dir" --runtime docker
 assert_in_df "code-it-build assembles the toolchain given" 'dotnet-sdk-$version-linux-musl'
 assert_not_in_df "code-it-build builds only the toolchain given" "apk add --no-cache nodejs"

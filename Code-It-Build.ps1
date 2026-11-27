@@ -8,8 +8,9 @@
     Builds the Alpine image from the Dockerfile with the requested toolchains,
     package caches and coding agents, and labels the image with that resolution so
     Code-It.ps1 can check it rather than guess from the image name. The image's
-    locale defaults to the host's. With no toolchain, it interactively detects and
-    asks which toolchains and agents to build. Code-It.ps1 runs the images this builds.
+    locale defaults to the host's. With no -toolchain, it builds a container with
+    no toolchain, which is valid; -interactive asks which to include. Code-It.ps1
+    runs the images this builds.
 
     Toolchains, package caches and agents are data: each is a directory with a config
     and an install fragment. This script assembles only the selected fragments into
@@ -21,7 +22,8 @@
     Comma-separated toolchains to build. Known: dotnet, node (aliases js-node,
     ts-node), bun (aliases js-bun, ts-bun), python (alias uv), powershell
     (alias pwsh), rust, go, gcc, g++, clang (alias llvm). Alias: -stack.
-    With no selection, interactive setup asks which detected toolchains to build.
+    Default: none, which is valid: a container with no toolchain. -interactive
+    asks which detected toolchains to build.
 
 .PARAMETER packageCaches
     Comma-separated package repos to support, independent of -toolchain. Known:
@@ -149,9 +151,8 @@ if ($listPackageCaches) {
     exit 0
 }
 
-# With no toolchain, build is an interactive setup command. First-run also asks
-# build to prompt for whichever selections were not supplied.
-if (-not $toolchain -or $interactive) { $interactive = $true }
+# -interactive asks about any omitted selection (first-run passes it). Without it,
+# no -toolchain builds no toolchain, which is a valid container.
 
 function ConvertTo-CodeItSelection([string]$answer, [string[]]$items) {
     $out = @()
@@ -196,17 +197,14 @@ if ($interactive) {
     }
 }
 
-# There is no default toolchain: building one nobody asked for wastes a long build.
-# The empty-list check also catches -toolchain ','.
+# The default toolchain list is empty, and empty is valid: a container with no
+# toolchain. Unknown names still fail. An explicitly empty -toolchain (',') is the
+# same as omitting it.
 # An explicit, empty -packageCaches means "no package caches", not "use the implied ones".
 $enabledToolchain = @()
 if ($toolchain) {
     $enabledToolchain = Resolve-CodeItToolchain $toolchain $toolchainsDir
     if ($null -eq $enabledToolchain) { exit 1 }
-}
-if ($enabledToolchain.Count -eq 0) {
-    Write-Warning "No toolchains selected. Choose at least one, or pass -toolchain."
-    exit 1
 }
 if ($PSBoundParameters.ContainsKey('packageCaches')) {
     if ($packageCaches) {
@@ -408,7 +406,10 @@ try {
     $agentBinaries = foreach ($a in $enabledAgents) { "$a=$(Get-CodeItAgentConfig $agentsDir $a 'AGENT_BINARY')" }
     $buildArgs += @('--label', "code-it.agent-binaries=$($agentBinaries -join ',')")
 
-    "    Building with toolchains $($enabledToolchain -join ','); package repos $($enabledPackageCaches -join ','); agents $($enabledAgents -join ','); locale $containerLocale"
+    # "none" reads better than an empty slot when nothing is selected
+    $toolchainsLabel = if ($enabledToolchain.Count) { $enabledToolchain -join ',' } else { 'none' }
+    $cachesLabel = if ($enabledPackageCaches.Count) { $enabledPackageCaches -join ',' } else { 'none' }
+    "    Building with toolchains $toolchainsLabel; package repos $cachesLabel; agents $($enabledAgents -join ','); locale $containerLocale"
     "    $runtime build $($buildArgs -join ' ') -t $image`:latest $buildContext"
 
     if ($interactive -and -not $yes) {

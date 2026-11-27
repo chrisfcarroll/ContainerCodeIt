@@ -134,7 +134,10 @@ function Resolve-CodeItPackageCaches([string]$raw, [string[]]$toolchain, [string
 }
 
 function CodeIt-ImageName([string[]]$toolchain) {
-    return "code-it-alpine-$($toolchain -join '-')"
+    # With no toolchains, the plain code-it-alpine (no trailing separator)
+    $slug = $toolchain -join '-'
+    if ($slug) { return "code-it-alpine-$slug" }
+    return 'code-it-alpine'
 }
 
 # Test-CodeItToolchainInclude IMAGE_CHAINS_COMMA REQUESTED: true if every requested

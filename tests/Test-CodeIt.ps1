@@ -493,21 +493,26 @@ foreach ($removedArgs in @(@('-buildImage'), @('-b'), @('-rebuildImage'), @('-do
 $codeItBuild = Join-Path $scriptDir 'Code-It-Build.ps1'
 $today = [DateTime]::Today.ToString('yyyy-MM-dd')
 
-# With no toolchain, build enters interactive setup. -yes uses the detected/default selections.
-$r = Invoke-Scenario $codeItBuild @('-yes', '-dryRun', '-dockerfileDir', $scriptDir) $stubPath
-Assert "Code-It-Build without -toolchain enters setup successfully" ($r.code -eq 0)
-Assert-Contains "interactive build resolves a toolchain" $r.out 'Building with toolchains'
-Assert "interactive build does not invoke docker" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
-# Menu numbers select the requested items (toolchains and agents listed alphabetically).
+# With no toolchain, build defaults to no toolchain: a valid, toolchain-free container.
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir) $stubPath
+Assert "Code-It-Build without -toolchain builds with none" ($r.code -eq 0)
+Assert-Contains "no-toolchain build installs the default agents" $r.out 'agents opencode,claude'
+Assert-Contains "no-toolchain build names the plain base image" $r.out '-t code-it-alpine:latest'
+Assert-Contains "no-toolchain build labels no toolchains" $r.out '--label code-it.toolchains='
+Assert "no-toolchain dry-run does not build" (-not $r.out.Contains('STUB-DOCKER-BUILD'))
+# An explicitly empty -toolchain list is the same as omitting it
+$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', ',') $stubPath
+Assert "Code-It-Build with an empty -toolchain list builds with none" ($r.code -eq 0)
+# -interactive still asks. Menu numbers select the requested items (toolchains and
+# agents listed alphabetically).
 $env:PATH = $stubPath
 try {
-    $out = "dotnet`nclaude`ny" | & $pwshExe -NoProfile -Command "& '$codeItBuild' -dryRun -dockerfileDir '$scriptDir'" 2>&1 | Out-String
+    $out = "dotnet`nclaude`ny" | & $pwshExe -NoProfile -Command "& '$codeItBuild' -dryRun -interactive -dockerfileDir '$scriptDir'" 2>&1 | Out-String
 } finally { $env:PATH = $origPath }
+Assert-Contains "interactive build asks about toolchains" $out 'Toolchains to build'
 Assert-Contains "interactive build asks about agents" $out 'Agents to install'
 Assert-Contains "interactive build selects the named toolchain" $out 'toolchains dotnet'
 Assert-Contains "interactive build selects the named agent" $out 'agents claude'
-$r = Invoke-Scenario $codeItBuild @('-dryRun', '-dockerfileDir', $scriptDir, '-toolchain', ',') $stubPath
-Assert "Code-It-Build with an empty -toolchain list exits 1" ($r.code -eq 1)
 Invoke-Capture $codeItBuild @('-dockerfileDir', $scriptDir, '-toolchain', 'dotnet', '-runtime', 'docker')
 Assert-InCapture "Code-It-Build assembles the toolchain given" 'dotnet-sdk-$version-linux-musl'
 Assert-NotInCapture "Code-It-Build builds only the toolchain given" 'apk add --no-cache nodejs'
