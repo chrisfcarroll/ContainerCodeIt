@@ -11,7 +11,7 @@ _code_it_defaults() {
         (--save-dir|-s) _files -/; return ;;
         (--agent|-a) compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null) none; return ;;
         (--model) compadd -- $(command ls "${0:A:h}/../agents" 2>/dev/null | sed 's/$/=/'); return ;;
-        (--toolchain|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh; return ;;
+        (--toolchain|-t) compadd -- dotnet node js-node ts-node bun js-bun ts-bun python uv powershell pwsh rust go gcc g++ clang llvm; return ;;
         (--trust-work-dir) compadd -- yes no; return ;;
         (--runtime|-r) compadd -- docker container wslc none; return ;;
     esac
