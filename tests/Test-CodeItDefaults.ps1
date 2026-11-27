@@ -237,6 +237,12 @@ Assert "an antigravity-cli model picked by number is saved by its label in its s
     ((Get-Content "$saveAgy/.gemini/antigravity-cli/settings.json" -Raw | ConvertFrom-Json).model -eq 'Gemini 4 Neon (Medium)')
 Assert "the antigravity-cli label is recorded in the defaults" `
     ((Get-Content "$saveAgy/defaults") -contains 'model.antigravity-cli=Gemini 4 Neon (Medium)')
+# The agents' aliases name them here too, and their own names are saved
+$saveAlias = Join-Path $tmp 'alias'; $null = New-Item -ItemType Directory -Force -Path $saveAlias
+$r = Invoke-Scenario "& '$defaults' -saveDir '$saveAlias' -agent agy -model 'oc=x/y'" $stubPath
+Assert "-agent and -model take the agents' aliases" ($r.code -eq 0)
+Assert "-agent agy saves antigravity-cli" ((Get-Content "$saveAlias/defaults") -contains 'default-agent=antigravity-cli')
+Assert "-model oc= sets opencode's model" ((Get-Content "$saveAlias/defaults") -contains 'model.opencode=x/y')
 # The prompts' brackets hold only the default; 'none' is offered on the line above,
 # a model's default is none until one is chosen, and each says where to edit it
 $saveUi = Join-Path $tmp 'interactive-ui'; $null = New-Item -ItemType Directory -Force -Path $saveUi

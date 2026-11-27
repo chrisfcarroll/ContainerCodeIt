@@ -2,6 +2,8 @@
 # and PowerShell (parsed as key=value). Keep one key per line.
 AGENT_NAME=antigravity-cli
 AGENT_SHORT=
+# Other names the command line takes for this agent (code-it --agent agy), space-separated
+AGENT_ALIASES=agy
 AGENT_COMMAND=agy
 AGENT_BINARY=/home/agent1/.local/bin/agy
 AGENT_INSTALL=install.dockerfile

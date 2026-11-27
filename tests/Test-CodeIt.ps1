@@ -413,10 +413,17 @@ Assert-Contains "-listAgents lists claude" $r.out 'claude'
 Assert-Contains "-listAgents lists opencode" $r.out 'opencode'
 Assert-Contains "-listAgents lists codex" $r.out 'codex'
 Assert-Contains "-listAgents lists antigravity-cli" $r.out 'antigravity-cli'
+Assert-Contains "-listAgents shows antigravity-cli's alias" $r.out 'antigravity-cli  (aliases: agy)'
+Assert-Contains "-listAgents shows opencode's alias" $r.out '-o (aliases: oc)'
+# The agents' aliases select them as their own names do
+$r = Invoke-Scenario $codeIt (@('-agent','agy') + $commonArgs) $stubPath
+Assert-Contains "-agent agy selects antigravity-cli" $r.out 'CODE_AGENT="antigravity-cli"'
+$r = Invoke-Scenario $codeIt (@('-a','oc') + $commonArgs) $stubPath
+Assert-Contains "-a oc selects opencode" $r.out 'CODE_AGENT="opencode"'
 $r = Invoke-Scenario $codeIt (@('-agent','nosuchagent') + $commonArgs) $stubPath
 Assert "unknown -agent fails" ($r.code -ne 0)
 Assert-Contains "unknown agent lists the available agents" $r.out 'The available agents are:'
-Assert-Contains "the agent list includes a short flag" $r.out '  opencode   -o'
+Assert-Contains "the agent list includes a short flag" $r.out '  opencode         -o'
 Assert-Contains "unknown agent explains code-it-add-agent" $r.out 'code-it-add-agent NAME adds a new one, if the agent has a recognised internet presence'
 $r = Invoke-Scenario $codeIt (@('-c','-o') + $commonArgs) $stubPath
 Assert "-c and -o together fails" ($r.code -ne 0)
@@ -690,6 +697,9 @@ $r = Invoke-ScenarioCommand "& '$codeItBuild' -listAgents" $stubPath
 Assert "Code-It-Build -listAgents exit code 0" ($r.code -eq 0)
 Assert-Contains "Code-It-Build -listAgents lists claude" $r.out 'claude'
 Assert-Contains "Code-It-Build -listAgents lists opencode" $r.out 'opencode'
+Assert-Contains "Code-It-Build -listAgents shows the aliases" $r.out '(aliases: agy)'
+$r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir, '-agent', 'agy,oc') $stubPath
+Assert-Contains "Code-It-Build -agent resolves the agents' aliases" $r.out 'agents antigravity-cli,opencode'
 $r = Invoke-Scenario $codeItBuild @('-toolchain', 'dotnet,node', '-dryRun', '-dockerfileDir', $scriptDir, '-agent', 'nosuch') $stubPath
 Assert "Code-It-Build unknown agent fails" ($r.code -ne 0)
 
@@ -1773,6 +1783,7 @@ function Complete([string]`$line) {
 "CLAUDE:"   + (Complete "& '$codeIt' -claude -agentArgs --mod")
 "OPENCODE:" + (Complete "& '$codeIt' -agentArgs --sta")
 "CODEX:" + (Complete "& '$codeIt' -agent codex -agentArgs --mo")
+"AGYALIAS:" + (Complete "& '$codeIt' -agent agy -agentArgs --mo")
 "RUNTIME:"  + (Complete "& '$codeIt' -runtime ")
 "LOCALE:"   + (Complete "& '$codeIt' -locale ")
 "@
@@ -1781,6 +1792,7 @@ Assert "completion script loads" ($r.code -eq 0 -or $null -eq $r.code)
 Assert-Contains "-agentArgs completes claude flags" $r.out 'CLAUDE:--model'
 Assert-Contains "-agentArgs completes opencode (v2) flags" $r.out 'OPENCODE:--standalone'
 Assert-Contains "-agent codex completes its flags" $r.out 'CODEX:--model'
+Assert-Contains "-agent agy completes antigravity-cli's flags" $r.out 'AGYALIAS:--mode'
 Assert-Contains "-runtime completes its values" $r.out 'RUNTIME:docker container wslc'
 Assert-Contains "-locale completes like-host" $r.out 'LOCALE:like-host C.UTF-8'
 

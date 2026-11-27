@@ -14,6 +14,9 @@ One definition per agent, readable from bash and PowerShell (e.g. a simple `key=
 - prompt translation: interactive-with-prompt, headless-with-prompt, headless-without-prompt (today's "Translate the prompt" block in code-it.sh, and its Code-It.ps1 twin)
 - host config/state locations (for 07) and a host detect command
 - short flag (`-c`, `-o`) if any
+- aliases (`AGENT_ALIASES`, space-separated) if any: other names every agent-taking
+  option resolves to the agent's own name, as `agy` for antigravity-cli and `oc` for
+  opencode (added later; `--list-agents` shows them)
 
 ## Changes
 - `code-it-build --agent NAME[,NAME...]`, default `opencode,claude`.

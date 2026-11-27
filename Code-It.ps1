@@ -48,8 +48,10 @@
     /, at /work. Defaults to the current directory.
 
 .PARAMETER agent
-    Run the agent defined in agents/<name>. Only that agent's state is mounted.
-    Default: opencode, or the agent saved by Code-It-Defaults.ps1. Alias: -a
+    Run the agent defined in agents/<name>, or one of its aliases: agy for
+    antigravity-cli, oc for opencode (-listAgents lists them). Only that agent's
+    state is mounted. Default: opencode, or the agent saved by Code-It-Defaults.ps1.
+    Alias: -a
 
 .PARAMETER listAgents
     List the available agents and exit.
@@ -341,6 +343,7 @@ $agentCmdHeadlessPrompt = ""
 $agentCmdHeadlessNoPrompt = ""
 $agentTrustEnv = ""
 if (-not $noAgent) {
+    $codeAgent = Get-CodeItAgentAlias $agentsDir $codeAgent
     if (-not (Test-CodeItAgentExists $agentsDir $codeAgent)) {
         Write-Warning "Unknown agent '$codeAgent'. The available agents are:"
         Get-CodeItPrintAgents $agentsDir | ForEach-Object { Write-Host $_ }

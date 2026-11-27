@@ -31,7 +31,8 @@
     node->npm). An explicit, empty list means no package caches.
 
 .PARAMETER agent
-    Comma-separated agents to install. Default for parameterized builds: opencode,claude.
+    Comma-separated agents to install, by name or alias (agy, oc). Default for
+    parameterized builds: opencode,claude.
     Interactive setup preselects detected agents. Alias: -agents
 
 .PARAMETER listAgents
@@ -133,10 +134,7 @@ $packageCachesDir = Join-Path $dockerfileDir 'package-caches'
 if (-not (Test-Path -Path $packageCachesDir -PathType Container)) { $packageCachesDir = Join-Path $PSScriptRoot 'package-caches' }
 
 if ($listAgents) {
-    foreach ($name in (Get-CodeItListAgents $agentsDir)) {
-        $short = Get-CodeItAgentConfig $agentsDir $name 'AGENT_SHORT'
-        if ($short) { "  {0,-10} -{1}" -f $name, $short } else { "  $name" }
-    }
+    Get-CodeItPrintAgents $agentsDir
     exit 0
 }
 if ($listToolchains) {

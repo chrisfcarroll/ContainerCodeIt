@@ -22,13 +22,13 @@ The agent runs in tmux, next to a zsh session: `Ctrl-B S` switches between them.
 
 To exit, `Ctrl-C` twice currently works in both Claude Code and OpenCode.
 
-## Maintenance and Change.
+## Maintenance and Change
 
 This is the XS version, for devs who are comfortable maintaining their own Dockerfile.
 
 - `Dockerfile`: Alpine, zsh, git, tmux, Claude Code and OpenCode. Add your own toolchains or other agents.
 - `code-it.sh` and `Code-It.ps1`: build the image if it is missing, then run an agent
-- `snippets/`: Example lines to paste into a Dockerfile for other agents and toochains.
+- `snippets/`: Example lines to paste into a Dockerfile for other agents and toolchains.
 
 For a full-fat version including UI for toolchain and agent selection see 
 the [full version README.md](../README.md).

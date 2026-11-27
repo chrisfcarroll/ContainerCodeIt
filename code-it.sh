@@ -24,9 +24,11 @@
 # word-split); and the coding agent, everything after --.
 #
 # Options:
-#   --agent, -a NAME         Run the agent defined in agents/NAME. Only that agent's
-#                            state is mounted. Default: opencode, or the agent saved
-#                            by code-it-defaults.
+#   --agent, -a NAME         Run the agent defined in agents/NAME, or one of its
+#                            aliases: agy for antigravity-cli, oc for opencode
+#                            (--list-agents lists them). Only that agent's state is
+#                            mounted. Default: opencode, or the agent saved by
+#                            code-it-defaults.
 #   --opencode, -o           Shortcut for --agent opencode.
 #   --claude, -c             Shortcut for --agent claude.
 #   --no-agent, --zsh        Run a plain interactive zsh instead of a coding agent:
@@ -498,6 +500,7 @@ AGENT_EXCLUSIVE_DIRS=""
 AGENT_EXCLUSIVE_CARRY=""
 AGENT_TRUST_ENV=""
 if [[ "$no_agent" == false ]]; then
+    code_agent=$(ci_agent_alias "$agents_dir" "$code_agent")
     if ! ci_agent_exists "$agents_dir" "$code_agent"; then
         echo "Warning: Unknown agent '$code_agent'. The available agents are:" >&2
         ci_print_agents "$agents_dir" >&2

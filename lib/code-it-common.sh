@@ -61,21 +61,31 @@ ci_list_definitions() {
     done
 }
 
-# ci_toolchain_alias DIR NAME: canonical toolchain name for NAME, resolving the
-# aliases declared in each toolchains/<name>/config. Unknown names pass through.
-ci_toolchain_alias() {
-    local dir="$1" name="$2" d a
+# ci_definition_alias DIR NAME KEY: canonical definition name for NAME, resolving
+# the space-separated aliases declared as KEY in each DIR/<name>/config. Unknown
+# names pass through.
+ci_definition_alias() {
+    local dir="$1" name="$2" key="$3" d a
     [[ -f "$dir/$name/config" ]] && { printf '%s' "$name"; return 0; }
-    # uv is Python's package manager here, so its definition aliases it to python.
     for d in "$dir"/*/; do
         [[ -f "$d/config" ]] || continue
-        a=$(ci_agent_config "$dir" "$(basename "$d")" TOOLCHAIN_ALIASES) || a=""
+        a=$(ci_agent_config "$dir" "$(basename "$d")" "$key") || a=""
         case " $a " in
             *" $name "*) basename "$d"; return 0 ;;
         esac
     done
     printf '%s' "$name"
 }
+
+# ci_toolchain_alias DIR NAME: canonical toolchain name for NAME, resolving the
+# aliases declared in each toolchains/<name>/config. Unknown names pass through.
+# uv is Python's package manager here, so its definition aliases it to python.
+ci_toolchain_alias() { ci_definition_alias "$1" "$2" TOOLCHAIN_ALIASES; }
+
+# ci_agent_alias DIR NAME: canonical agent name for NAME, resolving the aliases
+# declared in each agents/<name>/config, as agy for antigravity-cli. Unknown names
+# pass through.
+ci_agent_alias() { ci_definition_alias "$1" "$2" AGENT_ALIASES; }
 
 # ci_has LIST ITEM: true if the space-separated LIST contains ITEM
 ci_has() {
@@ -578,16 +588,17 @@ ci_list_agents() {
 }
 
 # ci_print_agents AGENTS_DIR: the available agents, one per line, with their short
-# flags: --list-agents and the unknown-agent error print the same list (Spec 18)
+# flags and aliases: --list-agents and the unknown-agent error print the same list
+# (Spec 18)
 ci_print_agents() {
-    local name short
+    local name short aliases line
     while IFS= read -r name; do
-        short=$(ci_agent_config "$1" "$name" AGENT_SHORT)
-        if [[ -n "$short" ]]; then
-            printf '  %-10s -%s\n' "$name" "$short"
-        else
-            printf '  %s\n' "$name"
-        fi
+        short=$(ci_agent_config "$1" "$name" AGENT_SHORT) || short=""
+        aliases=$(ci_agent_config "$1" "$name" AGENT_ALIASES) || aliases=""
+        line=$(printf '  %-16s' "$name")
+        [[ -n "$short" ]] && line="$line -$short"
+        [[ -n "$aliases" ]] && line="$line (aliases: ${aliases// /, })"
+        printf '%s\n' "${line%"${line##*[! ]}"}"
     done < <(ci_list_agents "$1")
 }
 
@@ -602,6 +613,7 @@ ci_resolve_agents() {
         read -r -a requested <<< "$CI_DEFAULT_AGENTS"
     fi
     for a in ${requested[@]+"${requested[@]}"}; do
+        a=$(ci_agent_alias "$agents_dir" "$a")
         if [[ -z "$a" ]]; then
             continue
         elif ci_agent_exists "$agents_dir" "$a"; then

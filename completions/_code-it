@@ -30,6 +30,11 @@ _code_it() {
             (--)            seen_dashdash=1 ;;
         esac
     done
+    # The agents' aliases, as their configs' AGENT_ALIASES declare them
+    case $agent in
+        (agy) agent=antigravity-cli ;;
+        (oc)  agent=opencode ;;
+    esac
 
     if (( seen_dashdash )); then
         if [[ $agent == claude ]]; then

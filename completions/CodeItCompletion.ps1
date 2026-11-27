@@ -76,6 +76,8 @@ Register-ArgumentCompleter -CommandName $codeItCommands -ParameterName agentArgs
     if ($fakeBoundParameters.ContainsKey('agent') -and $fakeBoundParameters['agent']) { $agent = "$($fakeBoundParameters['agent'])" }
     if ($fakeBoundParameters.ContainsKey('claude'))   { $agent = 'claude' }
     if ($fakeBoundParameters.ContainsKey('opencode')) { $agent = 'opencode' }
+    # The agents' aliases, as their configs' AGENT_ALIASES declare them
+    $agent = switch ($agent) { 'agy' { 'antigravity-cli' } 'oc' { 'opencode' } default { $agent } }
 
     $candidates = if ($agent -eq 'claude') { $script:CodeItClaudeArgs } elseif ($agent -eq 'codex') { $script:CodeItCodexArgs } elseif ($agent -eq 'antigravity-cli') { $script:CodeItAntigravityArgs } else { $script:CodeItOpenCodeArgs }
     $candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {

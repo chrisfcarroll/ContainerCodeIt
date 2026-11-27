@@ -14,9 +14,11 @@
 #   ./code-it-defaults.sh [OPTIONS]
 #
 # Options:
-#   --agent, -a NAME        Set the default agent, as code-it --agent would take it.
-#                           `none` clears it.
-#   --model AGENT=MODEL     Set AGENT's default model in its own config, e.g.
+#   --agent, -a NAME        Set the default agent, as code-it --agent would take it,
+#                           aliases included (agy, oc); the agent's own name is
+#                           saved. `none` clears it.
+#   --model AGENT=MODEL     Set AGENT's default model in its own config (AGENT may
+#                           be an alias), e.g.
 #                             --model 'opencode=opencode-go/glm-5.3'
 #                             --model 'claude=opus'
 #                           The picker prefers opencode-go, the provider OpenCode
@@ -302,7 +304,8 @@ agent_save_path() {
 # of its definition, and record it as model.AGENT in the defaults file. Empty MODEL
 # clears both. Returns 1 if the agent has no known model mechanism.
 set_model() {
-    local agent="$1" model="$2" spec path key target
+    local agent model="$2" spec path key target
+    agent=$(ci_agent_alias "$agents_dir" "$1")
     if ! ci_agent_exists "$agents_dir" "$agent"; then
         echo "Warning: Unknown agent '$agent'. Known agents: $(ci_list_agents "$agents_dir" | tr '\n' ' ')" >&2
         return 1
@@ -536,7 +539,7 @@ interactive() {
     if [[ "$answer" == "none" || -z "$answer" ]]; then
         defaults_set default-agent ""
     else
-        a=$(pick_one "$answer" "${agents_available[@]}") || a=""
+        a=$(pick_one "$(ci_agent_alias "$agents_dir" "$answer")" "${agents_available[@]}") || a=""
         if [[ -n "$a" ]]; then
             defaults_set default-agent "$a"
             echo "    Default agent: $a"
@@ -720,6 +723,7 @@ fi
 # Parameterised: set exactly what was given, ask nothing
 rc=0
 if [[ -n "$agent_arg" ]]; then
+    agent_arg=$(ci_agent_alias "$agents_dir" "$agent_arg")
     if [[ "$agent_arg" == "none" ]]; then
         defaults_set default-agent ""
     elif ci_agent_exists "$agents_dir" "$agent_arg"; then

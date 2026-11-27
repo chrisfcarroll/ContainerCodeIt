@@ -289,10 +289,17 @@ assert_contains "--list-agents lists opencode" "$out" "opencode"
 assert_contains "--list-agents lists codex" "$out" "codex"
 assert_contains "--list-agents lists antigravity-cli" "$out" "antigravity-cli"
 assert_contains "--list-agents shows the short flag" "$out" "-o"
+assert_contains "--list-agents shows antigravity-cli's alias" "$out" "antigravity-cli  (aliases: agy)"
+assert_contains "--list-agents shows opencode's alias" "$out" "-o (aliases: oc)"
+# The agents' aliases select them as their own names do
+out=$(PATH="$stub_docker:$PATH" "$code_it" --agent agy "${common_args[@]}")
+assert_contains "--agent agy selects antigravity-cli" "$out" 'CODE_AGENT="antigravity-cli"'
+out=$(PATH="$stub_docker:$PATH" "$code_it" -a oc "${common_args[@]}")
+assert_contains "-a oc selects opencode" "$out" 'CODE_AGENT="opencode"'
 out=$(PATH="$stub_docker:$PATH" "$code_it" --agent nosuchagent "${common_args[@]}" 2>&1)
 [[ "$?" != "0" ]]; assert "unknown --agent fails" "$?"
 assert_contains "unknown agent lists the available agents" "$out" "The available agents are:"
-assert_contains "the agent list includes a short flag" "$out" "  opencode   -o"
+assert_contains "the agent list includes a short flag" "$out" "  opencode         -o"
 assert_contains "unknown agent explains code-it-add-agent" "$out" "code-it-add-agent NAME adds a new one, if the agent has a recognised internet presence"
 
 # ---------------------------------------------------------------------------
@@ -641,10 +648,13 @@ grep -q 'mv .*/\.opencode/bin/opencode ~/\.opencode-v2/bin/opencode' "$script_di
 assert "opencode (v2) installs to its own AGENT_BINARY path" "$?"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent claude,opencode 2>&1)
 assert_contains "--agent accepts a list" "$out" "agents claude,opencode"
+out=$(PATH="$stub_docker:$PATH" "$build_it" --toolchain dotnet,node --dry-run --dockerfile-dir "$script_dir" --agent agy,oc 2>&1)
+assert_contains "code-it-build --agent resolves the agents' aliases" "$out" "agents antigravity-cli,opencode"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --list-agents)
 assert "--list-agents exit code" "$?"
 assert_contains "code-it-build --list-agents lists claude" "$out" "claude"
 assert_contains "code-it-build --list-agents lists opencode" "$out" "opencode"
+assert_contains "code-it-build --list-agents shows the aliases" "$out" "(aliases: agy)"
 out=$(PATH="$stub_docker:$PATH" "$build_it" --list-toolchains)
 assert "--list-toolchains exit code" "$?"
 assert_contains "code-it-build --list-toolchains lists dotnet" "$out" "dotnet"
@@ -1166,6 +1176,8 @@ completions_out=$(
     echo "OPENCODEALIAS:$(comp ./opencode-it.sh -- --se | tr '\n' ' ')"
     echo "CODEX:$(comp ./code-it.sh --agent codex -- --mo | tr '\n' ' ')"
     echo "AGY:$(comp ./code-it.sh --agent antigravity-cli -- --mo | tr '\n' ' ')"
+    echo "AGYALIAS:$(comp ./code-it.sh --agent agy -- --mo | tr '\n' ' ')"
+    echo "OCALIAS:$(comp ./code-it.sh -a oc -- --se | tr '\n' ' ')"
     echo "NOAGENT:$(comp ./code-it.sh --no- | tr '\n' ' ')"
 )
 assert_contains "completes launcher options" "$completions_out" "OPTS:--headless"
@@ -1184,6 +1196,8 @@ assert_contains "defaults to opencode (v2) flags after --" "$completions_out" "O
 assert_contains "opencode-it.sh completes opencode (v2) flags after --" "$completions_out" "OPENCODEALIAS:--server"
 assert_contains "codex completes its flags after --" "$completions_out" "CODEX:--model"
 assert_contains "antigravity-cli completes its flags after --" "$completions_out" "AGY:--mode"
+assert_contains "--agent agy completes antigravity-cli's flags after --" "$completions_out" "AGYALIAS:--mode"
+assert_contains "-a oc completes opencode's flags after --" "$completions_out" "OCALIAS:--server"
 
 # ---------------------------------------------------------------------------
 echo "15. Container entrypoint (go.sh) passes its arguments to the agent"

@@ -43,17 +43,19 @@ manage the Dockerfile yourself if you need more things in it.
 `code-it` first run checks for Git, asks which container runtime to use (showing which
 of the runtimes your platform can have it found — Docker everywhere, Apple Containers on
 macOS, `wslc` on Windows — and offering the platform's own: `container` on macOS, `wslc`
-on Windows, `docker` elsewhere) and saves that as your
-default, asks you about toolchains and agents, and then builds a Dockerfile image. Existing state and login can be copied 
-over for the contained agent to use. Copied or not, first run then sets Claude Code to
-`bypassPermissions` and OpenCode to auto-accept, in their configuration under the save
-dir: the container is the sandbox.
+on Windows, `docker` elsewhere) and saves that as your default, asks you about
+toolchains and agents, and then builds a Dockerfile image. Existing state and login can
+be copied over for the contained agent to use. Copied or not, first run then sets Claude
+Code to `bypassPermissions`, OpenCode to auto-accept and Antigravity CLI to
+`always-proceed`, in their configuration under the save dir: the container is the
+sandbox.
 
 Use `code-it-defaults` and `code-it-build` to change your setup. 
 
 See help with `--help` (bash) or `-help` (PowerShell).
 
-Initial agents are opencode, claude, codex and antigravity-cli. Initial toolchains are dotnet, node, bun, python, powershell, rust, go, gcc, g++ and clang.
+Initial agents are opencode (alias `oc`), claude, codex and antigravity-cli (alias
+`agy`). Initial toolchains are dotnet, node, bun, python, powershell, rust, go, gcc, g++ and clang.
 
 ### Prerequisites for Windows
 
@@ -125,8 +127,8 @@ Start a container without an agent with --no-agent / -noAgent
 
 | bash | PowerShell | Default | Description |
 |---|---|---|---|
-| `--agent`, `-a` | `-agent`, `-a` | `opencode`, or the saved default agent (`code-it-defaults`) | Run the agent defined in `agents/NAME`; only its state is mounted |
-| `--list-agents` | `-listAgents` | - | List the available agents and exit |
+| `--agent`, `-a` | `-agent`, `-a` | `opencode`, or the saved default agent (`code-it-defaults`) | Run the agent defined in `agents/NAME`, or one of its aliases: `agy` for `antigravity-cli`, `oc` for `opencode`; only its state is mounted |
+| `--list-agents` | `-listAgents` | - | List the available agents, with their shortcut flags and aliases, and exit |
 | `--claude`, `-c` | `-claude`, `-c` | off | Shortcut for `--agent claude` |
 | `--opencode`, `-o` | `-opencode`, `-o` | on (default) | Shortcut for `--agent opencode` |
 | `--no-agent`, `--zsh` | `-noAgent`, `-zsh` | off | Run a plain interactive zsh in the container instead of a coding agent: no agent state is mounted and no login is needed. A prompt, `--headless`, or combining it with an agent selection is an error |
@@ -170,7 +172,7 @@ toolchains and package caches). They accept the same logical parameters:
 |---|---|---|---|
 | `--toolchain LIST`, `-t`, `--stack` | `-toolchain LIST`, `-stack` | none | Toolchains to build (aliases as above). With none, the container has no toolchain; `--interactive` detects host toolchains and asks which to include |
 | `--package-caches LIST` | `-packageCaches LIST` | implied by `toolchain` | Package repos to support; an explicit empty list means none |
-| `--agent`, `--agents`, `-a LIST` | `-agent`, `-agents LIST` | `opencode,claude` for parameterized builds | Agents to install; interactive setup preselects detected agents |
+| `--agent`, `--agents`, `-a LIST` | `-agent`, `-agents LIST` | `opencode,claude` for parameterized builds | Agents to install, by name or alias (`agy`, `oc`); interactive setup preselects detected agents |
 | `--list-agents` | `-listAgents` | - | List the available agents and exit |
 | `--list-toolchains` | `-listToolchains` | - | List the available toolchains and their aliases, then exit |
 | `--list-package-caches` | `-listPackageCaches` | - | List the available package caches and exit |
@@ -200,7 +202,7 @@ lacks, or one the image installed at a different path from the one its
 `agents/<name>/config` now names, because the image is out of date and would run the
 wrong binary. Images that predate the binaries label get a warning instead.
 
-The included Dockerfile is based on alpine3.24, which uses musl, and the architecture (amd64 or aarch64)
+The included Dockerfile is based on Alpine 3.23, which uses musl, and the architecture (amd64 or aarch64)
 of your host machine.
 
 ### code-it-defaults options
@@ -229,7 +231,8 @@ model in the agent's own configuration under the save dir, where every run picks
 .\Code-It-Defaults.ps1 -refreshModels
 ```
 
-They accept `--agent/-agent`, `--model/-model AGENT=MODEL` (an empty MODEL clears it),
+They accept `--agent/-agent` (an alias such as `agy` saves the agent's own name),
+`--model/-model AGENT=MODEL` (an empty MODEL clears it),
 `--toolchain/-toolchain`, `--trust-work-dir/-trustWorkDir yes|no`,
 `--runtime/-runtime docker|container|wslc|none`, `--show/-show`, `--refresh-models/-refreshModels`,
 `--save-dir/-saveDir` and `--dry-run/-dryRun`; see `--help`.
@@ -374,6 +377,7 @@ also installs the .NET 10 SDK if `dotnet` is not selected.
 ./code-it-build.sh -t node --agent opencode              # a leaner image, OpenCode only
 ./code-it.sh -t node --agent opencode                    # run it
 ./code-it.sh -t node --agent codex --headless "summarise this repo"   # OpenAI Codex
+./code-it.sh --agent agy                                 # Antigravity CLI, by its alias
 ./code-it.sh --list-agents                               # what is available
 ```
 
@@ -386,7 +390,8 @@ work.
 
 When running multiple OpenCode containers, code-it makes copies of the session 
 database to avoid conflicts, so multiple sessions can't share context or history.
-We try to not make you log in again. This in `AGENT_EXCLUSIVE_DIRS` (below).
+We try to not make you log in again. Each agent's definition says which of its
+directories this applies to, in `AGENT_EXCLUSIVE_DIRS` (below).
 
 Multiple Claude agents get on fine, and multiple Antigravity CLI agents too: their
 state is plain files (the Antigravity CLI's login lives in the OS keyring, which a
@@ -404,15 +409,16 @@ Each agent is a directory, `agents/<name>/`, so adding one needs no script chang
   |---|---|
   | `AGENT_NAME` | The agent's name, the same as its directory |
   | `AGENT_SHORT` | Its shortcut letter, shown by `--list-agents` (may be empty) |
+  | `AGENT_ALIASES` | Optional space-separated other names that `--agent`, `code-it-build --agent` and `code-it-defaults` take for it, shown by `--list-agents`: `agy` for antigravity-cli, `oc` for opencode |
   | `AGENT_COMMAND` | Its command on the host, used by first-run to detect it |
   | `AGENT_BINARY` | Its absolute path in the image |
   | `AGENT_INSTALL` | The Dockerfile fragment that installs it, usually `install.dockerfile` |
   | `AGENT_CONFIG_LABEL` | How messages name its config, e.g. `'Claude Code settings'` |
   | `AGENT_STATE_DIRS`, `AGENT_STATE_FILES` | `:`-separated paths, relative to home, kept under the save dir and mounted into the container |
   | `AGENT_SAVE_SUBDIR` | Optional subdirectory of the save dir for its state, when it would clash with another agent's |
-  | `AGENT_MODEL_FILE` | Optional `path:key`: the JSON file, under the agent's save dir, whose top-level `key` holds its default model; how `code-it-defaults` sets the model. Claude: `.claude/settings.json:model`; opencode: `.config/opencode/opencode.json:model` |
-  | `AGENT_PERMISSIONS` | Optional space-separated `file:key.path=value` settings, files under the agent's save dir, that first-run makes whether or not it copied host state, so the agent runs without permission prompts. `true`/`false` are JSON booleans. Claude: `permissions.defaultMode=bypassPermissions` and `skipDangerousModePermissionPrompt=true` in `.claude/settings.json`; opencode: `session.permissions=autoaccept` in `.config/opencode/tui.json` |
-  | `AGENT_EXCLUSIVE_DIRS` | Optional `:`-separated directories, from `AGENT_STATE_DIRS`, that only one container at a time may use. See [Several containers at once](#several-containers-at-once) |
+  | `AGENT_MODEL_FILE` | Optional `path:key`: the JSON file, under the agent's save dir, whose top-level `key` holds its default model; how `code-it-defaults` sets the model. Claude: `.claude/settings.json:model`; opencode: `.config/opencode/opencode.json:model`; Antigravity CLI: `.gemini/antigravity-cli/settings.json:model` |
+  | `AGENT_PERMISSIONS` | Optional space-separated `file:key.path=value` settings, files under the agent's save dir, that first-run makes whether or not it copied host state, so the agent runs without permission prompts. `true`/`false` are JSON booleans. Claude: `permissions.defaultMode=bypassPermissions` and `skipDangerousModePermissionPrompt=true` in `.claude/settings.json`; opencode: `session.permissions=autoaccept` in `.config/opencode/tui.json`; Antigravity CLI: `toolPermission=always-proceed` in `.gemini/antigravity-cli/settings.json` |
+  | `AGENT_EXCLUSIVE_DIRS` | Optional `:`-separated directories, from `AGENT_STATE_DIRS`, that only one container at a time may use. See [Multiple containers](#multiple-containers) |
   | `AGENT_EXCLUSIVE_CARRY` | Optional `:`-separated files, relative to home, inside those directories (credentials), copied into a run's own copy |
   | `AGENT_CMD_INTERACTIVE_PROMPT`, `AGENT_CMD_INTERACTIVE_NO_PROMPT`, `AGENT_CMD_HEADLESS_PROMPT`, `AGENT_CMD_HEADLESS_NO_PROMPT` | Its command line in each mode, where `{args}` is the arguments after `--` and `{prompt}` the opening prompt |
 
@@ -428,6 +434,9 @@ Each agent is a directory, `agents/<name>/`, so adding one needs no script chang
   have a writable parent.
 - `default-config/` (optional): files copied into the agent's save dir on first run,
   if not already there, keeping their layout.
+- `models.txt` (optional): the models `code-it-defaults` offers for the agent, one per
+  line, in place of the provider/model catalog, for an agent whose models are not
+  provider/model ids (Antigravity CLI's are display labels).
 
 ## Agent-specific Prompts, parameters and flags
 
@@ -506,12 +515,14 @@ container from `~/.docker/config.json`
 
 The launcher translates the prompt into each agent's own command line
 ([Claude Code](https://code.claude.com/docs/en/cli-reference),
-[OpenCode](https://opencode.ai/v2/docs/cli/)):
+[OpenCode](https://opencode.ai/v2/docs/cli/),
+[Antigravity CLI](https://antigravity.google/docs/cli/reference/)):
 
 | | interactive | `--headless` |
 |---|---|---|
 | Claude Code | `claude PROMPT` | `claude -p PROMPT` |
 | OpenCode | `opencode --prompt PROMPT` | `opencode run --standalone PROMPT` |
+| Codex | `codex PROMPT` | `codex exec --skip-git-repo-check PROMPT` |
 | Antigravity CLI | `agy -i PROMPT` | `agy -p PROMPT` |
 
 Interactively the agent still runs inside tmux. With `--headless` it runs in the
@@ -565,8 +576,9 @@ docker run -it --rm \
     -e GIT_COMMITTER_NAME="Agent1 for $(git config --get user.name)" \
     -e GIT_COMMITTER_EMAIL="$(git config --get user.email)" \
     -v ~/dev/my-repos:/work/dev/my-repos \
-    -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \
-    -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
+    -v ~/.config/code-it/opencode-v2/.config/opencode:/home/agent1/.config/opencode \
+    -v ~/.config/code-it/opencode-v2/.local/share/opencode:/home/agent1/.local/share/opencode \
+    -v ~/.config/code-it/opencode-v2/.local/state/opencode:/home/agent1/.local/state/opencode \
     -v ~/.nuget/packages:/home/agent1/.nuget/packages-host:ro \
     -v ~/.npm:/home/agent1/.npm-host:ro \
     code-it-alpine-dotnet-node:latest

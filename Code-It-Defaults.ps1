@@ -21,11 +21,12 @@
     agents/<name>/models.txt, which the picker offers instead.
 
 .PARAMETER agent
-    Set the default agent, as Code-It -agent would take it. `none` clears it.
+    Set the default agent, as Code-It -agent would take it, aliases included (agy,
+    oc); the agent's own name is saved. `none` clears it.
 
 .PARAMETER model
     Set agents' default models in their own configs, one AGENT=MODEL per array
-    element, e.g.
+    element (AGENT may be an alias), e.g.
         -model 'opencode=opencode-go/glm-5.3' -model 'claude=opus'
     The picker prefers opencode-go, the provider OpenCode itself runs on,
     wherever it serves the model. An empty MODEL, as in -model 'opencode=',
@@ -230,6 +231,7 @@ function AgentSavePath([string]$agentName, [string]$rel) {
 # AGENT_MODEL_FILE of its definition, and record it as model.AGENT in the defaults
 # file. Empty MODEL clears both.
 function Set-Model([string]$agentName, [string]$modelValue) {
+    $agentName = Get-CodeItAgentAlias $agentsDir $agentName
     if (-not (Test-CodeItAgentExists $agentsDir $agentName)) {
         Write-Warning "Unknown agent '$agentName'. Known agents: $((Get-CodeItListAgents $agentsDir) -join ' ')"
         return $false
@@ -402,7 +404,7 @@ function Invoke-Interactive {
     $preselect = $savedAgent
     if (-not $preselect) { $preselect = if ($detectedAgents.Count) { $detectedAgents[0] } else { '' } }
     if (-not $preselect) { $preselect = $script:CodeItDefaultAgents[0] }
-    $answer = Read-Choice 'default agent' $preselect ($detectedAgents -join ' ') $savedAgent $agentsAvailable
+    $answer = Get-CodeItAgentAlias $agentsDir (Read-Choice 'default agent' $preselect ($detectedAgents -join ' ') $savedAgent $agentsAvailable)
     if (-not $answer -or $answer -eq 'none') {
         $chosen = $null
         Set-DefaultLine 'default-agent' ""
@@ -567,6 +569,7 @@ if (-not $settingsGiven) {
 # Parameterised: set exactly what was given, ask nothing
 $rc = 0
 if ($agent) {
+    $agent = Get-CodeItAgentAlias $agentsDir $agent
     if ($agent -eq 'none') {
         Set-DefaultLine 'default-agent' ""
     } elseif (Test-CodeItAgentExists $agentsDir $agent) {

@@ -229,6 +229,12 @@ grep -q '"model": "Gemini 4 Neon (Medium)"' "$save_agy/.gemini/antigravity-cli/s
 assert "an antigravity-cli model picked by number is saved by its label in its settings" "$?"
 grep -q '^model.antigravity-cli=Gemini 4 Neon (Medium)$' "$save_agy/defaults"
 assert "the antigravity-cli label is recorded in the defaults" "$?"
+# The agents' aliases name them here too, and their own names are saved
+save_alias="$tmp/save-alias"; mkdir -p "$save_alias"
+PATH="$cleanbin:$PATH" "$defaults" -s "$save_alias" --agent agy --model 'oc=x/y' >/dev/null 2>&1
+assert "--agent and --model take the agents' aliases" "$?"
+grep -q '^default-agent=antigravity-cli$' "$save_alias/defaults"; assert "--agent agy saves antigravity-cli" "$?"
+grep -q '^model.opencode=x/y$' "$save_alias/defaults"; assert "--model oc= sets opencode's model" "$?"
 # The prompts' brackets hold only the default; 'none' is offered on the line above,
 # a model's default is none until one is chosen, and each says where to edit it
 save_ui="$tmp/save-ui"; mkdir -p "$save_ui"

@@ -122,6 +122,8 @@ If it passes the gate:
    - config (key=value): AGENT_NAME, AGENT_SHORT, AGENT_COMMAND, AGENT_BINARY,
      AGENT_INSTALL, AGENT_CONFIG_LABEL, AGENT_STATE_DIRS, AGENT_STATE_FILES and the
      four AGENT_CMD_* prompt-translation templates.
+     If its command name differs from the agent name, set AGENT_ALIASES to it
+     (as agy for antigravity-cli), so --agent takes either.
      If its state paths are the same as another agent's, also set AGENT_SAVE_SUBDIR so its state is kept separately.
      If it keeps a database in a state directory that two containers must not
      use at once (as opencode's SQLite sessions), list that directory in

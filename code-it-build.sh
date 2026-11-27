@@ -24,8 +24,8 @@
 #                            --toolchain. Known: nuget, npm, bun.
 #                            Default: the repos implied by --toolchain
 #                            (dotnet->nuget, node->npm).
-#   --agent, -a LIST         Comma-separated agents to install. Default: opencode,claude.
-#                            --agents is an alias. Interactive mode preselects detected
+#   --agent, -a LIST         Comma-separated agents to install, by name or alias (agy,
+#                            oc). Default: opencode,claude. --agents is an alias. Interactive mode preselects detected
 #                            agents instead.
 #   --list-agents            List the available agents and exit.
 #   --list-toolchains        List the available toolchains (and their aliases) and exit.
@@ -188,14 +188,7 @@ package_caches_dir="$dockerfile_dir/package-caches"
 [[ -d "$package_caches_dir" ]] || package_caches_dir="$script_dir/package-caches"
 
 if [[ "$list_agents" == true ]]; then
-    while IFS= read -r name; do
-        short=$(ci_agent_config "$agents_dir" "$name" AGENT_SHORT)
-        if [[ -n "$short" ]]; then
-            printf '  %-10s -%s\n' "$name" "$short"
-        else
-            printf '  %s\n' "$name"
-        fi
-    done < <(ci_list_definitions "$agents_dir")
+    ci_print_agents "$agents_dir"
     exit 0
 fi
 if [[ "$list_toolchains" == true ]]; then

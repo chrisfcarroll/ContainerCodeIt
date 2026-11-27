@@ -76,16 +76,27 @@ function Get-CodeItDefinitions([string]$dir) {
 function Get-CodeItListToolchains([string]$dir) { return Get-CodeItDefinitions $dir }
 function Get-CodeItListPackageCaches([string]$dir) { return Get-CodeItDefinitions $dir }
 
-# Get-CodeItToolchainAlias DIR NAME: canonical name for NAME, resolving the aliases
-# declared in each toolchains/<name>/config. Unknown names pass through.
-function Get-CodeItToolchainAlias([string]$dir, [string]$name) {
+# Get-CodeItDefinitionAlias DIR NAME KEY: canonical definition name for NAME,
+# resolving the space-separated aliases declared as KEY in each DIR/<name>/config.
+# Unknown names pass through.
+function Get-CodeItDefinitionAlias([string]$dir, [string]$name, [string]$key) {
+    if (-not $name) { return $name }
     if (Test-Path -Path (Join-Path $dir (Join-Path $name 'config')) -PathType Leaf) { return $name }
     foreach ($d in (Get-CodeItDefinitions $dir)) {
-        $aliases = Get-CodeItAgentConfig $dir $d 'TOOLCHAIN_ALIASES'
+        $aliases = Get-CodeItAgentConfig $dir $d $key
         if ($aliases -and @($aliases -split '\s+' | Where-Object { $_ }) -contains $name) { return $d }
     }
     return $name
 }
+
+# Get-CodeItToolchainAlias DIR NAME: canonical name for NAME, resolving the aliases
+# declared in each toolchains/<name>/config. Unknown names pass through.
+function Get-CodeItToolchainAlias([string]$dir, [string]$name) { return Get-CodeItDefinitionAlias $dir $name 'TOOLCHAIN_ALIASES' }
+
+# Get-CodeItAgentAlias DIR NAME: canonical agent name for NAME, resolving the aliases
+# declared in each agents/<name>/config, as agy for antigravity-cli. Unknown names
+# pass through.
+function Get-CodeItAgentAlias([string]$dir, [string]$name) { return Get-CodeItDefinitionAlias $dir $name 'AGENT_ALIASES' }
 
 function Resolve-CodeItToolchain([string]$raw, [string]$dir) {
     # There is no default toolchain: an empty RAW resolves to an empty list
@@ -592,18 +603,24 @@ function Test-CodeItAgentExists([string]$dir, [string]$name) {
 function Get-CodeItListAgents([string]$dir) { return Get-CodeItDefinitions $dir }
 
 # Get-CodeItPrintAgents DIR: the available agents, one per line, with their short
-# flags: -listAgents and the unknown-agent error print the same list (Spec 18)
+# flags and aliases: -listAgents and the unknown-agent error print the same list
+# (Spec 18)
 function Get-CodeItPrintAgents([string]$dir) {
     foreach ($name in (Get-CodeItListAgents $dir)) {
         $short = Get-CodeItAgentConfig $dir $name 'AGENT_SHORT'
-        if ($short) { '  {0,-10} -{1}' -f $name, $short } else { "  $name" }
+        $aliases = Get-CodeItAgentConfig $dir $name 'AGENT_ALIASES'
+        $line = '  {0,-16}' -f $name
+        if ($short) { $line += " -$short" }
+        if ($aliases) { $line += " (aliases: $($aliases -replace ' ', ', '))" }
+        $line.TrimEnd()
     }
 }
 
 function Resolve-CodeItAgents([string]$raw, [string]$dir) {
     $requested = if ($raw) { Split-CodeItList $raw } else { $script:CodeItDefaultAgents }
     $out = @()
-    foreach ($a in $requested) {
+    foreach ($r in $requested) {
+        $a = Get-CodeItAgentAlias $dir $r
         if (-not $a) { continue }
         if (Test-CodeItAgentExists $dir $a) {
             $out += $a
