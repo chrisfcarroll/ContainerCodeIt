@@ -1,6 +1,8 @@
 #!/usr/bin/env pwsh
 # Tests for news/update-opencode-news.ps1, run offline: the models.dev data
-# comes from a fixture file (-ApiUrl), the page from a copy of the real one.
+# comes from a fixture file (-ApiUrl), and the page is a small fixture shaped
+# like the real one, written fresh every run, so the tests stay valid however
+# the news pages are updated or renamed.
 # Run with:
 #   pwsh -NoProfile -File tests/Test-UpdateOpencodeNews.ps1
 
@@ -9,7 +11,6 @@ $ErrorActionPreference = 'Continue'
 $testsDir  = $PSScriptRoot
 $scriptDir = Split-Path $testsDir -Parent
 $updater   = Join-Path $scriptDir 'news/update-opencode-news.ps1'
-$page      = Join-Path $scriptDir 'news/opencode/opencode-go-models-2026-10.html'
 
 # Find a pwsh that actually runs (as Test-CodeIt.ps1 does)
 function Test-PwshWorks([string]$exe) {
@@ -79,8 +80,27 @@ Assert "the fixture has four models" ((ConvertFrom-Json $fixture).opencode.model
 
 # ---------------------------------------------------------------------------
 "2. The updater refreshes the model list and the prices from the data source"
+# A page shaped like the real one, with the preconditions the assertions below
+# need: a model the data source no longer lists (kimi-k3), a manual en:false
+# flag to carry over (claude-fable-5), a source citation, and a stale snapshot
+# date no month could collide with.
 $testPage = Join-Path $tmp 'page.html'
-Copy-Item $page $testPage
+@'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OpenCode Models</title>
+</head>
+<body>
+<h1 class="fw-bold mb-2">OpenCode Models</h1>
+<p class="lead">The models OpenCode serves &middot; model list and prices from <a class="link-light" href="https://models.dev">models.dev</a> &middot; snapshot January 2000</p>
+<script>
+const DATA=[{"name": "Kimi K3", "id": "kimi-k3", "free": false, "feats": ["Reasoning", "Tools", "Text"], "inp": 3.0, "out": 15.0, "cr": 0.3, "cw": 3.0, "en": true}, {"name": "Claude Fable 5", "id": "claude-fable-5", "free": false, "feats": ["Reasoning", "Image", "PDF", "Tools", "Text"], "inp": 10.0, "out": 50.0, "cr": 1.0, "cw": 12.5, "en": false}];
+</script>
+</body>
+</html>
+'@ | Set-Content -Path $testPage
 $r = Invoke-Updater @('-Page', $testPage, '-ApiUrl', $fixtureFile)
 Assert "updater exit code 0" ($r.code -eq 0)
 Assert "updater reports the model count" ($r.out.Contains('models from the opencode provider'))
