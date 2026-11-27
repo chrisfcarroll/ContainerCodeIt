@@ -311,7 +311,7 @@ foreach ($f in @('Code-It.ps1','Code-It-Build.ps1','Code-It-FirstRun.ps1','Code-
 # Files the bash scripts read or source must check out as LF even where Git
 # converts text to CRLF (Windows), or every value read carries a trailing `r
 if (Get-Command git -EA Silent) {
-    $lfFiles = @('agents/*/config', 'toolchains/*/config', 'package-caches/*/config', 'lib/models.txt', 'completions/_code-it*') |
+    $lfFiles = @('agents/*/config', 'toolchains/*/config', 'package-caches/*/config', 'lib/models.txt', 'agents/*/models.txt', 'completions/_code-it*') |
         ForEach-Object { Get-ChildItem -Path (Join-Path $scriptDir $_) -File } |
         ForEach-Object { [IO.Path]::GetRelativePath($scriptDir, $_.FullName) -replace '\\', '/' }
     foreach ($f in $lfFiles) {

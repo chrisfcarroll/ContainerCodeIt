@@ -14,3 +14,4 @@ completions/_code-it* text eol=lf
 # Read by the bash scripts, which would otherwise see a trailing \r in every value
 config text eol=lf
 lib/*.txt text eol=lf
+agents/*/models.txt text eol=lf

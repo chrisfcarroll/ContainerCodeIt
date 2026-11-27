@@ -213,6 +213,23 @@ Assert "a model opencode-go does not serve keeps its provider" `
     (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) zai/glm-5\.3-flashx$' }).Count -gt 0)
 Assert "claude's list keeps Anthropic's models without the prefix" `
     (@($r.out -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\) claude-sonnet-5-5$' }).Count -gt 0)
+# Antigravity CLI saves its model by label: its picker offers its own list, from
+# agents/antigravity-cli/models.txt, and nothing from the provider/model catalog
+$agyOut = @($r.out -split "`r?`n" | ForEach-Object -Begin { $in = $false } -Process {
+    if ($_ -like 'Default model for antigravity-cli*') { $in = $true }
+    elseif ($_ -like 'Default model for *') { $in = $false }
+    if ($in) { $_ }
+})
+Assert "the antigravity-cli picker offers agy's own model labels" `
+    (@($agyOut | Where-Object { $_ -match '^\s+\d+\) Gemini 4 Neon \(Medium\)$' }).Count -gt 0)
+Assert "the antigravity-cli picker offers no provider/model ids" `
+    (@($agyOut | Where-Object { $_ -match '^\s+\d+\) [^ ]+/[^ ]+$' }).Count -eq 0)
+$saveAgy = Join-Path $tmp 'interactive-agy'; $null = New-Item -ItemType Directory -Force -Path $saveAgy
+$null = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveAgy'" $stubPath @('', '2', '', '', 'node')
+Assert "an antigravity-cli model picked by number is saved by its label in its settings" `
+    ((Get-Content "$saveAgy/.gemini/antigravity-cli/settings.json" -Raw | ConvertFrom-Json).model -eq 'Gemini 4 Neon (Medium)')
+Assert "the antigravity-cli label is recorded in the defaults" `
+    ((Get-Content "$saveAgy/defaults") -contains 'model.antigravity-cli=Gemini 4 Neon (Medium)')
 # Model questions follow the agent list (codex has none, so it is skipped):
 # antigravity-cli, then claude, then opencode
 $r = Invoke-ScenarioWithAnswers "& '$defaults' -saveDir '$saveInt'" $stubPath @('9', '', 'sonnet', 'none', 'none')

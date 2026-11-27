@@ -57,6 +57,12 @@ says which models opencode-go serves (checked against its entry on models.dev); 
 refreshed catalog says the same by listing them itself. Claude Code, which takes
 bare Anthropic model names only, is unaffected.
 
+An agent whose models are not `provider/model` ids lists its own in
+`agents/<name>/models.txt` (one per line, `#` comments). When that file exists the
+picker offers its lines as they are, and nothing from the catalog. Antigravity CLI
+has one: agy saves the model chosen with `/model` in `settings.json` by its display
+label, such as `Gemini 4 Neon (Medium)`, so its list is labels, not ids.
+
 ## Parameters
 
 | bash | PowerShell | Meaning |

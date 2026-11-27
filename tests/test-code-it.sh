@@ -172,6 +172,7 @@ fi
 if git -C "$script_dir" rev-parse --git-dir &>/dev/null; then
     for f in "$script_dir"/agents/*/config "$script_dir"/toolchains/*/config \
              "$script_dir"/package-caches/*/config "$script_dir"/lib/models.txt \
+             "$script_dir"/agents/*/models.txt \
              "$script_dir"/completions/_code-it*; do
         f=${f#"$script_dir/"}
         [[ "$(git -C "$script_dir" check-attr eol -- "$f")" == *": eol: lf" ]]

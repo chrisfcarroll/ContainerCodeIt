@@ -41,7 +41,9 @@
 #   --refresh-models        Refresh SAVE-DIR/model-catalog.txt, the model list offered
 #                           by the interactive picker, from https://models.dev/api.json
 #                           (needs curl and jq). The bundled list in lib/models.txt is
-#                           used until then.
+#                           used until then. An agent whose models are not
+#                           provider/model ids lists its own in agents/NAME/models.txt,
+#                           which the picker offers instead.
 #   --save-dir, -s DIR      Where the defaults and agent state live.
 #                           Default: ~/.config/code-it
 #   --dry-run, -d           Show what would be written; change nothing.
@@ -548,7 +550,7 @@ interactive() {
     fi
 
     # 2. Default model, for each agent that has a known mechanism
-    local spec path key live target catalog entry claude_style="" choice og_models seen
+    local spec path key live target catalog entry claude_style="" choice og_models seen own
     local -a models=()
     for a in "${agents_available[@]}"; do
         spec=$(ci_agent_config "$agents_dir" "$a" AGENT_MODEL_FILE) || spec=""
@@ -564,18 +566,30 @@ interactive() {
         echo "Default model for $a [current: ${live:-none}]. The catalog below is best effort"
         echo "and always incomplete: any model string is accepted."
         models=()
+        own="$agents_dir/$a/models.txt"
+        if [[ -f "$own" ]]; then
+            # The agent lists its own models, which are not provider/model ids:
+            # offer those, as they are, and nothing from the catalog
+            while IFS= read -r entry || [[ -n "$entry" ]]; do
+                entry=${entry%%#*}
+                entry=${entry%"${entry##*[![:space:]]}"}
+                [[ -n "$entry" ]] && models+=("$entry")
+            done < "$own"
+            catalog=""
+        else
+            catalog=$(catalog_file)
+        fi
         claude_style=""
         case "$path" in .claude/*) claude_style=true ;; esac
         if [[ "$claude_style" == true ]]; then
             for entry in $CI_CLAUDE_ALIASES; do models+=("$entry"); done
         fi
-        catalog=$(catalog_file)
         # opencode-go is the provider OpenCode itself runs on: where it serves a
         # model, offer it as opencode-go/MODEL rather than the catalog's provider
         og_models=""
-        [[ "$claude_style" == true ]] || og_models=$(opencode_go_models "$catalog")
+        [[ "$claude_style" == true || -z "$catalog" ]] || og_models=$(opencode_go_models "$catalog")
         seen=" "
-        if [[ -f "$catalog" ]]; then
+        if [[ -n "$catalog" && -f "$catalog" ]]; then
             while IFS= read -r entry; do
                 entry=${entry%%#*}
                 entry=${entry%"${entry##*[![:space:]]}"}

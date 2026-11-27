@@ -1,0 +1,27 @@
+# The models code-it-defaults offers for Antigravity CLI (agy), one per line, in
+# place of the provider/model catalog in lib/models.txt, which agy does not take.
+# Best effort and always incomplete: the picker accepts any model string as free text.
+#
+# agy saves the model chosen with /model in settings.json by its display label, not
+# its id, so these are labels: a model name with its thinking level in brackets.
+# `agy models` lists the ones your account has, as <id> TAB <label>; an unavailable
+# model falls back to agy's default, with a warning.
+#
+# Curated 2026-11-27 from https://antigravity.google/docs/models/, leaving out the
+# Enterprise-only models and those it says go on 2026-11-30 (Gemini 4 Argon,
+# Gemini 3.8 Flash, GPT-OSS 120B, Claude 4.6). Gemini 4 Neon, Carbon and the
+# Orchestrator need a paid Google AI plan; Gemini 4 Hydrogen is on every plan.
+
+Gemini 4 Neon (Low)
+Gemini 4 Neon (Medium)
+Gemini 4 Neon (High)
+Gemini 4 Carbon (Low)
+Gemini 4 Carbon (Medium)
+Gemini 4 Carbon (High)
+Gemini 4 Hydrogen (Low)
+Gemini 4 Hydrogen (Medium)
+Gemini 4 Hydrogen (High)
+Orchestrator (Neon)
+Orchestrator (Carbon)
+Claude Sonnet 5.5 (Thinking)
+Claude Opus 5.5 (Thinking)

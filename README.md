@@ -254,7 +254,10 @@ again. Models are data: the catalog offered by the interactive picker (from
 effort and always incomplete, and any model string is accepted. Where opencode-go —
 the provider OpenCode itself runs on — serves a model, the picker offers it as
 `opencode-go/MODEL` rather than under the provider the catalog names (Claude Code,
-which takes bare Anthropic model names, is unaffected). `--show` names the
+which takes bare Anthropic model names, is unaffected). An agent whose models are
+not provider/model ids offers its own list instead, from `agents/NAME/models.txt`:
+Antigravity CLI's is the labels agy saves its model by, such as
+`Gemini 4 Neon (Medium)`. `--show` names the
 file each agent's model was set in.
 
 ## Locale

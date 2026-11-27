@@ -211,6 +211,19 @@ printf '%s\n' "$out" | grep -qE '^  [0-9]+\) zai/glm-5\.3-flashx$'
 assert "a model opencode-go does not serve keeps its provider" "$?"
 printf '%s\n' "$out" | grep -qE '^  [0-9]+\) claude-sonnet-5-5$'
 assert "claude's list keeps Anthropic's models without the prefix" "$?"
+# Antigravity CLI saves its model by label: its picker offers its own list, from
+# agents/antigravity-cli/models.txt, and nothing from the provider/model catalog
+agy_out=$(printf '%s\n' "$out" | sed -n '/^Default model for antigravity-cli/,/^Choose model for antigravity-cli/p')
+printf '%s\n' "$agy_out" | grep -qE '^  [0-9]+\) Gemini 4 Neon \(Medium\)$'
+assert "the antigravity-cli picker offers agy's own model labels" "$?"
+printf '%s\n' "$agy_out" | grep -qE '^  [0-9]+\) [^ ]+/[^ ]+$'
+[[ "$?" != "0" ]]; assert "the antigravity-cli picker offers no provider/model ids" "$?"
+save_agy="$tmp/save-agy"; mkdir -p "$save_agy"
+printf '\n2\n\n\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_agy" >/dev/null 2>&1
+grep -q '"model": "Gemini 4 Neon (Medium)"' "$save_agy/.gemini/antigravity-cli/settings.json"
+assert "an antigravity-cli model picked by number is saved by its label in its settings" "$?"
+grep -q '^model.antigravity-cli=Gemini 4 Neon (Medium)$' "$save_agy/defaults"
+assert "the antigravity-cli label is recorded in the defaults" "$?"
 out=$(printf '9\n\nsonnet\nnone\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "third interactive run exit code" "$?"
 grep -q '^default-agent=opencode$' "$save_i/defaults"; assert "out-of-range number keeps the saved agent" "$?"
@@ -253,7 +266,7 @@ assert_contains "the refreshed catalog's opencode-go models are offered" "$out" 
 printf '%s\n' "$out" | grep -qE '^  [0-9]+\) prov2/m-three$'
 [[ "$?" != "0" ]]; assert "the fetched model opencode-go serves is not offered under its other provider" "$?"
 n=$(printf '%s\n' "$out" | grep -cE '^  [0-9]+\) opencode-go/m-three$')
-[[ "$n" == "2" ]]; assert "the mapped model appears once per agent picker (antigravity-cli's and opencode's)" "$?"
+[[ "$n" == "1" ]]; assert "the mapped model appears once, in opencode's picker only" "$?"
 grep -q '^model.claude=' "$save_r/defaults"
 [[ "$?" != "0" ]]; assert "picker out-of-range number is refused" "$?"
 

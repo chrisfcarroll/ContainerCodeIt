@@ -15,8 +15,10 @@
 
     The model catalog offered by the picker is best effort and always incomplete,
     and any model string is accepted as free text. The bundled list lib/models.txt is
-    used until -refreshModelsfetches a current catalog from https://models.dev, the
-    registry OpenCode itself reads, saving it as <saveDir>/model-catalog.txt.
+    used until -refreshModels fetches a current catalog from https://models.dev, the
+    registry OpenCode itself reads, saving it as <saveDir>/model-catalog.txt. An
+    agent whose models are not provider/model ids lists its own in
+    agents/<name>/models.txt, which the picker offers instead.
 
 .PARAMETER agent
     Set the default agent, as Code-It -agent would take it. `none` clears it.
@@ -267,6 +269,12 @@ function Set-Model([string]$agentName, [string]$modelValue) {
 # else the bundled list. Returns "provider/model" strings.
 function Get-ModelCatalog {
     $file = if (Test-Path -Path $catalogCache -PathType Leaf) { $catalogCache } else { $catalogBundled }
+    return @(Read-ModelList $file)
+}
+
+# Read-ModelList FILE: the models listed in FILE, one per line, # comments and blank
+# lines dropped; nothing if FILE is absent
+function Read-ModelList([string]$file) {
     if (-not (Test-Path -Path $file -PathType Leaf)) { return @() }
     return @(Get-Content $file | ForEach-Object { ($_ -replace '#.*$', '').Trim() } | Where-Object { $_ })
 }
@@ -429,9 +437,17 @@ function Invoke-Interactive {
         Write-Host "Default model for $a [current: $(if ($live) { $live } else { 'none' })]. The catalog below is best"
         Write-Host "effort and always incomplete: any model string is accepted."
         $models = @()
+        $own = Join-Path (Join-Path $agentsDir $a) 'models.txt'
+        if (Test-Path -Path $own -PathType Leaf) {
+            # The agent lists its own models, which are not provider/model ids:
+            # offer those, as they are, and nothing from the catalog
+            $models += @(Read-ModelList $own)
+            $catalog = @()
+        } else {
+            $catalog = @(Get-ModelCatalog)
+        }
         $claudeStyle = $path.StartsWith('.claude/')
         if ($claudeStyle) { $models += $claudeAliases }
-        $catalog = @(Get-ModelCatalog)
         # opencode-go is the provider OpenCode itself runs on: where it serves a
         # model, offer it as opencode-go/MODEL rather than the catalog's provider
         $goModels = @()
