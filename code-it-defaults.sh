@@ -598,7 +598,7 @@ interactive() {
         [[ "$claude_style" == true || -z "$catalog" ]] || og_models=$(opencode_go_models "$catalog")
         seen=" "
         if [[ -n "$catalog" && -f "$catalog" ]]; then
-            while IFS= read -r entry; do
+            while IFS= read -r entry || [[ -n "$entry" ]]; do
                 entry=${entry%%#*}
                 entry=${entry%"${entry##*[![:space:]]}"}
                 [[ -z "$entry" ]] && continue

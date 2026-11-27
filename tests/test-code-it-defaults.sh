@@ -44,12 +44,38 @@ assert_contains() {
 
 # A PATH with the tools the scripts need but no jq and no curl, so the no-jq JSON
 # editing and the --refresh-models without-them paths test hermetically even on
-# machines that have them.
+# machines that have them. Also keep host coding agents off clean_path and HOME
+# isolated so host installations do not change interactive defaults.
 cleanbin="$tmp/cleanbin"
 mkdir -p "$cleanbin"
-for cmd in bash sh sed grep tr uname dirname basename mkdir cat head sort mv cp chmod git touch wc tail awk date find; do
+for cmd in bash sh sed grep tr uname dirname basename mkdir cat head sort mv cp chmod git touch wc tail awk date find rm; do
     src=$(command -v "$cmd" 2>/dev/null) && ln -s "$src" "$cleanbin/$cmd"
 done
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) clean_path="$cleanbin:$PATH" ;;
+    *)                    clean_path="$cleanbin" ;;
+esac
+clean_home="$tmp/clean-home"
+mkdir -p "$clean_home"
+
+pwsh_bin=""
+for candidate in pwsh "$HOME/.local/bin/pwsh" "$HOME/.dotnet/tools/pwsh"; do
+    if command -v "$candidate" &>/dev/null && "$candidate" -NoProfile -Command 'exit 0' &>/dev/null; then
+        pwsh_bin="$candidate"
+        break
+    fi
+done
+valid_json() {
+    if [[ -n "$pwsh_bin" ]]; then
+        "$pwsh_bin" -NoProfile -Command "try { Get-Content '$1' -Raw | ConvertFrom-Json | Out-Null; exit 0 } catch { exit 1 }"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$1"
+    elif command -v jq >/dev/null 2>&1; then
+        jq empty "$1"
+    else
+        return 2
+    fi
+}
 
 # Stub docker, as tests/test-code-it.sh does, for the launcher tests
 stub_docker="$tmp/stub-docker"
@@ -137,8 +163,12 @@ grep -q '"model": "opus"' "$save/.claude/settings.json"; assert "claude settings
 oc_config="$save/opencode-v2/.config/opencode/opencode.json"
 grep -q '"model": "zhipuai/glm-4.6"' "$oc_config"
 assert "opencode config, under its save subdir, gets the model key" "$?"
-pwsh -NoProfile -Command "try { Get-Content '$oc_config' -Raw | ConvertFrom-Json | Out-Null; exit 0 } catch { exit 1 }"
-assert "edited opencode config is valid JSON" "$?"
+valid_json "$oc_config"; rc=$?
+if [[ "$rc" == "2" ]]; then
+    echo "  skip: edited opencode config is valid JSON (no pwsh, python3 or jq)"
+else
+    assert "edited opencode config is valid JSON" "$rc"
+fi
 
 # Records survive a round-trip into an existing, other-keyed config
 mkdir -p "$(dirname "$oc_config")" "$save/.claude"
@@ -151,8 +181,12 @@ assert "other opencode config keys survive" "$?"
 grep -q '"model": "openai/gpt-5"' "$oc_config"; assert "opencode model set in existing config" "$?"
 grep -q '"defaultMode": "bypassPermissions"' "$save/.claude/settings.json"; assert "other claude settings keys survive" "$?"
 grep -q '"model": "claude-opus-4-5"' "$save/.claude/settings.json"; assert "claude model set in existing settings" "$?"
-pwsh -NoProfile -Command "try { Get-Content '$save/.claude/settings.json' -Raw | ConvertFrom-Json | Out-Null; exit 0 } catch { exit 1 }"
-assert "edited claude settings are valid JSON" "$?"
+valid_json "$save/.claude/settings.json"; rc=$?
+if [[ "$rc" == "2" ]]; then
+    echo "  skip: edited claude settings are valid JSON (no pwsh, python3 or jq)"
+else
+    assert "edited claude settings are valid JSON" "$rc"
+fi
 
 # --show lists them
 out=$(PATH="$cleanbin:$PATH" "$defaults" -s "$save" --show)
@@ -238,7 +272,8 @@ grep -q '^model.opencode=x/y$' "$save_alias/defaults"; assert "--model oc= sets 
 # The prompts' brackets hold only the default; 'none' is offered on the line above,
 # a model's default is none until one is chosen, and each says where to edit it
 save_ui="$tmp/save-ui"; mkdir -p "$save_ui"
-out=$(printf '\n\nsonnet\n\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_ui" 2>&1)
+home_claude="$tmp/home-claude"; mkdir -p "$home_claude/.claude"
+out=$(printf '\n\nsonnet\n\nnode\n' | HOME="$home_claude" PATH="$clean_path" "$defaults" -s "$save_ui" 2>&1)
 assert_contains "the agent prompt's brackets hold only its default" "$out" "Choose default agent [claude]: "
 assert_contains "the agent prompt offers 'none' on the line above" "$out" "'none' for no default agent."
 assert_contains "a model not yet chosen defaults to none" "$out" "Choose model for claude [none]: "
@@ -247,7 +282,7 @@ assert_contains "each model question says where to edit it" "$out" "Edit the mod
 assert_contains "the edit line names the agent's own subdir" "$out" "Edit the model for opencode in $save_ui/opencode-v2/.config/opencode/opencode.json."
 [[ "$out" != *", or none]"* && "$out" != *"'none' clears]"* ]]
 assert "no prompt lists none inside its brackets" "$?"
-out=$(printf '\n\n\n\nnode\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_ui" 2>&1)
+out=$(printf '\n\n\n\nnode\n' | HOME="$home_claude" PATH="$clean_path" "$defaults" -s "$save_ui" 2>&1)
 assert_contains "a chosen model is the default" "$out" "Choose model for claude [sonnet]: "
 out=$(printf '9\n\nsonnet\nnone\nnone\n' | PATH="$cleanbin:$PATH" "$defaults" -s "$save_i" 2>&1)
 assert "third interactive run exit code" "$?"
@@ -295,6 +330,11 @@ n=$(printf '%s\n' "$out" | grep -cE '^  [0-9]+\) opencode-go/m-three$')
 [[ "$n" == "1" ]]; assert "the mapped model appears once, in opencode's picker only" "$?"
 grep -q '^model.claude=' "$save_r/defaults"
 [[ "$?" != "0" ]]; assert "picker out-of-range number is refused" "$?"
+
+# A catalog file without a trailing newline keeps its last model entry
+printf 'prov1/m-first\nprov1/m-last-no-newline' > "$save_r/model-catalog.txt"
+out=$(printf '\n\n\n\n\n' | HOME="$clean_home" PATH="$clean_path" "$defaults" -s "$save_r" 2>&1)
+assert_contains "catalog without trailing newline keeps its last entry" "$out" "prov1/m-last-no-newline"
 
 # ---------------------------------------------------------------------------
 echo "11. code-it uses the saved defaults; its own options win"
