@@ -228,7 +228,7 @@ tmux -u new-session -d
 tmux -u new-session "$agent_cmd"
 tmux_rc=$?
 if [ "${CODE_AGENT_SHELL:-}" != "1" ] && [ -s /tmp/code-it-agent-exit-screen ] ; then
-    printf '\n\n--- Agent screen at exit ---\n'
+    printf '\n\n\n--- Agent screen at exit ---\n'
     cat /tmp/code-it-agent-exit-screen
     rm -f /tmp/code-it-agent-exit-screen
 fi
