@@ -242,17 +242,16 @@ WORKDIR /work
 # names of its parent directory and of itself, so directories keep their names
 # for agents' per-directory memory); CODE_IT_WORK_DIR tells go.sh the path, and
 # go.sh cds to it, so the agent starts in the mounted directory.
-# Also mount the state directories for whichever agent(s) you use, for up to 7 mounts:
+# Also mount the state paths for whichever agent you run (see agents/*/config):
 # 1. Work directory, at /work/<parent>/<name> (CODE_IT_WORK_DIR)
-# 2. ~/.claude directory (claude credentials, settings & memory)
-# 3. ~/.claude.json file (claude OAuth session data & MCP configs)
-# 4. ~/.config/opencode directory (opencode configuration)
-# 5. ~/.local/share/opencode directory (opencode data & auth)
-# 6. Host package caches, READ-ONLY, for the package repos selected at build time:
+# 2. Agent state under ~/.config/code-it (e.g. ~/.claude + ~/.claude.json,
+#    opencode-v2/{.config,.local/share,.local/state}/opencode, ~/.codex,
+#    or ~/.gemini/{antigravity-cli,antigravity,config})
+# 3. Host package caches, READ-ONLY, for the package repos selected at build time:
 #    ~/.nuget/packages-host (NuGet, a fallbackPackageFolder)
 #    ~/.npm-host           (npm cache, seeded into ~/.npm at startup)
 #    ~/.bun-host           (Bun cache, seeded into ~/.bun/install/cache at startup)
-# Choose the agent with -e CODE_AGENT=opencode (default) or -e CODE_AGENT=claude
+# Choose the agent with -e CODE_AGENT=opencode (default), claude, codex, or antigravity-cli.
 # Example :
 #     docker run -it --rm \
 #                -e CODE_AGENT=claude \
@@ -264,8 +263,6 @@ WORKDIR /work
 #                -v ~/repos/my-repos:/work/repos/my-repos \
 #                -v ~/.config/code-it/.claude:/home/agent1/.claude \
 #                -v ~/.config/code-it/.claude.json:/home/agent1/.claude.json \
-#                -v ~/.config/code-it/.config/opencode:/home/agent1/.config/opencode \
-#                -v ~/.config/code-it/.local/share/opencode:/home/agent1/.local/share/opencode \
 #                -v ~/.nuget/packages:/home/agent1/.nuget/packages-host:ro \
 #        code-it-alpine-dotnet-node:latest
 # --------------------------------

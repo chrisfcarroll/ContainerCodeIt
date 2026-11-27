@@ -94,7 +94,7 @@ If it passes the gate:
 2. Add agents/<name>/ following the format in README.md ("Agents") and the existing
    agents/opencode and agents/claude:
    - config (key=value): AGENT_NAME, AGENT_SHORT, AGENT_COMMAND, AGENT_BINARY,
-     AGENT_INSTALL, AGENT_CONFIG_LABEL, AGENT_STATE_DIRS, AGENT_STATE_FILES and the
+     AGENT_INSTALL, AGENT_CONFIG_LABEL, AGENT_STATE_DIRS, AGENT_STATE_FILES, and the
      four AGENT_CMD_* prompt-translation templates.
      If its command name differs from the agent name, set AGENT_ALIASES to it
      (as agy for antigravity-cli), so --agent takes either.
@@ -102,6 +102,8 @@ If it passes the gate:
      If it keeps a database in a state directory that two containers must not
      use at once (as opencode's SQLite sessions), list that directory in
      AGENT_EXCLUSIVE_DIRS and its credential files in AGENT_EXCLUSIVE_CARRY.
+     Also set AGENT_MODEL_FILE (if JSON), AGENT_PERMISSIONS, and AGENT_TRUST_ENV
+     where applicable.
    - install.dockerfile: install from the official channel only, as user agent1,
      pinning versions where possible, keeping a "# last changed YYYY-MM-DD"
      cache-bust line. If the agent binary needs shared libraries the base image
@@ -109,6 +111,8 @@ If it passes the gate:
      the base image installs tools only, not libraries.
    - default-config/: any configuration written on first run, with the layout the
      agent expects under the container home.
+   - models.txt (optional): model labels when the agent does not use provider/model
+     ids.
 3. Add tests to tests/test-code-it.sh and tests/Test-CodeIt.ps1 (prompt translation
    in all modes, mounts, unknown agent), a README row, and completion entries.
 4. Run ./tests/run-all-tests.sh and fix any failures.

@@ -80,6 +80,8 @@
     2) implicit knowledge of the existence of --but no access to-- an origin repo,
        which is also a local filesystem hosted working directory.
 
+    updateAgentAndDiff uses `git merge-tree --write-tree`, which requires Git 2.38 or later.
+
 .LINK
     https://github.com/chrisfcarroll/ContainerCodeIt
 #>

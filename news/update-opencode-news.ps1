@@ -47,7 +47,7 @@ https://models.dev/api.json) or a local file with the same shape.
 
 .EXAMPLE
     ./update-opencode-news.ps1
-    Updates news/opencode/opencode-go-models-2026-10.html with today's models
+    Updates news/opencode/opencode-go-models-2026.html with today's models
     and prices from https://models.dev/api.json.
 
 .EXAMPLE

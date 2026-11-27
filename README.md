@@ -246,7 +246,7 @@ scripted); a blank answer keeps the current value. With any of `--agent`, `--mod
 `code-it` uses the saved defaults only when its own options do not say:
 `--agent`/`-c`/`-o` beats the saved agent, and `--toolchain` and `--image` beat the
 saved toolchain — which in turn beats the remembered-image heuristic of
-[Specs 09/10](Specs/10-default-first-run-or-existing-image.md) — and
+[Specs 09/10](specs/10-default-first-run-or-existing-image.md) — and
 `--no-trust-work-dir` / `-trustWorkDir:$false` beats a saved `trust-work-dir=yes`, and
 `--runtime` beats the saved runtime, which `code-it-build` and `code-it-doctor` use too. When it launches the
 saved agent it says so (`Using saved default agent: …`), because the agent brings its
@@ -520,7 +520,8 @@ and the container's exit code is the agent's.
 
 The `completions/` directory completes the launchers' own options, and, after `--`, the
 flags of whichever agent is selected — `claude-it.sh` completes Claude Code flags,
-`opencode-it.sh` completes OpenCode flags. Edit the flag lists in those files to add your
+`opencode-it.sh` completes OpenCode flags, and `--agent codex` / `--agent agy`
+complete Codex / Antigravity CLI flags. Edit the flag lists in those files to add your
 own favourites.
 
 ```bash
@@ -548,7 +549,7 @@ autoload -Uz compinit && compinit
 ```
 ## News
 
-`news/` holds generated summary pages, pwsh-only. `news/opencode/opencode-go-models-2026-10.html`
+`news/` holds generated summary pages, pwsh-only. `news/opencode/opencode-go-models-2026.html`
 lists the models OpenCode serves with their prices, from
 [models.dev](https://models.dev) — the registry OpenCode itself reads — and cites it
 in the page header. Refresh the page's model list and prices with:
@@ -579,9 +580,11 @@ options and the link to the source of the data.
     git config --global core.fsmonitor true
     git config --global feature.manyFiles true
     ```
-- Coding agents are a moving target, especially permissions. We use
-  `--dangerously-skip-permissions` for Claude Code, `--auto` for OpenCode, and
-  `always-proceed` for Antigravity CLI.
+- Coding agents are a moving target, especially permissions. Full `code-it` writes
+  permission-skipping settings into each agent's state directory (`bypassPermissions` for
+  Claude Code, `autoaccept` / `allow` for OpenCode, `never` / `danger-full-access` for
+  Codex, and `always-proceed` for Antigravity CLI); the `XS` version passes
+  `--dangerously-skip-permissions` to Claude Code and `--auto` to OpenCode on the CLI.
 
 ## Runtime detection
 
@@ -612,9 +615,10 @@ The launcher scripts keep the chosen agent's state under one save dir (default `
 | `/work/<parent>/<name>` | Host directory containing git repos for the agent to work on, keeping the host directory's own (and its parent's) name so agents' per-directory memory does not collide between projects |
 | `/home/agent1/.claude` | Claude only: credentials, settings, permissions, memory |
 | `/home/agent1/.claude.json` | Claude only: OAuth session data, MCP configs, preferences |
-| `/home/agent1/.config/opencode` | OpenCode: configuration, including `opencode.json` and `cli.json`, from `<save dir>/opencode-v2/` |
+| `/home/agent1/.config/opencode` | OpenCode: configuration, including `opencode.json` and `tui.json`, from `<save dir>/opencode-v2/` |
 | `/home/agent1/.local/share/opencode` | OpenCode: session data and provider auth database |
 | `/home/agent1/.local/state/opencode` | OpenCode: shared-service state |
+| `/home/agent1/.codex` | Codex: configuration (`config.toml`), auth, and sessions |
 | `/home/agent1/.gemini/antigravity-cli` | Antigravity CLI: settings, conversations, cache |
 | `/home/agent1/.gemini/antigravity` | Antigravity CLI: shared agent harness state (brain, artifacts, transcripts) |
 | `/home/agent1/.gemini/config` | Antigravity CLI: shared configuration (skills, workflows, MCP servers) |
