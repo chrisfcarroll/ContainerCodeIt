@@ -154,6 +154,13 @@ Assert-NotContains "claude does not see opencode's state" $out "opencode:"
 $out = Run-XS '& $x -agent codex'
 Assert-Contains "-agent codex runs codex" $out "[CODE_AGENT=codex]"
 Assert-Contains "codex's state is mounted" $out "/.codex:/home/agent1/.codex]"
+$out = Run-XS '& $x -agent agy'
+Assert-Contains "-agent agy runs agy" $out "[CODE_AGENT=agy]"
+Assert-Contains "agy's CLI state is mounted" $out "/.gemini/antigravity-cli:/home/agent1/.gemini/antigravity-cli]"
+Assert-Contains "agy's shared harness state is mounted" $out "/.gemini/antigravity:/home/agent1/.gemini/antigravity]"
+Assert-Contains "agy's shared config is mounted" $out "/.gemini/config:/home/agent1/.gemini/config]"
+$out = Run-XS '& $x -a antigravity-cli'
+Assert-Contains "-a antigravity-cli runs agy, its command" $out "[CODE_AGENT=agy]"
 $out = Run-XS '& $x -zsh'
 Assert-Contains "-zsh runs zsh" $out "[CODE_AGENT=zsh]"
 Assert-NotContains "-zsh mounts no agent state" $out "/home/agent1/"
@@ -258,6 +265,18 @@ Assert "tmux runs the agent command" $dockerfile.Contains('exec tmux -u new-sess
 Assert "OpenCode's libstdc++ is installed" ($dockerfile -match 'musl-locales libstdc\+\+\r?\n')
 Assert "libgcc is left to apk" (-not $dockerfile.Contains('libgcc libstdc++'))
 Assert "the home is handed to agent1 after the toolchain snippets" ($dockerfile -match '(?m)here ---\r?\n\r?\n#[^\n]*\r?\n#[^\n]*\r?\nRUN chown -R agent1:wheel /home/agent1\r?\n\r?\nUSER agent1\r?$')
+
+"Snippets"
+$snippets = Join-Path (Split-Path $codeIt -Parent) 'snippets'
+$agySnippet = Get-Content (Join-Path $snippets 'antigravity-cli.dockerfile') -Raw
+# The same pinned release and checksums as the full version's installer
+$fullAgy = Get-Content (Join-Path (Split-Path (Split-Path $codeIt -Parent) -Parent) 'agents/antigravity-cli/install.dockerfile') -Raw
+foreach ($m in [regex]::Matches($fullAgy, '(https://storage\.googleapis\.com/[^"]+|sha=[0-9a-f]{128})')) {
+    Assert "the agy snippet pins the full version's $($m.Value.Substring(0, 12))…" $agySnippet.Contains($m.Value)
+}
+Assert "the agy snippet verifies its download" $agySnippet.Contains('sha512sum -c -')
+Assert "the agy snippet installs agy onto the XS PATH" $agySnippet.Contains('mv /tmp/antigravity ~/.local/bin/agy')
+Assert "the agy snippet runs as the Agents section's agent1" (-not $agySnippet.Contains('USER '))
 
 Remove-Item -Recurse -Force $tmp
 ""

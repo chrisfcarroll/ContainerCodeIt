@@ -141,6 +141,14 @@ assert_not_contains "claude does not see opencode's state" "$out" "opencode:"
 out=$(run_xs --agent codex)
 assert_contains "--agent codex runs codex" "$out" "[CODE_AGENT=codex]"
 assert_contains "codex's state is mounted" "$out" "[$save/.codex:/home/agent1/.codex]"
+out=$(run_xs --agent agy)
+assert_contains "--agent agy runs agy" "$out" "[CODE_AGENT=agy]"
+assert_contains "agy's CLI state is mounted" "$out" "[$save/.gemini/antigravity-cli:/home/agent1/.gemini/antigravity-cli]"
+assert_contains "agy's shared harness state is mounted" "$out" "[$save/.gemini/antigravity:/home/agent1/.gemini/antigravity]"
+assert_contains "agy's shared config is mounted" "$out" "[$save/.gemini/config:/home/agent1/.gemini/config]"
+assert_not_contains "agy does not see other agents' state" "$out" "opencode:"
+out=$(run_xs -a antigravity-cli)
+assert_contains "-a antigravity-cli runs agy, its command" "$out" "[CODE_AGENT=agy]"
 out=$(run_xs --zsh)
 assert_contains "--zsh runs zsh" "$out" "[CODE_AGENT=zsh]"
 assert_not_contains "--zsh mounts no agent state" "$out" "/home/agent1/"
@@ -273,6 +281,25 @@ fi
 assert_contains "OpenCode's libstdc++ is installed" "$dockerfile" "musl-locales libstdc++"
 assert_not_contains "libgcc is left to apk" "$dockerfile" "libgcc libstdc++"
 assert_contains "the home is handed to agent1 after the toolchain snippets" "$dockerfile" $'here ---\n\n# Toolchain snippets run as root and may create directories under the agent\'s\n# home, so hand the whole home to agent1 before switching to it.\nRUN chown -R agent1:wheel /home/agent1\n\nUSER agent1'
+
+# ---------------------------------------------------------------------------
+echo "Snippets"
+snippets="$(dirname "$code_it")/snippets"
+full_agents="$(dirname "$(dirname "$tests_dir")")/agents"
+agy_snippet=$(cat "$snippets/antigravity-cli.dockerfile")
+# The same pinned release and checksums as the full version's installer
+for line in $(grep -oE '(https://storage\.googleapis\.com/[^"]+|sha=[0-9a-f]{128})' "$full_agents/antigravity-cli/install.dockerfile"); do
+    assert_contains "the agy snippet pins the full version's ${line:0:12}…${line: -12}" "$agy_snippet" "$line"
+done
+assert_contains "the agy snippet verifies its download" "$agy_snippet" 'sha512sum -c -'
+assert_contains "the agy snippet installs agy onto the XS PATH" "$agy_snippet" 'mv /tmp/antigravity ~/.local/bin/agy'
+assert_not_contains "the agy snippet runs as the Agents section's agent1" "$agy_snippet" 'USER '
+assert_contains "the agy snippet says how to skip its permission prompts" "$agy_snippet" '--agent agy -D:-e -D:GEMINI_API_KEY -- --dangerously-skip-permissions'
+for f in "$snippets"/*.dockerfile; do
+    [[ "$f" == */ca-certificates.dockerfile ]] && continue
+    grep -q '# last changed [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}' "$f"
+    assert "$(basename "$f") keeps a last-changed date" "$?"
+done
 
 echo
 echo "Passed: $pass, Failed: $fail"

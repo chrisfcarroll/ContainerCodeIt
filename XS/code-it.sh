@@ -6,7 +6,7 @@
 #
 #   -o, --opencode        Run OpenCode (the default)
 #   -c, --claude          Run Claude Code
-#   -a, --agent NAME      Run agent NAME, e.g. codex once snippets/codex.dockerfile is added
+#   -a, --agent NAME      Run agent NAME, e.g. codex or agy once its snippet is added
 #   --zsh                 Run zsh instead of an agent
 #   -w, --work-dir DIR    The host directory the agent can see. Default: .
 #                         It is mounted at /work/<parent>/<name>, so it keeps its name.
@@ -72,6 +72,7 @@ case "$agent" in
     opencode) state=(.config/opencode .local/share/opencode .local/state/opencode) ;;
     claude)   state=(.claude .claude.json) ;;
     codex)    state=(.codex) ;;
+    agy|antigravity-cli) agent=agy; state=(.gemini/antigravity-cli .gemini/antigravity .gemini/config) ;;
     zsh)      state=() ;;
     *)        echo "Unknown agent '$agent': add its state paths to $0" >&2; exit 1 ;;
 esac

@@ -15,7 +15,7 @@
 .PARAMETER claude
     Run Claude Code. Alias: -c
 .PARAMETER agent
-    Run agent NAME, e.g. codex once snippets/codex.dockerfile is added. Alias: -a
+    Run agent NAME, e.g. codex or agy once its snippet is added. Alias: -a
 .PARAMETER zsh
     Run zsh instead of an agent.
 .PARAMETER workDir
@@ -79,6 +79,7 @@ $state = switch ($agent) {
     'opencode' { '.config/opencode', '.local/share/opencode', '.local/state/opencode' }
     'claude'   { '.claude', '.claude.json' }
     'codex'    { '.codex' }
+    { $_ -in 'agy', 'antigravity-cli' } { $agent = 'agy'; '.gemini/antigravity-cli', '.gemini/antigravity', '.gemini/config' }
     'zsh'      { @() }
     default    { Write-Warning "Unknown agent '$agent': add its state paths to $PSCommandPath"; exit 1 }
 }

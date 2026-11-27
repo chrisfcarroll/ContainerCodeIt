@@ -55,7 +55,7 @@ Each agent sees only its own state.
 |---|---|---|---|
 | `--opencode`, `-o` | `-opencode`, `-o` | on | Run OpenCode |
 | `--claude`, `-c` | `-claude`, `-c` | off | Run Claude Code |
-| `--agent`, `-a NAME` | `-agent`, `-a NAME` | `opencode` | Run agent NAME, e.g. `codex` once its snippet is in the Dockerfile |
+| `--agent`, `-a NAME` | `-agent`, `-a NAME` | `opencode` | Run agent NAME, e.g. `codex` or `agy` (Antigravity CLI; `antigravity-cli` also works) once its snippet is in the Dockerfile |
 | `--zsh` | `-zsh` | off | Run zsh instead of an agent |
 | `--work-dir`, `-w DIR` | `-workDir`, `-w DIR` | `.` | The one host directory the agent can see, mounted at `/work/<parent>/<name>` so it keeps its name |
 | `--save-dir`, `-s DIR` | `-saveDir`, `-s DIR` | `~/.config/code-it-xs` | Where agent logins and state are kept |
@@ -80,7 +80,12 @@ PowerShell prompt.
 
 Paste a snippet into the Dockerfile where it says `--- Toolchains` or `--- Agents`,
 then run with `--build`. A new agent also needs a line in the scripts saying which
-of its state directories to mount; `codex` already has one.
+of its state directories to mount; `codex` and `agy` already have one.
+
+Each agent snippet says, in its comments, how to run that agent without permission
+prompts: the container is the sandbox. Antigravity CLI has no login in a container
+(it keeps its login in the OS keyring), so its snippet also says how to use a Gemini
+API key instead.
 
 For a TLS-intercepting proxy, paste `snippets/ca-certificates.dockerfile` immediately
 after `FROM`. Put the CA certificate files in the repository's top-level
