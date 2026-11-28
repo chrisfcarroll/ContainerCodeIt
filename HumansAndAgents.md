@@ -9,6 +9,7 @@
 - Respect the native idioms of Powershell and bash where feasible
 - The only exception is that scripts in the news/ directory are pwsh only.
 - Configure agents in the container to run anything with full permissions without approval. This is the point of the project.
+- Strive for an excellent developer/user experience. Without this, it's pointless.
 - The Dockerfile is for Alpine linux, so everything must work on musl for x86_64 and aarch64
 
 ## Implementation
